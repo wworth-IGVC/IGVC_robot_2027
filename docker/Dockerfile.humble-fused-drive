@@ -2,6 +2,9 @@ FROM ros:humble-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# ---------------------------------------------------------------------------
+# System + ROS dependencies
+# ---------------------------------------------------------------------------
 RUN sed -i 's/^# \(.*universe\)/\1/' /etc/apt/sources.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -25,8 +28,33 @@ RUN sed -i 's/^# \(.*universe\)/\1/' /etc/apt/sources.list \
         ros-humble-odom-to-tf-ros2 \
         ros-humble-twist-stamper \
         ros-humble-simulation-interfaces \
-    && pip3 install --no-cache-dir -U pip \
-    && pip3 install --no-cache-dir 'numpy<2' ultralytics opencv-python-headless torch \
+        # --- added: declared in package.xml but previously missing ---
+        # ublox_gps: cmake/Findasio.cmake -> needs ASIO_INCLUDE_DIR
+        libasio-dev \
+        # ublox_gps: <depend>diagnostic_updater</depend>
+        ros-humble-diagnostic-updater \
+        # exec dep used by python nodes
+        ros-humble-sensor-msgs-py \
+        # debug_gui: <exec_depend>python3-pyqt5</exec_depend>
+        python3-pyqt5 \
     && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Python / ML stack
+# ---------------------------------------------------------------------------
+RUN pip3 install --no-cache-dir -U pip \
+    && pip3 install --no-cache-dir 'numpy<2' ultralytics opencv-python-headless torch \
+    # ultralytics pulls in full opencv-python; drop it so only the headless
+    # build remains (avoids Qt/GUI conflicts in a headless container)
+    && pip3 uninstall -y opencv-python || true
+
+# ---------------------------------------------------------------------------
+# Pin setuptools LAST - the torch/ultralytics install above drags setuptools
+# past 80, which breaks colcon-core 0.21.1 (requires setuptools<80) and
+# crashes every ament_python package with:
+#   TypeError: canonicalize_version() got an unexpected keyword argument
+#              'strip_trailing_zero'
+# ---------------------------------------------------------------------------
+RUN pip3 install --no-cache-dir 'setuptools==58.2.0' 'packaging<25'
 
 WORKDIR /root/ros2_ws

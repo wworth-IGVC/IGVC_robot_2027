@@ -1,0 +1,66 @@
+# docker-compose.windows.yml
+# Windows / Docker Desktop (WSL2 backend) variant of the Humble fused-drive service.
+#
+# The main docker-compose.yml targets native Linux and cannot run as-is on
+# Windows. This file drops the host-Linux-only pieces:
+#
+#   - /dev:/dev, /tmp:/tmp, /tmp/.X11-unix  -> not valid Windows host paths
+#   - network_mode: host                    -> maps to the WSL2 VM, not Windows
+#   - runtime: nvidia                       -> Docker Desktop uses `gpus:` instead
+#   - DISPLAY / QT_X11_NO_MITSHM            -> no X server on Windows by default
+#   - privileged                            -> only needed for real hardware access
+#
+# Use it explicitly (NOT as an override):
+#   docker compose -f docker-compose.windows.yml build
+#   docker compose -f docker-compose.windows.yml run --rm igvc_humble_fused_drive
+#
+# This is for building/inspecting the workspace on a dev laptop. Talking to real
+# hardware (ODrive over CAN, LiDAR, GPS) needs /dev passthrough and therefore
+# native Linux or the Jetson - use docker-compose.yml there.
+
+services:
+  igvc_humble_fused_drive:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.humble-fused-drive
+    image: igvc-humble-fused-drive:latest
+    container_name: igvc_humble_fused_drive
+    stdin_open: true
+    tty: true
+    gpus: all
+    working_dir: /root/ros2_ws
+    # DDS needs more shared memory than the 64MB default
+    shm_size: "2gb"
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      # colcon output stays in named volumes: keeps build artifacts off the
+      # (slow) Windows bind mount and out of the repo working tree
+      - igvc_humble_build:/root/ros2_ws/build
+      - igvc_humble_install:/root/ros2_ws/install
+      - igvc_humble_log:/root/ros2_ws/log
+    environment:
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - FASTDDS_DEFAULT_PROFILES_FILE=/root/ros2_ws/src/IGVC_robot_2026/src/igvc_test_bringup/config/fastdds_udp.xml
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/root/ros2_ws/src/IGVC_robot_2026/src/igvc_test_bringup/config/fastdds_udp.xml
+      - ROS_DISTRO=humble
+      - YOLOPV2_WEIGHTS=/root/ros2_ws/src/IGVC_robot_2026/models/yolopv2.pt
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      - DEVENV_HOST_PATH=${DEVENV_HOST_PATH:-}
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -e
+        source /opt/ros/humble/setup.bash
+        source /root/ros2_ws/install/setup.bash 2>/dev/null || true
+        echo "IGVC Humble workspace. Build with:"
+        echo "  colcon build --symlink-install --base-paths /root/ros2_ws/src/IGVC_robot_2026/src"
+        exec /bin/bash
+
+volumes:
+  igvc_humble_build:
+  igvc_humble_install:
+  igvc_humble_log:

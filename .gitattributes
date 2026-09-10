@@ -1,0 +1,41 @@
+# Keep LF endings on files that are executed inside Linux containers.
+#
+# Without this, a Windows clone with core.autocrlf=true rewrites these to CRLF,
+# and a CRLF shell script fails inside the container with:
+#     bad interpreter: /usr/bin/env bash^M
+# Docker, colcon, and ROS launch files hit the same class of problem.
+
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.json5     text eol=lf
+*.xml       text eol=lf
+*.urdf      text eol=lf
+*.xacro     text eol=lf
+*.launch    text eol=lf
+*.cmake     text eol=lf
+CMakeLists.txt  text eol=lf
+Dockerfile*     text eol=lf
+*.repos     text eol=lf
+*.meta      text eol=lf
+
+# Binary assets - never touch these
+*.pt        binary
+*.pth       binary
+*.onnx      binary
+*.engine    binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.pdf       binary
+*.docx      binary
+*.db3       binary
+*.bag       binary
+*.usd       binary
+*.usda      binary
+*.usdc      binary

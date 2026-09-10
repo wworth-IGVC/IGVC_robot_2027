@@ -143,6 +143,28 @@ docker volume rm igvc_robot_2026_igvc_humble_build igvc_robot_2026_igvc_humble_i
 docker compose up igvc_humble_fused_drive
 ```
 
+## Windows / Docker Desktop
+
+`docker-compose.yml` targets native Linux and will not run as-is on Windows: it
+bind-mounts `/dev`, `/tmp`, and `/tmp/.X11-unix`, uses `network_mode: host`, and
+sets `runtime: nvidia`. None of those are valid on Docker Desktop (WSL2 backend).
+
+Use the Windows-specific file instead, passed explicitly with `-f`:
+
+```bash
+docker compose -f docker-compose.windows.yml build
+docker compose -f docker-compose.windows.yml run --rm igvc_humble_fused_drive
+```
+
+That drops the host-Linux-only settings and keeps GPU access via `gpus: all`.
+It is intended for building and inspecting the workspace on a dev laptop.
+Talking to real hardware (ODrive over CAN, LiDAR, GPS) requires `/dev`
+passthrough, so use `docker-compose.yml` on native Linux or the Jetson.
+
+Note: `docker compose` derives volume names from the directory name. In a fork
+checked out as `IGVC_robot_2027`, the volumes are `igvc_robot_2027_igvc_humble_*`,
+not the `igvc_robot_2026_*` names shown above.
+
 ## Docker services
 
 | Service | Image | Purpose |
