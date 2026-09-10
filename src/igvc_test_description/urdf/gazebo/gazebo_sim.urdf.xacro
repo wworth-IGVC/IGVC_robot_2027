@@ -1,0 +1,172 @@
+<?xml version="1.0"?>
+<!--
+  Gazebo-only additions to the test robot.
+
+  Nothing in here is used on the real robot. test_robot.urdf.xacro includes it
+  only when sim:=true, so the hardware description is unchanged.
+
+  Stage 1 drives the robot with Gazebo's built-in DiffDrive system, which needs
+  no extra packages. That is deliberate: ros-humble-gz-ros2-control depends on
+  libignition-gazebo6 (Fortress) and we run libgz-sim8 (Harmonic), and no
+  Harmonic build of it is packaged, so gz_ros2_control has to be compiled from
+  source with GZ_VERSION=harmonic. Stage 2 does that and swaps DiffDrive for
+  the ros2_control path so sim and hardware share controllers.yaml.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Cameras are the expensive part. Measured on an RTX 5070 Ti Laptop under
+       WSLg: three 720p RGBD cameras run the sim at 7 Hz, one runs at 27 Hz.
+       Default to the front camera only; turn the others on deliberately. -->
+  <xacro:arg name="sim_cameras" default="front" />   <!-- none | front | all -->
+  <xacro:arg name="sim_camera_width"  default="640" />
+  <xacro:arg name="sim_camera_height" default="360" />
+  <xacro:arg name="sim_camera_hz"     default="15" />
+
+  <xacro:property name="cams" value="$(arg sim_cameras)" />
+
+  <!-- Geometry measured from the model, not copied from controllers.yaml.
+       Both values there are wrong for simulation, and one of them looks wrong
+       for the real robot too. Flagged for the team lead; not changed here.
+
+       radius 0.1016, NOT the 0.2032 in controllers.yaml. The wheel mesh
+       left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj measures
+       0.2032 x 0.0640 x 0.2032 m, so 0.2032 is the diameter (exactly 8.00 in)
+       and 0.2032-as-radius is a diameter/radius mix-up. The robot's own
+       geometry settles it: drive-wheel joint z is -0.1274171 and the caster
+       contacts at -0.0307033 + -0.1223279 - 0.0801 = -0.2331. With r=0.1016
+       the drive wheels contact at -0.2290, 4 mm off the caster, which is build
+       tolerance. With r=0.2032 they would reach -0.3306 and leave the caster
+       floating 97 mm in the air.
+
+       separation 0.57633 = 0.2844359 + 0.2918941 from the wheel joint origins.
+       controllers.yaml says 0.5027, which is 0.87x the geometry it describes. -->
+  <xacro:property name="wheel_separation" value="0.57633" />
+  <xacro:property name="wheel_radius"     value="0.1016" />
+
+<!-- ================= drive =================
+       Both wheel joints have axis 0 1 0, so both take a positive radius here.
+       Do NOT port left_wheel_radius_multiplier: -1.0 from controllers.yaml;
+       that compensates for inverted ODrive wiring on the physical robot, and
+       applying it in sim makes the robot spin instead of drive. -->
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>${wheel_separation}</wheel_separation>
+      <wheel_radius>${wheel_radius}</wheel_radius>
+      <max_linear_acceleration>2.0</max_linear_acceleration>
+      <topic>/cmd_vel</topic>
+      <odom_topic>/odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+      <odom_publish_frequency>30</odom_publish_frequency>
+    </plugin>
+
+    <!-- Publishes joint positions so robot_state_publisher can animate the
+         wheels. Bridged to /joint_states in the launch file. -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <joint_name>left_wheel_joint</joint_name>
+      <joint_name>right_wheel_joint</joint_name>
+      <joint_name>caster_raceway_joint</joint_name>
+      <joint_name>caster_wheel_joint</joint_name>
+    </plugin>
+  </gazebo>
+
+  <!-- ================= contact =================
+       Drive wheels grip; the caster must not, or it steers the robot. -->
+  <xacro:macro name="wheel_friction" params="link mu">
+    <gazebo reference="${link}">
+      <mu1>${mu}</mu1>
+      <mu2>${mu}</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:wheel_friction link="left_wheel_link"   mu="1.0" />
+  <xacro:wheel_friction link="right_wheel_link"  mu="1.0" />
+  <xacro:wheel_friction link="caster_wheel_link" mu="0.05" />
+
+  <!-- ================= lidar =================
+       RPLidar C1: 360 deg, 0.05-12 m, 10 Hz. gpu_lidar renders on the GPU;
+       switch to "lidar" only if RQ-02 rendering turns out to be unavailable. -->
+  <gazebo reference="top_rplidar_c1_link">
+    <sensor name="rplidar_c1" type="gpu_lidar">
+      <topic>/scan</topic>
+      <gz_frame_id>top_rplidar_c1_link</gz_frame_id>
+      <update_rate>10</update_rate>
+      <always_on>1</always_on>
+      <visualize>false</visualize>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.14159</min_angle>
+            <max_angle>3.14159</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.05</min>
+          <max>12.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+        </noise>
+      </lidar>
+    </sensor>
+  </gazebo>
+
+  <!-- ================= imu ================= -->
+  <gazebo reference="chassis_link">
+    <sensor name="imu_sensor" type="imu">
+      <topic>/imu</topic>
+      <gz_frame_id>chassis_link</gz_frame_id>
+      <update_rate>50</update_rate>
+      <always_on>1</always_on>
+    </sensor>
+  </gazebo>
+
+  <!-- ================= cameras =================
+       Attached to the *_left_camera_frame, not the optical frame: Gazebo
+       cameras look down +X, which is what that frame gives. The optical frame
+       stays the correct frame_id for downstream perception, and
+       robot_state_publisher still supplies it from the URDF. -->
+  <xacro:macro name="sim_rgbd" params="prefix">
+    <gazebo reference="${prefix}_zed_camera_x_left_camera_frame">
+      <sensor name="${prefix}_zed_rgbd" type="rgbd_camera">
+        <topic>/${prefix}_zed</topic>
+        <gz_frame_id>${prefix}_zed_camera_x_left_camera_optical_frame</gz_frame_id>
+        <update_rate>$(arg sim_camera_hz)</update_rate>
+        <always_on>1</always_on>
+        <camera>
+          <horizontal_fov>1.7453</horizontal_fov>  <!-- 100 deg, ZED X wide -->
+          <image>
+            <width>$(arg sim_camera_width)</width>
+            <height>$(arg sim_camera_height)</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.3</near>
+            <far>20.0</far>
+          </clip>
+        </camera>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:if value="${cams == 'front' or cams == 'all'}">
+    <xacro:sim_rgbd prefix="front" />
+  </xacro:if>
+  <xacro:if value="${cams == 'all'}">
+    <xacro:sim_rgbd prefix="left" />
+    <xacro:sim_rgbd prefix="right" />
+  </xacro:if>
+
+</robot>

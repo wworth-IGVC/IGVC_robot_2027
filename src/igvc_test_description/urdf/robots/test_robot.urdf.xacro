@@ -29,7 +29,11 @@
         <origin xyz="0.177 -0.133 0.218" rpy="0 0 0"/>
     </xacro:gps_antenna>
 
-
-
+    <!-- Gazebo-only plugins and sensors. Inert on the real robot: pass
+         sim:=true to load them. See urdf/gazebo/gazebo_sim.urdf.xacro. -->
+    <xacro:arg name="sim" default="false" />
+    <xacro:if value="$(arg sim)">
+        <xacro:include filename="$(find igvc_test_description)/urdf/gazebo/gazebo_sim.urdf.xacro" />
+    </xacro:if>
 
 </robot>

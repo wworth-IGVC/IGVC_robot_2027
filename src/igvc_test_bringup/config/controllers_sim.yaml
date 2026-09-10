@@ -1,0 +1,31 @@
+# Simulation-only overrides for controllers.yaml.
+#
+# Load AFTER controllers.yaml so these win:
+#   parameters=[controllers.yaml, controllers_sim.yaml]
+#
+# Only the values that must differ in Gazebo are here, so the two files cannot
+# drift apart on the ~40 lines of shared limit parameters.
+#
+# Used by the Stage 2 gz_ros2_control path. Stage 1 drives through Gazebo's
+# built-in DiffDrive system and reads neither file; those numbers live in
+# igvc_test_description/urdf/gazebo/gazebo_sim.urdf.xacro and already match.
+
+diff_drive_controller:
+  ros__parameters:
+
+    # Measured from the model rather than inherited. See the block in
+    # controllers.yaml for why the real-robot values are not these.
+    wheel_separation: 0.57633
+    wheel_radius: 0.1016
+
+    # THE TRAP. -1.0 in controllers.yaml compensates for an inverted ODrive
+    # motor on the physical robot. Simulated wheels are not miswired: both
+    # wheel joints have axis 0 1 0, so a negative multiplier here makes the
+    # left wheel spin backwards and the robot pivots in place instead of
+    # driving forward. Must be +1.0 in simulation.
+    left_wheel_radius_multiplier: 1.0
+    right_wheel_radius_multiplier: 1.0
+
+    # Deliberately NOT changed from controllers.yaml: open_loop, publish_odom
+    # and enable_odom_tf stay false so simulation exercises the same odometry
+    # path as hardware, where the EKF owns odom. Run the EKF in sim too.

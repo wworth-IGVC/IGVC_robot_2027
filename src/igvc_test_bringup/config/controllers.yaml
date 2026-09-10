@@ -14,6 +14,25 @@ diff_drive_controller:
     left_wheel_names: ["left_wheel_joint"]
     right_wheel_names: ["right_wheel_joint"]
 
+    # ---------------------------------------------------------------------
+    # Both numbers below disagree with the robot model. Left as-is because
+    # changing them changes how the physical robot moves, which is the team
+    # lead's call, not something to alter from a simulation task.
+    #
+    # wheel_radius: the mesh left_wheel_link__..._Wheel_Stand_In.obj measures
+    #   0.2032 x 0.0640 x 0.2032 m, so 0.2032 is the DIAMETER (8.00 in) and the
+    #   radius is 0.1016. The robot's own geometry agrees: with r=0.1016 the
+    #   drive wheels contact the ground 4 mm from where the caster does; with
+    #   r=0.2032 they would sit 97 mm lower and lift the caster off the floor.
+    #   If 0.2032 is wrong here, the robot has been driving at half the
+    #   commanded speed.
+    #
+    # wheel_separation: the wheel joint origins are y=+0.2844359 and
+    #   y=-0.2918941, so the geometric separation is 0.57633, not 0.5027.
+    #   0.5027 may be a hand-tuned value; worth confirming.
+    #
+    # Simulation overrides both in controllers_sim.yaml.
+    # ---------------------------------------------------------------------
     wheel_separation: 0.5027
     wheel_radius: 0.2032
 
