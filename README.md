@@ -208,9 +208,13 @@ If you do not have WSL2 set up, use the Windows-specific compose file, passed
 explicitly with `-f`:
 
 ```powershell
-docker compose -f docker-compose.windows.yml build
+docker compose -f docker-compose.windows.yml build igvc_humble_fused_drive
 docker compose -f docker-compose.windows.yml run --rm igvc_humble_fused_drive
 ```
+
+Name the service. A bare `docker compose build` builds **every** service in the
+file, which now includes both ZED variants — roughly 40 minutes and 70 GB when
+all you wanted was the everyday image.
 
 This drops the host-Linux-only settings (`/dev`, `/tmp/.X11-unix`,
 `network_mode: host`, `runtime: nvidia`) that Docker Desktop cannot honour, and

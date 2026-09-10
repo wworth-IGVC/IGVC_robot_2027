@@ -219,8 +219,11 @@ lists by target and therefore cannot *remove* an inherited mount. It must be
 passed explicitly:
 
 ```bash
-docker compose -f docker-compose.windows.yml build
+docker compose -f docker-compose.windows.yml build igvc_humble_fused_drive
 ```
+
+Name the service explicitly. Since §4.5.4 added the two ZED variants, a bare
+`docker compose build` builds all three images — about 40 minutes and 70 GB.
 
 GPU access is preserved through `gpus: all`. Build output goes to named volumes
 so colcon artifacts stay off the (slow) Windows bind mount.
