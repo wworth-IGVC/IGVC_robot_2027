@@ -1011,6 +1011,51 @@ Desktop the "host" is the WSL2 VM, not Windows, so sharing the namespace cannot
 reach an Isaac Sim running on the Windows side. That limitation is independent of
 these two flags.
 
+### 9.6 Proof the image change is sufficient, and the one code change it needs
+
+`igvc_pointcloud_tools` was compiled from the competition branch inside the
+rebuilt image. PCL resolved immediately; the build reached the source and failed
+on something unrelated:
+
+```text
+error: passing 'const rclcpp::Clock' as 'this' argument discards qualifiers
+  246 |     RCLCPP_WARN_THROTTLE(
+note:   in call to 'rclcpp::Time rclcpp::Clock::now()'
+```
+
+The package targets **Jazzy**, where `rclcpp::Clock::now()` is `const`. Humble
+declares it non-const, so calling it through the const method
+`lookup_transform(...) const` is rejected. This is consistent with the
+competition branch's `docker-compose.yml`, which sources
+`/opt/ros/jazzy/setup.bash` because the private `dev-zed` image was Jazzy. Our
+consolidation target is Humble, so adopting that branch means porting it.
+
+For this package the port is one substitution across five call sites:
+
+```bash
+sed -i 's|\*this->get_clock()|*const_cast<rclcpp::Clock *>(this->get_clock().get())|g'   src/igvc_pointcloud_tools/src/pointcloud_merger_node.cpp
+```
+
+Only the site in the const method actually fails; the other four are harmless to
+change and it keeps the file consistent. With that applied, in this image:
+
+```text
+Starting >>> igvc_pointcloud_tools
+Finished <<< igvc_pointcloud_tools [28.2s]
+Summary: 1 package finished
+COLCON_EXIT=0
+```
+
+Producing `libpointcloud_merger_component.so` and the `pointcloud_merger_node`
+executable, linked against PCL. **So `libpcl-dev` was the only image-level gap.**
+
+The patch is recorded here rather than applied, because the file does not exist
+in this fork; it arrives only if the team adopts that branch (RQ-25).
+
+One caveat: `ldd` on the built executable reports a single unresolved library
+when run without sourcing `install/setup.bash`. That is expected for a colcon
+overlay and was not investigated further.
+
 ### 9.5 What this does not resolve
 
 Which branch the 2027 fork should track is an open question and outranks
