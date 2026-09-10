@@ -16,10 +16,13 @@ rather than take them on trust.
 | `e1b118d` | Fix the Humble image so the workspace builds (0/22 → 22/22) | §2, §3.1–3.3, §6.1 |
 | `c5c88f0` | Add the buildable ZED image, Windows setup script, and these docs | §3.4, §4, §6.2, §6.4, §6.5 |
 | `63a075a` | Update the README for the 2027 fork | §6.3 |
+| `c6cc83d` | Close documentation gaps found by auditing against the diff | §6.3–6.5 |
 
-To see the whole change set at once:
+Anything after those is described in the sections below; this table is not
+maintained per-commit. For the authoritative list and the whole change set:
 
 ```bash
+git log --oneline a4b7433..HEAD
 git diff a4b7433..HEAD --stat
 ```
 
@@ -297,7 +300,16 @@ Content-Length: 1630536643
 does still publish Ubuntu 22.04 images, which is what makes a CUDA-13 + Humble
 combination possible at all.
 
-### 4.2.1 Why SDK 5.3.0 and not 5.1.0
+### 4.2.1 How the SDK version was chosen — including one wrong answer
+
+This section records the sequence honestly, because the middle step **looked
+verified and was not**. If you only read one thing here, read §4.5.
+
+| Attempt | SDK | Outcome |
+| --- | --- | --- |
+| 1 | 5.1.0 | fails to compile |
+| 2 | 5.3.0 | compiles, all checks pass, **node dies on launch** |
+| 3 | 5.2.3 | works — verified by launching the node (§7.2) |
 
 The first build attempt pinned SDK **5.1.0**, matching the version in the old
 `dev-zed:5.1.0-13.0.0` tag. `zed_components` failed to compile:
@@ -313,13 +325,11 @@ This is an SDK **API mismatch**, not a ROS distro problem. The wrapper's own
 README states it requires *"ZED SDK v5.2"*; `object_tracking_parameters` was
 introduced in 5.2, so the current wrapper source cannot build against 5.1.0.
 
-Pinned to **5.3.0** instead, which satisfies the requirement and matches
-`docker_images/jetson-zed` (`ZED_SDK_MAJOR=5 MINOR=3 PATCH=0`) so x86 and Jetson
-run the same SDK.
+Attempt 2 pinned **5.3.0**, reasoning that it satisfies the `>= 5.2`
+requirement and matches `docker_images/jetson-zed`, so x86 and Jetson would run
+the same SDK.
 
-**Confirmed fixed.** The rebuild with 5.3.0 compiled `zed_components` in 1 min
-29 s and finished the workspace with `Summary: 6 packages finished [2min 2s]`,
-exit 0. The installed SDK was verified in the image rather than assumed:
+That build was then declared "confirmed fixed" on this evidence:
 
 ```text
 $ grep PACKAGE_VERSION /usr/local/zed/zed-config-version.cmake
@@ -330,10 +340,28 @@ zed_components  zed_debug  zed_description
 zed_msgs        zed_ros2   zed_wrapper
 ```
 
-> Worth noting: `jetson-zed` clones **upstream** `stereolabs/zed-ros2-wrapper`,
-> not the org's `zed-ros2-wrapper-2025` fork. The Dockerfile exposes
-> `ZED_WRAPPER_REPO` / `ZED_WRAPPER_BRANCH` build args so either can be used
-> without editing the recipe.
+plus `zed_components` compiling in 1 min 29 s, `Summary: 6 packages finished`,
+and the 22-package IGVC workspace building inside the image with exit 0.
+
+**All of that was true, and the image was still broken.** Launching the node
+gives:
+
+```text
+[ERROR] This version of the ZED ROS2 wrapper is designed to work with
+        ZED SDK v4.2 or newer up to v5.2.
+[INFO]  * Detected SDK v5.3.0 ... Node stopped.
+```
+
+The reasoning error was assuming a *minimum* requirement when the wrapper
+enforces a **closed range** — and the upper bound is only checked at runtime.
+The lesson generalises past this repo: *a build is not a test of a program that
+validates its environment when it starts.*
+
+Attempt 3 pinned **5.2.3**, the newest patch inside the org fork's supported
+window, and verified it by launching the node (§7.2).
+
+The full analysis — why the cap exists, why `jetson-zed` is unaffected, and the
+two supported wrapper/SDK pairings now provided — is in **§4.5**.
 
 ### 4.3 Consolidation
 
@@ -357,19 +385,164 @@ Dockerfile, is the realistic floor.
 
 Both are kept; neither replaces the other.
 
-| Task | Image | Size |
-| --- | --- | --- |
-| Everyday development | `igvc_humble_fused_drive` | 3.98 GB |
-| ZED camera code, robot machines | `igvc_zed_humble` | 9.7 GB |
+| Task | Image | Download size | On disk |
+| --- | --- | --- | --- |
+| Everyday development | `igvc_humble_fused_drive` | 3.98 GB | **13 GB** |
+| ZED camera code, robot machines | `igvc_zed_humble` | 9.70 GB | **28.6 GB** |
 
-Both sizes are measured from `docker image ls`, not estimated. The ZED image
-came in well under the 15–20 GB originally projected, because `skip_cuda` and
-`skip_tools` keep the SDK installer from duplicating CUDA or adding the GUI
-tools.
+**Two numbers, because Docker reports two and they differ by ~3.3×.** Quote the
+right one:
+
+```text
+$ docker image inspect igvc-zed-humble:latest --format "{{.Size}}"
+9695080432                 # 9.70 GB - sum of COMPRESSED layers = download size
+
+$ docker image ls igvc-zed-humble
+igvc-zed-humble  latest  28.6GB      # unpacked, once actually used
+```
+
+This machine uses the containerd image store
+(`driver-type: io.containerd.snapshotter.v1`, overlayfs), which unpacks layers
+into snapshots **lazily — on the first container run, not at build time**. That
+is measurable, and it is why a freshly built image can look deceptively small:
+
+```text
+# immediately after `docker compose build igvc_zed_humble_upstream`
+igvc-zed-humble  upstream   ls=9.7GB
+
+# after one `docker run` from that same image
+igvc-zed-humble  upstream   ls=28.6GB
+
+# inspect is unchanged throughout: 9.70 GB
+```
+
+So **an image you have built but not yet run has not finished costing you
+disk.** Budget the larger number, and add build cache on top — it reached
+**55.9 GB** while developing these images. `docker system df` shows all of it;
+`docker builder prune` reclaims the cache.
+
+The download size still came in well under the 15–20 GB originally projected,
+because `skip_cuda` and `skip_tools` keep the SDK installer from duplicating
+CUDA or adding the GUI tools.
 
 On Windows the smaller image is the right default: Docker Desktop cannot pass
 through USB, so a ZED camera is unusable there, and the 22 workspace packages
 build without the SDK (proven — the 4 GB image has no SDK and builds 22/22).
+
+### 4.5 Wrapper / SDK pairing, and the two variants
+
+This is the most important section in this document for anyone maintaining the
+ZED image. **A build-only test cannot validate this image.**
+
+#### 4.5.1 The wrapper enforces a closed SDK range, at runtime
+
+`zed_components/src/include/sl_version.hpp` defines a minimum *and* a maximum
+supported SDK, checked in `zed_camera_component_main.cpp` as
+`(MAJOR * 10 + MINOR)` — the patch level is not considered:
+
+```cpp
+if (((ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) <
+  (SDK_MAJOR_MIN_SUPP * 10 + SDK_MINOR_MIN_SUPP)) ||
+  ((ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >
+  (SDK_MAJOR_MAX_SUPP * 10 + SDK_MINOR_MAX_SUPP)))
+```
+
+Both ends fail, but they fail in **very different ways**:
+
+| SDK | Wrapper | Result |
+| --- | --- | --- |
+| 5.1.0 | org fork (max 5.2) | fails to **compile** — obvious, caught by any build |
+| 5.3.0 | org fork (max 5.2) | **compiles perfectly, node refuses to start** |
+| 5.2.3 | org fork (max 5.2) | works |
+| 5.3.0 | upstream v5.4.1 (max 5.4) | works |
+
+The 5.3.0 + fork combination is the dangerous one. The image builds with no
+errors, all six ZED packages install, `ros2 pkg list` shows them — and then:
+
+```text
+[INFO] Load Library: .../libzed_camera_component.so
+[INFO] Found class: rclcpp_components::NodeFactoryTemplate<stereolabs::ZedCamera>
+[INFO] ================================
+[INFO]       ZED Camera Component
+[ERROR] This version of the ZED ROS2 wrapper is designed to work with
+        ZED SDK v4.2 or newer up to v5.2.
+[INFO] * Detected SDK v5.3.0-114247_4d466e77_3096846
+[INFO] Node stopped. Press Ctrl+C to exit.
+[ERROR] process has died [exit code 1]
+```
+
+**This image was originally published in exactly that broken state**, because
+it had been verified by building it and by running `colcon build` inside it,
+never by launching the node. If you change `ZED_WRAPPER_BRANCH` or any
+`ZED_SDK_*` value, verify with §7.2, not with a build.
+
+#### 4.5.2 Why the cap exists: the org fork is a stale mirror
+
+The cap is not upstream's. Upstream derives its maximum from its own version:
+
+```cpp
+const size_t SDK_MAJOR_MAX_SUPP = WRAPPER_MAJOR;   // 5
+const size_t SDK_MINOR_MAX_SUPP = WRAPPER_MINOR;   // 4
+```
+
+`Gold-Rush-Robotics/zed-ros2-wrapper-2025` is pinned at wrapper **v5.2.1**,
+which is where the hard 5.2 cap comes from. Comparing it against upstream:
+
+```text
+GET /repos/stereolabs/zed-ros2-wrapper/compare/
+      master...Gold-Rush-Robotics:zed-ros2-wrapper-2025:master
+
+status    : behind
+ahead_by  : 0        <- commits the fork has that upstream does not
+behind_by : 70       <- commits upstream has that the fork lacks
+files changed vs upstream: 0
+```
+
+**The fork contains no org-specific changes at all.** It is a plain mirror,
+70 commits stale. There is nothing in it to preserve.
+
+#### 4.5.3 `jetson-zed` is not affected
+
+Worth stating plainly, because the mismatch above raised the question.
+`docker_images/jetson-zed` pairs SDK 5.3.0 with **upstream**
+(`git clone https://github.com/stereolabs/zed-ros2-wrapper.git`), whose cap is
+5.4. `53 <= 54`, so it is internally consistent. No latent fault there.
+
+One real weakness though: it clones upstream with **no tag or branch**, so its
+result depends on when it was built. Both variants below pin their wrapper.
+
+#### 4.5.4 The two variants
+
+Which one the team adopts is an open decision, so both are wired up rather than
+one being chosen unilaterally.
+
+| | `igvc_zed_humble` (A) | `igvc_zed_humble_upstream` (B) |
+| --- | --- | --- |
+| Wrapper | org fork v5.2.1 | upstream **v5.4.1**, pinned |
+| ZED SDK | 5.2.3 | 5.3.0 |
+| Image tag | `igvc-zed-humble:latest` | `igvc-zed-humble:upstream` |
+| Matches `jetson-zed` | no | **yes** — same wrapper source and SDK |
+| Wrapper currency | 70 commits behind upstream | current |
+
+```bash
+docker compose build igvc_zed_humble            # A
+docker compose build igvc_zed_humble_upstream   # B
+```
+
+They use separate colcon volumes (`igvc_zed_*` vs `igvc_zed_up_*`), so both can
+exist side by side without mixing build output.
+
+**The argument for B**: it is the same wrapper source and SDK the Jetson
+already runs, which is what "consolidation" was supposed to achieve, and it
+picks up 70 commits of upstream fixes. The fork it would replace contributes
+nothing (§4.5.2).
+
+**The argument for A**: it is the combination the repo implicitly declared by
+referencing the org fork, and it changes less. If someone forked
+`zed-ros2-wrapper-2025` intending to customise it later, A keeps that path open.
+
+A is the default only because it is the more conservative of the two, not
+because it is better.
 
 ---
 
@@ -588,8 +761,8 @@ afterwards.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Image builds clean | `docker build -f docker/Dockerfile.igvc-zed-humble .` | exit 0, **18.5 min**, **9.7 GB** |
-| ZED SDK installed | `grep PACKAGE_VERSION /usr/local/zed/zed-config-version.cmake` | `5.3.0` |
+| Image builds clean | `docker build -f docker/Dockerfile.igvc-zed-humble .` | exit 0, **18.5 min**, 9.70 GB download / **28.6 GB on disk** |
+| ZED SDK installed | `grep PACKAGE_VERSION /usr/local/zed/zed-config-version.cmake` | `5.2.3` |
 | ZED wrapper compiles | colcon, layer 9/14 | `zed_components` in 1 min 29 s; `Summary: 6 packages finished` |
 | ZED packages resolvable | `ros2 pkg list \| grep -i zed` | 6: `zed_components`, `zed_debug`, `zed_description`, `zed_msgs`, `zed_ros2`, `zed_wrapper` |
 | **IGVC workspace regression** | `colcon build` over all repo packages, inside this image | **`22 packages finished [4min 22s]`, `COLCON_EXIT=0`** |
@@ -611,15 +784,112 @@ Layer timings, for anyone deciding whether to build or pull (see §8, item 2):
 Both workspace builds were verified against images built **from scratch** with
 the corrected Dockerfiles, not against incrementally patched layers.
 
+> **Every check in the table above also passed on the broken SDK 5.3.0 build.**
+> Image built, six ZED packages resolved, 22 IGVC packages compiled — and the
+> node still died on launch (§4.5.1). Build-time checks are necessary and not
+> sufficient. §7.2 is the one that catches it.
+
+### 7.2 Runtime check — the one that actually matters
+
+Static checks cannot detect the wrapper's SDK guard, because it runs when the
+node starts. This launches the node with the repo's own parameter override file
+and no camera attached:
+
+```bash
+docker run --rm --gpus all \
+  -v "<repo>:/root/ros2_ws/src/IGVC_robot_2026" \
+  igvc-zed-humble:latest bash -lc '
+    source /opt/ros/humble/setup.bash
+    source /root/ros2_ws/install/setup.bash
+    timeout 45 ros2 launch zed_wrapper zed_camera.launch.py \
+      camera_model:=zed2i camera_name:=front_zed_camera_x \
+      ros_params_override_path:=/root/ros2_ws/src/IGVC_robot_2026/src/igvc_test_bringup/config/common_stereo_real.yaml'
+```
+
+`--gpus all` is required. Without it the component fails earlier with
+`libcuda.so.1: cannot open shared object file`, which is the test harness
+missing the GPU, not an image fault.
+
+**Interpreting the result.** There is no camera, so it must fail eventually.
+What matters is *where*:
+
+| Where it stops | Meaning |
+| --- | --- |
+| `designed to work with ZED SDK ... up to vX.Y` | **wrong SDK/wrapper pairing** (§4.5) |
+| a parameter error | the override YAML is incompatible with this wrapper |
+| `CAMERA STREAM FAILED TO START`, retrying | **pass** — software stack is fine, only hardware is absent |
+
+Result for variant A (org fork wrapper + SDK 5.2.3):
+
+```text
+[INFO]  * Advertised on service: '/front_zed_camera_x/zed_node/enable_obj_det'
+        ... (all services advertised)
+[INFO] === STARTING CAMERA ===
+[INFO] ZED SDK Version: 5.2.3 - Build 112767_50a3dc68_3019834
+[INFO] === CAMERA OPENING ===
+[WARN] Error opening camera: CAMERA STREAM FAILED TO START
+[INFO] Please verify the camera connection
+```
+
+Passed: no version rejection, all services advertised, reached camera open and
+retried cleanly. It also confirms the repo's `common_stereo_real.yaml` is
+accepted — see §7.3.
+
+Result for variant B (upstream wrapper v5.4.1 + SDK 5.3.0):
+
+```text
+[INFO] === STARTING CAMERA ===
+[INFO] ZED SDK Version: 5.3.0 - Build 114247_4d466e77_3096846
+[INFO] === CAMERA OPENING ===
+[WARN] Error opening camera: CAMERA STREAM FAILED TO START
+[INFO] Please verify the camera connection
+```
+
+Also passed. Note this is the **same SDK 5.3.0 that fails with the org fork** —
+proof that the fault was never the SDK version on its own, only its pairing
+with a wrapper that caps at 5.2.
+
+**Both variants are verified.** Summary:
+
+| Variant | Wrapper | SDK | Builds | Node launches |
+| --- | --- | --- | --- | --- |
+| `igvc_zed_humble` | org fork v5.2.1 | 5.2.3 | yes | **yes** |
+| `igvc_zed_humble_upstream` | upstream v5.4.1 | 5.3.0 | yes | **yes** |
+| *(rejected)* | org fork v5.2.1 | 5.3.0 | yes | **no** |
+
+What cannot be verified on Windows: that a camera actually streams. Docker
+Desktop cannot pass USB through, so the launch test above is the furthest any
+check can go on a Windows machine. First real camera bring-up has to happen on
+the Jetson or a native Linux host.
+
+### 7.3 Repo/wrapper interface checks
+
+Confirming the repo can actually drive this wrapper, not merely that the
+wrapper exists:
+
+| Check | Result |
+| --- | --- |
+| `zed_wrapper/launch/zed_camera.launch.py` present at the path `zed_multi.launch.py` resolves | yes |
+| Launch arguments the repo passes vs those the wrapper declares | **14 of 14 accepted** (repo passes 14, wrapper declares 29) |
+| Repo's `common_stereo_real.yaml` loaded | yes — `Using ROS parameters override file: ...` |
+| ZED URDF parses | yes — all 6 camera frames published by `robot_state_publisher` |
+| Parameters set by the repo but not declared by the wrapper | 29, mostly `object_detection.*`. **Silently ignored, not fatal** — the node started with the override applied. They have no effect, so object-detection tuning in that file is currently inert. |
+
+The launch-argument comparison is done by AST-parsing `zed_multi.launch.py`
+rather than by regex: the repo builds the dict and then adds three keys
+conditionally, and a regex over the literal misses those and reports a false
+pass.
+
 ---
 
 ## 8. Outstanding
 
 1. **`dev-zed` access.** Still private. Either have the package made public /
    granted to team accounts, or adopt `igvc-zed-humble` (§4) and retire it.
-2. **Publish `igvc-zed-humble`.** Building it per-developer costs 9.7 GB and
-   ~18.5 minutes each (measured; see §7). Push it to GHCR once and have
-   everyone pull instead.
+2. **Publish `igvc-zed-humble`.** Building it per-developer costs ~18.5 minutes
+   and **28.6 GB of disk** (plus build cache, which reached 55.9 GB here).
+   Pulling a published image transfers 9.70 GB and skips the build entirely.
+   Push it to GHCR once and have everyone pull.
 3. **Correct the `jetson-ros-base` tag** upstream — `jazzy-36.4.7-2` contains
    Humble (§5.4).
 4. **Fix the stale Jazzy comments** in `docker-compose.jetson.yml` (§5.4).

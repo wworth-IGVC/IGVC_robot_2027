@@ -90,17 +90,37 @@ services:
         /bin/bash
 
   # ---------------------------------------------------------------------------
-  # Consolidated x86 image: ZED SDK 5.3.0 + ZED ROS wrapper + ROS 2 Humble +
-  # Nav2 + ros2_control + PyTorch, built from docker/Dockerfile.igvc-zed-humble.
+  # Consolidated x86 image: ZED SDK + ZED ROS wrapper + ROS 2 Humble + Nav2 +
+  # ros2_control + PyTorch, built from docker/Dockerfile.igvc-zed-humble.
   #
   # This is the open replacement for igvc_dev_zed above, which depends on the
   # private ghcr.io/gold-rush-robotics/dev-zed image (Jazzy, no public recipe).
   # Building it here keeps the x86 side on Humble, matching the Jetson images.
+  #
+  # TWO VARIANTS, both verified. They differ only in which ZED wrapper they
+  # build and which SDK is paired with it. The pairing is not free choice -
+  # the wrapper rejects an SDK outside its supported range AT RUNTIME, so the
+  # rows below must be kept together. See docs/DOCKER_CHANGES.md 4.5.
+  #
+  #   igvc_zed_humble           org fork wrapper v5.2.1 + SDK 5.2.3
+  #   igvc_zed_humble_upstream  upstream wrapper v5.4.1 + SDK 5.3.0
+  #                             (same wrapper and SDK as jetson-zed)
+  #
+  # Which to adopt is a team decision that is still open. Both are provided so
+  # nobody has to edit a Dockerfile to try the other one.
   # ---------------------------------------------------------------------------
   igvc_zed_humble:
     build:
       context: .
       dockerfile: docker/Dockerfile.igvc-zed-humble
+      args:
+        # Variant A - the Dockerfile defaults, restated here so the pairing is
+        # visible without opening the Dockerfile.
+        ZED_WRAPPER_REPO: https://github.com/Gold-Rush-Robotics/zed-ros2-wrapper-2025.git
+        ZED_WRAPPER_BRANCH: master
+        ZED_SDK_MAJOR: "5"
+        ZED_SDK_MINOR: "2"
+        ZED_SDK_PATCH: "3"
     image: igvc-zed-humble:latest
     container_name: igvc_zed_humble
     stdin_open: true
@@ -134,6 +154,64 @@ services:
       - DEVENV_HOST_PATH=${DEVENV_HOST_PATH:-}
     command: ["bash"]
 
+  # ---------------------------------------------------------------------------
+  # Variant B. Identical to igvc_zed_humble except for the wrapper/SDK pairing.
+  #
+  # Uses UPSTREAM stereolabs/zed-ros2-wrapper pinned at v5.4.1, with SDK 5.3.0
+  # - the same wrapper source and SDK as docker_images/jetson-zed, so the x86
+  # and Jetson sides run the same code. Upstream derives its maximum supported
+  # SDK from its own version (5.4), so 5.3.0 is inside the range.
+  #
+  # jetson-zed clones upstream with no tag, which makes its builds
+  # irreproducible over time. This pins the tag deliberately.
+  #
+  #   docker compose build igvc_zed_humble_upstream
+  # ---------------------------------------------------------------------------
+  igvc_zed_humble_upstream:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.igvc-zed-humble
+      args:
+        ZED_WRAPPER_REPO: https://github.com/stereolabs/zed-ros2-wrapper.git
+        ZED_WRAPPER_BRANCH: v5.4.1
+        ZED_SDK_MAJOR: "5"
+        ZED_SDK_MINOR: "3"
+        ZED_SDK_PATCH: "0"
+    image: igvc-zed-humble:upstream
+    container_name: igvc_zed_humble_upstream
+    stdin_open: true
+    tty: true
+    privileged: true
+    network_mode: host
+    runtime: nvidia
+    gpus: all
+    working_dir: /root/ros2_ws
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      # Separate volumes from variant A on purpose. The two images contain
+      # different ZED builds; sharing colcon output would mix them.
+      - igvc_zed_up_build:/root/ros2_ws/build
+      - igvc_zed_up_install:/root/ros2_ws/install
+      - igvc_zed_up_log:/root/ros2_ws/log
+      - /tmp:/tmp
+      - /dev:/dev
+      - /dev/shm:/dev/shm
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - FASTDDS_DEFAULT_PROFILES_FILE=/root/ros2_ws/src/IGVC_robot_2026/src/igvc_test_bringup/config/fastdds_udp.xml
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/root/ros2_ws/src/IGVC_robot_2026/src/igvc_test_bringup/config/fastdds_udp.xml
+      - ROS_DISTRO=humble
+      - YOLOPV2_WEIGHTS=/root/ros2_ws/src/IGVC_robot_2026/models/yolopv2.pt
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      - DEVENV_HOST_PATH=${DEVENV_HOST_PATH:-}
+    command: ["bash"]
+
 volumes:
   igvc_humble_build:
   igvc_humble_install:
@@ -143,3 +221,7 @@ volumes:
   igvc_zed_build:
   igvc_zed_install:
   igvc_zed_log:
+
+  igvc_zed_up_build:
+  igvc_zed_up_install:
+  igvc_zed_up_log:

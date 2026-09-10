@@ -43,8 +43,8 @@ The workspace is used in two main ROS environments:
 
 | Target | Use case | Notes |
 | --- | --- | --- |
-| ROS 2 Humble in Docker | Fused-drive runtime, and the default for everyday work. | Uses `ros:humble-ros-base` through `docker/Dockerfile.humble-fused-drive`. 3.98 GB. |
-| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | `docker/Dockerfile.igvc-zed-humble` — CUDA 13, ZED SDK 5.3.0, ZED ROS 2 wrapper. 9.7 GB. |
+| ROS 2 Humble in Docker | Fused-drive runtime, and the default for everyday work. | Uses `ros:humble-ros-base` through `docker/Dockerfile.humble-fused-drive`. 13 GB on disk. |
+| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | `docker/Dockerfile.igvc-zed-humble` — CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
 | ROS 2 Jazzy on host | Local debug GUI and host-side tools. | Host tools can see Docker topics when the shared DDS helper is sourced. |
 
 The Humble containers are the supported path. The rest of the org's robot-side
@@ -259,7 +259,8 @@ rather than naming volumes by hand.
 | --- | --- | --- |
 | `igvc_dev_zed` | `ghcr.io/gold-rush-robotics/dev-zed:5.1.0-13.0.0` | Jazzy/ZED development container. Builds `igvc_test_bringup` and launches `simulation_launch.launch.yaml`. |
 | `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default** — 3.98 GB. |
-| `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus ZED SDK 5.3.0 and the ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 9.7 GB. |
+| `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus the ZED SDK and ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 28.6 GB on disk. |
+| `igvc_zed_humble_upstream` | Same Dockerfile, different build args | Same as above but built against **upstream** `zed-ros2-wrapper` v5.4.1 with SDK 5.3.0 — the same wrapper and SDK as the Jetson image. See below. |
 
 All three services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
 
@@ -275,12 +276,75 @@ access and for which no build recipe is published anywhere. The new image is
 built from a Dockerfile in this repo, so anyone can build it:
 
 ```bash
-docker compose build igvc_zed_humble     # ~18 minutes, 9.7 GB
+docker compose build igvc_zed_humble     # ~18 minutes, 28.6 GB on disk
 ```
 
 On Windows, note that Docker Desktop cannot pass USB devices through, so a ZED
 camera is not usable from a Windows container regardless of image. See
 [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) for the full rationale.
+
+### Two ZED variants — pick one
+
+The ZED wrapper only accepts a **specific range** of ZED SDK versions, and it
+enforces this **when the node starts**, not when the image builds. An image can
+build perfectly, install every ZED package, and then die the instant you launch
+it:
+
+```text
+[ERROR] This version of the ZED ROS2 wrapper is designed to work with
+        ZED SDK v4.2 or newer up to v5.2.
+[INFO]  * Detected SDK v5.3.0 ... Node stopped.
+```
+
+So the wrapper and the SDK have to be chosen together. Two combinations are
+verified, and both are wired up:
+
+| | `igvc_zed_humble` | `igvc_zed_humble_upstream` |
+| --- | --- | --- |
+| Wrapper | org fork v5.2.1 | upstream v5.4.1 (pinned) |
+| ZED SDK | 5.2.3 | 5.3.0 |
+| Matches `jetson-zed` | no | **yes** |
+| Wrapper currency | 70 commits behind upstream | current |
+
+```bash
+docker compose build igvc_zed_humble            # default
+docker compose build igvc_zed_humble_upstream   # matches the Jetson
+```
+
+They use separate colcon volumes, so both can coexist. Which one the team
+standardises on is still an open decision — see
+[docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) §4.5 for the evidence behind
+each.
+
+**If you change the SDK or wrapper version, test by launching the node, not by
+building the image.** `DOCKER_CHANGES.md` §7.2 has the exact command and how to
+read its output.
+
+### Disk space
+
+Docker reports two different sizes and they differ by about 3.3×:
+
+| | Download | On disk |
+| --- | --- | --- |
+| `igvc_humble_fused_drive` | 3.98 GB | 13 GB |
+| `igvc_zed_humble` | 9.70 GB | 28.6 GB |
+
+`docker image inspect` reports the compressed download size. `docker image ls`
+reports the unpacked footprint — but layers are unpacked **lazily, on the first
+container run**, so a freshly built image looks smaller than it will be:
+
+```text
+igvc-zed-humble  upstream  9.7GB     # right after building it
+igvc-zed-humble  upstream  28.6GB    # after running it once
+```
+
+**Plan around the on-disk column**, and leave room for build cache — it reached
+55.9 GB while these images were being developed.
+
+```bash
+docker system df        # see images, volumes, and build cache
+docker builder prune    # reclaim build cache
+```
 
 ## Shared DDS profile
 

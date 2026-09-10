@@ -8,7 +8,8 @@
 # Contains:
 #   Ubuntu 22.04 (Jammy - required by ROS 2 Humble)
 #   CUDA 13.0    (Blackwell / RTX 50-series need >= 12.8)
-#   ZED SDK 5.3.0 (same version as the Jetson image)
+#   ZED SDK 5.2.3 (see the ZED_SDK_* args below - the version is constrained
+#                  at BOTH ends by the wrapper; do not bump it casually)
 #   ROS 2 Humble + zed-ros2-wrapper, zed_msgs, zed_description
 #   Nav2, ros2_control, robot_localization
 #   PyTorch + Ultralytics (CUDA 13 wheels)
@@ -32,15 +33,45 @@ FROM ${BASE_IMAGE}
 ARG ROS2_DIST=humble
 ARG UBUNTU_MAJOR=22
 ARG CUDA_MAJOR=13
-# ZED SDK 5.3.0, matching docker_images/jetson-zed so x86 and Jetson run the
-# same SDK. Do NOT drop to 5.1.0 (the version in the old dev-zed tag): the
-# current zed-ros2-wrapper requires SDK >= 5.2 and fails to compile against
-# 5.1.0 with
-#   error: 'struct sl::CustomObjectDetectionProperties' has no member
-#          named 'object_tracking_parameters'
+# -----------------------------------------------------------------------------
+# WRAPPER / SDK VERSION PAIRING - read this before changing either
+#
+# The wrapper enforces a CLOSED SDK version range and BOTH ends bite. From
+# zed_components/src/include/sl_version.hpp, checked in
+# zed_camera_component_main.cpp as (MAJOR*10 + MINOR) - the PATCH is ignored:
+#
+#   too old  -> fails to COMPILE
+#   too new  -> compiles fine, then the node REFUSES TO START
+#
+# The second failure mode is invisible to a build-only test. The image builds
+# perfectly and the node dies the moment you launch it:
+#
+#   [ERROR] This version of the ZED ROS2 wrapper is designed to work with
+#           ZED SDK v4.2 or newer up to v5.2.
+#   [INFO]  * Detected SDK v5.3.0 ... Node stopped.
+#
+# So: if you change ZED_WRAPPER_BRANCH or any ZED_SDK_* value, verify by
+# LAUNCHING the node, not just by building the image.
+#
+# Two combinations are known good. Both are wired up as compose services -
+# see docker-compose.yml. Do not mix and match across the rows.
+#
+#   A (this file's defaults)     B (igvc_zed_humble_upstream)
+#   ------------------------     ---------------------------
+#   wrapper: org fork v5.2.1     wrapper: upstream v5.4.1
+#   SDK:     5.2.3               SDK:     5.3.0
+#   caps at SDK 5.2              caps at SDK 5.4 (= its own version)
+#                                same wrapper AND SDK as docker_images/jetson-zed
+#
+# Note on the org fork: Gold-Rush-Robotics/zed-ros2-wrapper-2025 is a plain
+# mirror of upstream with NO org-specific commits (0 ahead, 70 behind as of
+# 2026-09), pinned at wrapper v5.2.1 - which is where the 5.2 cap comes from.
+# B is the one that matches the Jetson. A is the conservative default until
+# the team decides. See docs/DOCKER_CHANGES.md 4.5.
+# -----------------------------------------------------------------------------
 ARG ZED_SDK_MAJOR=5
-ARG ZED_SDK_MINOR=3
-ARG ZED_SDK_PATCH=0
+ARG ZED_SDK_MINOR=2
+ARG ZED_SDK_PATCH=3
 ARG DEBIAN_FRONTEND=noninteractive
 
 ENV ROS_DISTRO=${ROS2_DIST}
