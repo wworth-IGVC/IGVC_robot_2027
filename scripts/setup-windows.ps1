@@ -15,7 +15,7 @@
     Useful switches:
 
         -CheckOnly     Run the checks and stop. Changes nothing.
-        -SkipWeights   Do not download the YOLOPv2 model weights (~200 MB).
+        -SkipWeights   Do not download the YOLOPv2 model weights (about 150 MB).
         -WithZed       Also build the large ZED SDK image (15-20 GB).
                        Only needed if you are working on ZED camera code.
                        A ZED camera cannot be used from Docker on Windows.
@@ -218,7 +218,7 @@ if (Test-Path $weights) {
 } elseif ($CheckOnly) {
     Write-Warn2 "Missing. Run without -CheckOnly to download."
 } else {
-    Write-Info "Downloading (~200 MB, once per machine)..."
+    Write-Info "Downloading (about 150 MB, once per machine)..."
     try {
         New-Item -ItemType Directory -Force -Path "models" | Out-Null
         $url = "https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt"
