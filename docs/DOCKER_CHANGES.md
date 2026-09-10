@@ -5,17 +5,32 @@ each one, and how it was verified. Written so a reviewer can check the claims
 rather than take them on trust.
 
 - **Fork:** `wworth-IGVC/IGVC_robot_2027` (of `Gold-Rush-Robotics/IGVC_robot_2026`)
-- **Baseline commit:** `a4b7433`
-- **First change commit:** `e1b118d`
+- **Baseline commit:** `a4b7433` (the fork point — nothing below this line existed then)
 - **Tested on:** Windows 11 (build 26200), Docker Engine 29.7.2, Compose v5.5.1,
   WSL2 / Ubuntu 26.04, NVIDIA RTX 5070 Ti Laptop (Blackwell, sm_120)
+
+## Commits
+
+| Commit | Change | Covered in |
+| --- | --- | --- |
+| `e1b118d` | Fix the Humble image so the workspace builds (0/22 → 22/22) | §2, §3.1–3.3, §6.1 |
+| `c5c88f0` | Add the buildable ZED image, Windows setup script, and these docs | §3.4, §4, §6.2, §6.4, §6.5 |
+| `63a075a` | Update the README for the 2027 fork | §6.3 |
+
+To see the whole change set at once:
+
+```bash
+git diff a4b7433..HEAD --stat
+```
 
 ---
 
 ## 1. Summary
 
-The `igvc_humble_fused_drive` Docker image could not build **any** ROS package.
-A `colcon build` of the workspace produced:
+Three outcomes.
+
+**1. The Humble image now builds.** `igvc_humble_fused_drive` could not build
+**any** ROS package. A `colcon build` of the workspace produced:
 
 ```text
 Summary: 0 packages finished
@@ -23,7 +38,7 @@ Summary: 0 packages finished
   21 packages not processed
 ```
 
-After the fixes below:
+After the fixes in §2:
 
 ```text
 Summary: 22 packages finished [4min 15s]
@@ -32,6 +47,22 @@ COLCON_EXIT=0
 ```
 
 The two remaining stderr packages emit compiler warnings only — see §5.3.
+
+**2. The private ZED image has an open replacement.** `docker-compose.yml`
+depended on `ghcr.io/gold-rush-robotics/dev-zed`, which is private, which most
+team accounts cannot pull, and for which no build recipe is published anywhere
+in the organisation (§5.2 — verified, not assumed).
+`docker/Dockerfile.igvc-zed-humble` builds an equivalent x86 image from public
+sources, and the full workspace builds inside it: **22 packages, exit 0** (§7.1).
+
+**3. Windows works.** `docker-compose.yml` cannot run on Docker Desktop at all —
+it bind-mounts `/dev`, sets `network_mode: host`, and requests
+`runtime: nvidia`. `docker-compose.windows.yml` plus `scripts/setup-windows.ps1`
+give the three Windows machines on the team a working path (§3.3, §6.2).
+
+Everything claimed here was verified against real build output. §7 lists each
+check and the command that produces it. Where an early diagnosis turned out to
+be wrong, the correction is recorded rather than quietly dropped — see §4.2.1.
 
 ---
 
@@ -382,6 +413,17 @@ nvcr.io/nvidia/l4t-jetpack:r36.4.0`. It cannot run on an x86 laptop.
   `ignoring unknown package 'simulation_interfaces'` and still exits 0.
 - **`odrive_ros2_control` / `sllidar_ros2` stderr.** Vendor compiler warnings
   (`-Wunused-parameter`, zero-size arrays under `-Wpedantic`). Not errors.
+- **`/root/ros2_ws/src/IGVC_robot_2026` mount path.** Still says 2026 in a fork
+  named 2027, which looks like an oversight. It is not: the path is the
+  container-side mount target, referenced by `docker-compose.yml`,
+  `IGVC_WORKSPACE_ROOT`, `YOLOPV2_WEIGHTS`, and the DDS profile paths. Renaming
+  it would break all of them for no benefit.
+- **Hard tabs in a README bash code block.** Pre-existing at `a4b7433`. Flagged
+  by markdownlint (MD010); tabs are valid in shell, so this is cosmetic and was
+  left to keep the diff focused.
+- **Stray `# ros2 launch ... isaac_nav_test` comment** in the `volumes:` block of
+  `docker-compose.yml`. Looks like it was displaced by an earlier edit, but it is
+  pre-existing at `a4b7433` and harmless.
 
 ### 5.4 Humble / Jazzy audit
 
@@ -455,13 +497,77 @@ Two bugs found while testing it, both worth knowing independently:
    `Driver Version` never appears. Matching on `Driver Version` false-alarms on
    every Windows machine. The script matches `NVIDIA-SMI` instead.
 
-### 6.3 Documentation
+### 6.3 `README.md`
 
-- `README.md` — Windows section covering WSL2 (Option A) vs PowerShell
-  (Option B), the setup script, GPU/Blackwell notes, ZED limitations, and the
-  volume-naming difference in a fork named `IGVC_robot_2027`.
+**Windows support (in `e1b118d`).** New section covering WSL2 (Option A) vs
+PowerShell (Option B), the setup script, GPU/Blackwell notes, and ZED
+limitations on Windows.
+
+**Fork identity and stale content (in `63a075a`).**
+
+- Retitled from `IGVC_robot_2026` to `IGVC_robot_2027`, with a link crediting
+  the upstream repo.
+- Added a "What changed in this fork" section so a teammate landing on the repo
+  sees the state without reading this file first.
+- **Runtime targets** table listed only Jazzy-on-host and Humble-in-Docker. It
+  now lists both Humble images with their measured sizes and demotes Jazzy to
+  host-side tooling, matching the goal of consolidating the robot side on
+  Humble.
+- **Repository layout** table did not mention `docker-compose.windows.yml` or
+  `scripts/`; both are now listed.
+- **Maintainer notes** now say to mirror any new compose service into the
+  Windows file, and to pin `setuptools` after touching a Dockerfile pip stack —
+  the exact trap in §2.1.
+
+#### 6.3.1 A broken command in the clean-rebuild instructions
+
+**Symptom.** The documented way to force a clean workspace rebuild fails:
+
+```text
+$ docker volume rm igvc_robot_2026_igvc_humble_build ...
+Error response from daemon: get igvc_robot_2026_igvc_humble_build: no such volume
+```
+
+**Root cause.** Compose derives volume names from the **checkout directory**, so
+in a fork checked out as `IGVC_robot_2027` the volumes are
+`igvc_robot_2027_igvc_humble_*`. The README hardcoded the upstream 2026 names.
+
+A note explaining exactly this already existed in the README — but 77 lines
+further down, past the point where anyone copy-pasting the command would already
+have hit the error.
+
+**Fix.** Replaced the hand-written volume names with a command that does not
+depend on the directory name at all, and moved the explanation next to it:
+
+```bash
+docker compose down -v
+```
+
+The same edit adds a point that was missing everywhere: `down -v` is also
+required **after rebuilding an image**, because named volumes are seeded from
+the image only on first creation (§3.4). Without it, a rebuilt image silently
+keeps serving the previous build output.
+
+### 6.4 `.gitignore` — Office lock files
+
+Opening `docs/IGVC_2027_Docker_Setup_Guide.docx` in Word creates a hidden
+owner file, `~$VC_2027_Docker_Setup_Guide.docx`, in the same directory. It
+showed up as untracked and would have been committed by a `git add -A`. Added:
+
+```gitignore
+~$*
+```
+
+Word also holds an exclusive lock on the open file, so regenerating the guide
+while it is open fails with `PermissionError`. The generator now honours a
+`DOCX_OUT` environment variable so it can write elsewhere and be copied in
+afterwards.
+
+### 6.5 Documentation artifacts
+
 - `docs/IGVC_2027_Docker_Setup_Guide.docx` — step-by-step guide for teammates
-  who have never used Docker.
+  who have never used Docker. Sizes and SDK versions in it are the measured
+  ones from §7, not estimates.
 - `docs/DOCKER_CHANGES.md` — this file.
 
 ---
