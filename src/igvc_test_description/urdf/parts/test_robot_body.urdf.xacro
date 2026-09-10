@@ -40,13 +40,13 @@
       <visual>
         <origin xyz="-0.0003886 -0.0011449 -0.0088217" rpy="0. 0. ${0.9071883-3.14152/4}" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/caster_raceway_link_Part_2_Part_2.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/caster_raceway_link_Part_2_Part_2.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
       <collision>
         <origin xyz="-0.0003886 -0.0011449 -0.0088217" rpy="0. 0. ${0.9071883-3.14152/4}" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/caster_raceway_link_Part_2_Part_2.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/caster_raceway_link_Part_2_Part_2.obj" scale="1. 1. 1." />
         </geometry>
       </collision>
     </link>
@@ -59,13 +59,13 @@
       <visual>
         <origin xyz="-0.1135063 0.0373062 -0.0238125" rpy="-1.570796 -1e-07 1.570796" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/caster_wheel_link__in_Caster__in_Caster.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/caster_wheel_link__in_Caster__in_Caster.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
       <collision>
         <origin xyz="-0.1135063 0.0373062 -0.0238125" rpy="-1.570796 -1e-07 1.570796" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/caster_wheel_link__in_Caster__in_Caster.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/caster_wheel_link__in_Caster__in_Caster.obj" scale="1. 1. 1." />
         </geometry>
       </collision>
     </link>
@@ -78,13 +78,13 @@
       <visual>
         <origin xyz="9.06e-05 -0.0010859 -0.0010079" rpy="0. 0.8801533 -3.141593" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
       <collision>
         <origin xyz="9.06e-05 -0.0010859 -0.0010079" rpy="0. 0.8801533 -3.141593" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
         </geometry>
       </collision>
     </link>
@@ -97,13 +97,13 @@
       <visual>
         <origin xyz="-0.0007409 0.0085441 0.0012195" rpy="-3.141593 0. -7.32051e-08" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/right_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/right_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
       <collision>
         <origin xyz="-0.0007409 0.0085441 0.0012195" rpy="-3.141593 0. -7.32051e-08" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/right_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/right_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
         </geometry>
       </collision>
     </link>
@@ -116,7 +116,7 @@
       <visual>
         <origin xyz="0. 0. 0." rpy="0. 0. 1.570796" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/_FE2CBA3_2B86_49A6_86C6_46C335366A6A.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/_FE2CBA3_2B86_49A6_86C6_46C335366A6A.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
       <visual>
@@ -140,7 +140,7 @@
       <collision>
         <origin xyz="0. 0. 0." rpy="0. 0. 1.570796" />
         <geometry>
-          <mesh filename="file:///home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/src/igvc_test_description/meshes/_FE2CBA3_2B86_49A6_86C6_46C335366A6A.obj" scale="1. 1. 1." />
+          <mesh filename="package://igvc_test_description/meshes/_FE2CBA3_2B86_49A6_86C6_46C335366A6A.obj" scale="1. 1. 1." />
         </geometry>
       </collision>
     </link>
