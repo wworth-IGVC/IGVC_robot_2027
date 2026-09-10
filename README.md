@@ -1,15 +1,33 @@
-# IGVC_robot_2026
+# IGVC_robot_2027
 
-ROS 2 workspace for Gold Rush Robotics' 2026 IGVC robot. The repo contains robot description files, ros2_control hardware interfaces, bringup launch files, ZED/LiDAR/GPS integration, lane perception and navigation nodes, Isaac/Genesis simulation support, Docker runtime environments, and model training assets.
+ROS 2 workspace for Gold Rush Robotics' 2027 IGVC robot, forked from [Gold-Rush-Robotics/IGVC_Robot_2026](https://github.com/Gold-Rush-Robotics/IGVC_Robot_2026). The repo contains robot description files, ros2_control hardware interfaces, bringup launch files, ZED/LiDAR/GPS integration, lane perception and navigation nodes, Isaac/Genesis simulation support, Docker runtime environments, and model training assets.
+
+## What changed in this fork
+
+- **The Humble Docker image now builds.** It previously failed on every one of
+  the 22 workspace packages; it now builds all 22 clean. The root cause was a
+  `setuptools` version conflict that aborted the run before the other 21
+  packages were even attempted.
+- **The private ZED image has an open replacement.**
+  `docker/Dockerfile.igvc-zed-humble` builds an equivalent x86 image from public
+  sources, so you no longer need pull access to
+  `ghcr.io/gold-rush-robotics/dev-zed`.
+- **Windows is supported.** `scripts/setup-windows.ps1` checks and installs the
+  prerequisites, and `docker-compose.windows.yml` works on Docker Desktop.
+
+Every change, its root cause, and how it was verified is recorded in
+[docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md). New to Docker? Start with
+[docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx).
 
 ## Repository layout
 
 | Path | Purpose |
 | --- | --- |
 | `src/` | ROS 2 packages for bringup, robot description, hardware, perception, simulation, and vendored drivers/interfaces. |
-| `docker/` | Docker image definitions, including the Humble fused-drive runtime image. |
-| `docker-compose.yml` | GPU-enabled compose services for the Jazzy ZED/dev environment and Humble fused-drive runtime. |
-| `scripts/` | Workspace helper scripts for DDS setup and rosbag/data export utilities. |
+| `docker/` | Docker image definitions: the Humble fused-drive runtime image and the consolidated ZED + Humble image. |
+| `docker-compose.yml` | GPU-enabled compose services for the Jazzy ZED/dev environment, the Humble fused-drive runtime, and the consolidated ZED image. |
+| `docker-compose.windows.yml` | Same services adapted for Docker Desktop on Windows, which cannot use `/dev`, host networking, or `runtime: nvidia`. |
+| `scripts/` | Workspace helper scripts for DDS setup, rosbag/data export, and Windows prerequisite setup (`setup-windows.ps1`). |
 | `training/` | YOLOv12 training workflow, dataset, training requirements, seed weights, and training outputs. |
 | `IGVC_track_generator/` | Procedural IGVC-style course/track generation utilities. |
 | `isaac/` | Isaac Sim project assets and extensions. |
@@ -25,8 +43,16 @@ The workspace is used in two main ROS environments:
 
 | Target | Use case | Notes |
 | --- | --- | --- |
-| ROS 2 Jazzy on host | Local development, debug GUI, ZED dev container, and tools. | Host tools can see Docker topics when the shared DDS helper is sourced. |
-| ROS 2 Humble in Docker | Fused-drive runtime for compatibility with Humble-only dependencies. | Uses `ros:humble-ros-base` through `docker/Dockerfile.humble-fused-drive`. |
+| ROS 2 Humble in Docker | Fused-drive runtime, and the default for everyday work. | Uses `ros:humble-ros-base` through `docker/Dockerfile.humble-fused-drive`. 3.98 GB. |
+| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | `docker/Dockerfile.igvc-zed-humble` — CUDA 13, ZED SDK 5.3.0, ZED ROS 2 wrapper. 9.7 GB. |
+| ROS 2 Jazzy on host | Local debug GUI and host-side tools. | Host tools can see Docker topics when the shared DDS helper is sourced. |
+
+The Humble containers are the supported path. The rest of the org's robot-side
+images (`jetson-zed`, `jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros`) are
+already Humble, so `docker/Dockerfile.igvc-zed-humble` finishes that
+consolidation on the x86 side — it replaces a **private** ZED image that most
+team accounts cannot pull and that has no published build recipe.
+See [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md).
 
 ## ROS packages
 
@@ -138,10 +164,19 @@ The Humble image definition lives in `docker/Dockerfile.humble-fused-drive`. The
 To force a clean Humble workspace rebuild:
 
 ```bash
-docker compose down
-docker volume rm igvc_robot_2026_igvc_humble_build igvc_robot_2026_igvc_humble_install igvc_robot_2026_igvc_humble_log
+docker compose down -v
 docker compose up igvc_humble_fused_drive
 ```
+
+`down -v` removes the named volumes declared in `docker-compose.yml`, so it works
+regardless of what the checkout directory is called. Removing them by hand does
+not: Compose prefixes volume names with the directory, so in a fork checked out
+as `IGVC_robot_2027` they are `igvc_robot_2027_igvc_humble_*`, not
+`igvc_robot_2026_*`.
+
+Run `down -v` after rebuilding an image, too. Named volumes are seeded from the
+image only when they are first created, so a stale volume will quietly keep
+serving the old build output.
 
 ## Windows / Docker Desktop
 
@@ -214,9 +249,9 @@ cameras are high-bandwidth USB3 and USB/IP handles that poorly - do not plan
 around it without testing. Use the Jetson or a native Linux machine for camera
 work.
 
-Note: `docker compose` derives volume names from the directory name. In a fork
-checked out as `IGVC_robot_2027`, the volumes are `igvc_robot_2027_igvc_humble_*`,
-not the `igvc_robot_2026_*` names shown above.
+Note: `docker compose` derives volume names from the checkout directory, so in
+this fork they are prefixed `igvc_robot_2027_`. Use `docker compose down -v`
+rather than naming volumes by hand.
 
 ## Docker services
 
@@ -446,7 +481,8 @@ docker compose -f docker-compose.yml config >/tmp/igvc_compose_config.yml
 ## Notes for maintainers
 
 - Keep ROS launch/config files inside `src/igvc_test_bringup/` unless they belong to a specific package.
-- Keep Docker image definitions under `docker/` and wire them from `docker-compose.yml`.
+- Keep Docker image definitions under `docker/` and wire them from `docker-compose.yml`. If you add a service there, add it to `docker-compose.windows.yml` as well, or Windows machines silently lose it.
+- Pin `setuptools` after any change to the pip stack in a Dockerfile. `torch`/`ultralytics` pull setuptools past 80, which breaks `colcon-core` and every `ament_python` package. See `docs/DOCKER_CHANGES.md` §2.1.
 - Keep training-only data and scripts under `training/`.
 - Keep runtime model weights in `models/` or pass absolute paths with launch arguments.
 - Use the shared DDS profile whenever local tools and Docker containers need to participate in the same ROS graph.
