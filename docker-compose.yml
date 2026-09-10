@@ -89,9 +89,57 @@ services:
         # ros2 launch igvc_test_bringup igvc_fused_drive.launch.py hardware_interface:=IsaacDriveHardware use_sim_time:=true
         /bin/bash
 
+  # ---------------------------------------------------------------------------
+  # Consolidated x86 image: ZED SDK 5.3.0 + ZED ROS wrapper + ROS 2 Humble +
+  # Nav2 + ros2_control + PyTorch, built from docker/Dockerfile.igvc-zed-humble.
+  #
+  # This is the open replacement for igvc_dev_zed above, which depends on the
+  # private ghcr.io/gold-rush-robotics/dev-zed image (Jazzy, no public recipe).
+  # Building it here keeps the x86 side on Humble, matching the Jetson images.
+  # ---------------------------------------------------------------------------
+  igvc_zed_humble:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.igvc-zed-humble
+    image: igvc-zed-humble:latest
+    container_name: igvc_zed_humble
+    stdin_open: true
+    tty: true
+    privileged: true
+    network_mode: host
+    runtime: nvidia
+    gpus: all
+    working_dir: /root/ros2_ws
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      - igvc_zed_build:/root/ros2_ws/build
+      - igvc_zed_install:/root/ros2_ws/install
+      - igvc_zed_log:/root/ros2_ws/log
+      - /tmp:/tmp
+      - /dev:/dev
+      - /dev/shm:/dev/shm
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - FASTDDS_DEFAULT_PROFILES_FILE=/root/ros2_ws/src/IGVC_robot_2026/src/igvc_test_bringup/config/fastdds_udp.xml
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/root/ros2_ws/src/IGVC_robot_2026/src/igvc_test_bringup/config/fastdds_udp.xml
+      - ROS_DISTRO=humble
+      - YOLOPV2_WEIGHTS=/root/ros2_ws/src/IGVC_robot_2026/models/yolopv2.pt
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      - DEVENV_HOST_PATH=${DEVENV_HOST_PATH:-}
+    command: ["bash"]
+
 volumes:
   igvc_humble_build:
   igvc_humble_install:
   igvc_humble_log:
 
   # ros2 launch igvc_test_bringup isaac_nav_test.launch.py use_sim_time:=true
+  igvc_zed_build:
+  igvc_zed_install:
+  igvc_zed_log:

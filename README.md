@@ -145,21 +145,74 @@ docker compose up igvc_humble_fused_drive
 
 ## Windows / Docker Desktop
 
-`docker-compose.yml` targets native Linux and will not run as-is on Windows: it
-bind-mounts `/dev`, `/tmp`, and `/tmp/.X11-unix`, uses `network_mode: host`, and
-sets `runtime: nvidia`. None of those are valid on Docker Desktop (WSL2 backend).
+There are two ways to run this on Windows. If you have WSL2 with a Linux
+distribution installed, prefer the first - it is closer to how the robot
+actually runs and it gives you working GUI tools.
 
-Use the Windows-specific file instead, passed explicitly with `-f`:
+### Option A - from inside WSL2 (recommended)
+
+Open your WSL distribution (`wsl -d <YourDistro>`), `cd` to the repo, and use
+the normal Linux compose file:
 
 ```bash
+docker compose build igvc_humble_fused_drive
+docker compose run --rm igvc_humble_fused_drive
+```
+
+Inside WSL2, `/dev`, `/tmp`, and `/tmp/.X11-unix` are real Linux paths and
+`network_mode: host` applies to the WSL2 VM, so `docker-compose.yml` works
+essentially as written. On Windows 11, WSLg supplies an X server, which means
+`rviz2` and other GUI tools actually display - they cannot from PowerShell.
+
+Docker Desktop shares its daemon with WSL when the distro is enabled under
+Settings > Resources > WSL Integration, so you do not install Docker twice.
+
+### Option B - from PowerShell
+
+If you do not have WSL2 set up, use the Windows-specific compose file, passed
+explicitly with `-f`:
+
+```powershell
 docker compose -f docker-compose.windows.yml build
 docker compose -f docker-compose.windows.yml run --rm igvc_humble_fused_drive
 ```
 
-That drops the host-Linux-only settings and keeps GPU access via `gpus: all`.
-It is intended for building and inspecting the workspace on a dev laptop.
-Talking to real hardware (ODrive over CAN, LiDAR, GPS) requires `/dev`
-passthrough, so use `docker-compose.yml` on native Linux or the Jetson.
+This drops the host-Linux-only settings (`/dev`, `/tmp/.X11-unix`,
+`network_mode: host`, `runtime: nvidia`) that Docker Desktop cannot honour, and
+keeps GPU access through `gpus: all`. GUI tools will not display in this mode.
+
+### Automated setup
+
+`scripts/setup-windows.ps1` checks every prerequisite - Windows build, WSL2,
+Docker, GPU passthrough, disk space, submodules - then downloads the YOLOPv2
+weights and builds the image:
+
+```powershell
+.\scripts\setup-windows.ps1            # check, then build
+.\scripts\setup-windows.ps1 -CheckOnly # diagnose only, change nothing
+.\scripts\setup-windows.ps1 -WithZed   # also build the large ZED image
+```
+
+Windows 10 users need 22H2 (build 19045) or newer; current Docker Desktop
+refuses to install on earlier builds. The script reports this.
+
+### GPU notes
+
+RTX 50-series (Blackwell, compute capability 12.0) requires CUDA 12.8 or newer.
+The images here use CUDA 13, and the bundled PyTorch (2.14 + cu130) ships
+`sm_120` kernels, so 50-series laptops work without recompiling anything.
+
+Install the NVIDIA driver on **Windows** only. Do not install Linux NVIDIA
+drivers inside WSL - that breaks the passthrough.
+
+### ZED cameras on Windows
+
+A ZED camera cannot be reached from Docker Desktop, and `/dev` inside WSL2 has
+no USB devices by default, so the camera nodes will not run on a Windows laptop.
+`usbipd-win` can attach USB devices into WSL2 and is worth trying, but ZED
+cameras are high-bandwidth USB3 and USB/IP handles that poorly - do not plan
+around it without testing. Use the Jetson or a native Linux machine for camera
+work.
 
 Note: `docker compose` derives volume names from the directory name. In a fork
 checked out as `IGVC_robot_2027`, the volumes are `igvc_robot_2027_igvc_humble_*`,
@@ -170,9 +223,29 @@ not the `igvc_robot_2026_*` names shown above.
 | Service | Image | Purpose |
 | --- | --- | --- |
 | `igvc_dev_zed` | `ghcr.io/gold-rush-robotics/dev-zed:5.1.0-13.0.0` | Jazzy/ZED development container. Builds `igvc_test_bringup` and launches `simulation_launch.launch.yaml`. |
-| `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. |
+| `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default** — 3.98 GB. |
+| `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus ZED SDK 5.3.0 and the ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 9.7 GB. |
 
-Both services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
+All three services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
+
+### Which one should I use?
+
+Use **`igvc_humble_fused_drive`** unless you are working on ZED camera code. It
+is a quarter the size, and all 22 workspace packages build in it without the ZED
+SDK.
+
+`igvc_zed_humble` exists to replace `igvc_dev_zed`, which pulls a **private**
+image (`ghcr.io/gold-rush-robotics/dev-zed`) that most team accounts cannot
+access and for which no build recipe is published anywhere. The new image is
+built from a Dockerfile in this repo, so anyone can build it:
+
+```bash
+docker compose build igvc_zed_humble     # ~18 minutes, 9.7 GB
+```
+
+On Windows, note that Docker Desktop cannot pass USB devices through, so a ZED
+camera is not usable from a Windows container regardless of image. See
+[docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) for the full rationale.
 
 ## Shared DDS profile
 

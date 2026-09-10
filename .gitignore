@@ -16,3 +16,6 @@ runs/
 
 __pycache__/
 *.pyc
+
+# Microsoft Office lock/owner files (created while a .docx is open in Word)
+~$*

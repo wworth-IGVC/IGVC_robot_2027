@@ -60,7 +60,41 @@ services:
         echo "  colcon build --symlink-install --base-paths /root/ros2_ws/src/IGVC_robot_2026/src"
         exec /bin/bash
 
+  # Consolidated image: ZED SDK + ZED ROS wrapper + Humble + Nav2 + torch.
+  # Replaces the private ghcr.io/gold-rush-robotics/dev-zed on x86.
+  # A ZED camera cannot be reached from Docker Desktop (no /dev passthrough),
+  # so on Windows this is for building and inspecting, not live camera work.
+  igvc_zed_humble:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.igvc-zed-humble
+    image: igvc-zed-humble:latest
+    container_name: igvc_zed_humble
+    stdin_open: true
+    tty: true
+    gpus: all
+    working_dir: /root/ros2_ws
+    shm_size: "2gb"
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      - igvc_zed_build:/root/ros2_ws/build
+      - igvc_zed_install:/root/ros2_ws/install
+      - igvc_zed_log:/root/ros2_ws/log
+    environment:
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DISTRO=humble
+      - YOLOPV2_WEIGHTS=/root/ros2_ws/src/IGVC_robot_2026/models/yolopv2.pt
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      - DEVENV_HOST_PATH=${DEVENV_HOST_PATH:-}
+    command: ["bash"]
+
 volumes:
   igvc_humble_build:
   igvc_humble_install:
   igvc_humble_log:
+  igvc_zed_build:
+  igvc_zed_install:
+  igvc_zed_log:
