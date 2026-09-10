@@ -129,6 +129,15 @@ services:
     network_mode: host
     runtime: nvidia
     gpus: all
+    # ZED SDK simulation input uses IPC when the streaming source is on the
+    # same machine (sim_address 127.0.0.1 in common_stereo_sim.yaml), which
+    # needs the container to share the host IPC namespace. The 2026 team hit
+    # this and added the same two lines to igvc_dev_zed on the competition
+    # branch test_comp_changes_isaac_smi; docker-compose.jetson.yml already
+    # carries them. Linux only: on Docker Desktop the "host" is the WSL2 VM,
+    # not Windows, so this cannot reach an Isaac Sim running on Windows.
+    ipc: host
+    pid: host
     working_dir: /root/ros2_ws
     volumes:
       - .:/root/ros2_ws/src/IGVC_robot_2026
@@ -185,6 +194,15 @@ services:
     network_mode: host
     runtime: nvidia
     gpus: all
+    # ZED SDK simulation input uses IPC when the streaming source is on the
+    # same machine (sim_address 127.0.0.1 in common_stereo_sim.yaml), which
+    # needs the container to share the host IPC namespace. The 2026 team hit
+    # this and added the same two lines to igvc_dev_zed on the competition
+    # branch test_comp_changes_isaac_smi; docker-compose.jetson.yml already
+    # carries them. Linux only: on Docker Desktop the "host" is the WSL2 VM,
+    # not Windows, so this cannot reach an Isaac Sim running on Windows.
+    ipc: host
+    pid: host
     working_dir: /root/ros2_ws
     volumes:
       - .:/root/ros2_ws/src/IGVC_robot_2026

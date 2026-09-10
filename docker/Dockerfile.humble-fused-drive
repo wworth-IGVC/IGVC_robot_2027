@@ -37,6 +37,26 @@ RUN sed -i 's/^# \(.*universe\)/\1/' /etc/apt/sources.list \
         ros-humble-sensor-msgs-py \
         # debug_gui: <exec_depend>python3-pyqt5</exec_depend>
         python3-pyqt5 \
+        # --- added: required by the 2026 competition branch ---
+        # The competition work lives on IGVC_robot_2026 branch
+        # test_comp_changes_isaac_smi and was never merged to main, so these are
+        # not needed by the current checkout. They are installed anyway so the
+        # image can build that branch without a rebuild. See
+        # docs/DOCKER_CHANGES.md 9.
+        #
+        # igvc_pointcloud_tools (new ament_cmake package on that branch):
+        #   CMakeLists: find_package(PCL REQUIRED COMPONENTS common filters
+        #   registration); sources include pcl/registration/icp.h,
+        #   pcl/filters/voxel_grid.h, pcl/common/transforms.h.
+        #   rosdep maps its <depend>libpcl-all-dev</depend> to libpcl-dev here.
+        #   Verified absent from this image: no PCLConfig.cmake anywhere, so
+        #   find_package(PCL REQUIRED) fails without this. Costs 136 packages,
+        #   because libpcl-dev hard-depends on libvtk9-dev and Qt5 dev tools.
+        libpcl-dev \
+        #   pointcloud_merger_node.cpp registers a composable node via
+        #   rclcpp_components/register_node_macro.hpp. Already provided by
+        #   ros:humble-ros-base; listed because the package declares it.
+        ros-humble-rclcpp-components \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------

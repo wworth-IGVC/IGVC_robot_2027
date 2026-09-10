@@ -198,6 +198,11 @@ RUN apt-get update \
         ros-${ROS2_DIST}-sensor-msgs-py \
         libasio-dev \
         python3-pyqt5 \
+        # Required by igvc_pointcloud_tools, which exists only on the 2026
+        # competition branch test_comp_changes_isaac_smi. Kept in step with
+        # Dockerfile.humble-fused-drive; see docs/DOCKER_CHANGES.md 9.
+        libpcl-dev \
+        ros-${ROS2_DIST}-rclcpp-components \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------

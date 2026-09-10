@@ -900,3 +900,120 @@ pass.
 6. **ZED camera on Windows.** `usbipd-win` can attach USB devices into WSL2, but
    ZED cameras are high-bandwidth USB3 and USB/IP handles that poorly. Test
    before relying on it.
+
+---
+
+## 9. The 2026 competition branch, and what the images were missing for it
+
+Found on 2026-09-10 by auditing the organisation's GitHub repositories rather
+than the local checkout. It changes what these images have to be able to build.
+
+### 9.1 This fork is based on `main`, and `main` is not the competition code
+
+`Gold-Rush-Robotics/IGVC_robot_2026` has **15 branches**. This fork descends from
+`main`, last touched 2026-05-31. The branch named
+**`test_comp_changes_isaac_smi`** ("test competition changes, Isaac Sim") is
+**15 commits ahead of `main` and 1 behind**, spanning 23 to 29 May 2026, the week
+before the June competition. It was **never merged**.
+
+61 files differ. The ones that matter to these images:
+
+| Change | Effect on the image |
+| --- | --- |
+| `src/igvc_pointcloud_tools`, a new `ament_cmake` package | **needs PCL, which was absent** |
+| `anchor3dlane_node.py`, `anchor3dlane_infer.py`, `ufldv2_infer.py` | none at build time; their deps install via opt-in `scripts/setup_*.sh` |
+| `lane_segmentation.py` rewritten, +1923/-256 | none |
+| `mission_planner.py`, three new costmap nodes | none |
+| `localization.py` deleted, entry point removed | none |
+| `<exec_depend>yolo_msgs</exec_depend>` added | already satisfied by the `yolo_ros` submodule |
+| `isaac/exts` submodule repointed | see 9.3 |
+| `docker-compose.yml` gains `ipc: host` / `pid: host` | see 9.4 |
+
+### 9.2 PCL was the only real gap, and it is now fixed
+
+`igvc_pointcloud_tools/CMakeLists.txt`:
+
+```cmake
+find_package(PCL REQUIRED COMPONENTS common filters registration)
+```
+
+`pointcloud_merger_node.cpp` includes `pcl/registration/icp.h`,
+`pcl/filters/voxel_grid.h`, `pcl/common/transforms.h` and `pcl/point_types.h`.
+It does a one-shot ICP/FPFH geometric calibration of the partially overlapping
+ZED point clouds.
+
+Verified absent from `igvc-humble-fused-drive:latest`: no `PCLConfig.cmake`
+anywhere on the image, so `find_package(PCL REQUIRED)` fails outright.
+
+Added `libpcl-dev` to **both** `docker/Dockerfile.humble-fused-drive` and
+`docker/Dockerfile.igvc-zed-humble`. The package's own manifest declares
+`<depend>libpcl-all-dev</depend>`, which rosdep maps to `libpcl-dev` on Jammy.
+
+**Cost: 136 additional packages**, because `libpcl-dev` hard-depends on
+`libvtk9-dev`, which pulls Qt5 development tools. That is unavoidable if the
+headers are wanted; Ubuntu does not ship a headers-only split for the three PCL
+components this package uses.
+
+`ros-humble-rclcpp-components` is listed alongside it because the package
+registers a composable node, but it was **already present** in
+`ros:humble-ros-base` (16.0.19). Listing it is documentation, not a fix.
+
+Nothing else was needed. The Anchor3DLane and UFLDv2 nodes pull `mmcv-full` and
+friends through `scripts/setup_anchor3dlane.sh` and `scripts/setup_ufldv2.sh` at
+runtime, deliberately, and baking those into the image would add gigabytes for
+code that is opt-in.
+
+### 9.3 The `isaac/exts` submodule points at the wrong remote on `main`
+
+```text
+main:                         375eddd1 -> stereolabs/zed-isaac-sim (upstream)
+test_comp_changes_isaac_smi:  72ff9c21 -> Gold-Rush-Robotics/zed-isaac-sim (fork)
+```
+
+Unlike `zed-ros2-wrapper-2025`, which is an empty mirror (§4.5.2), the
+organisation's `zed-isaac-sim` fork carries **real changes**: 2 commits ahead, 4
+files modified. The substantive one is `72ff9c21`, **"added urdf support"**,
+2026-03-02. It rewrites camera and IMU prim path resolution so the ZED extension
+can find cameras inside a URDF-imported hierarchy:
+
+```python
+# upstream
+left_path = "/base_link/" + base_camera_model + "/CameraLeft"
+
+# org fork
+prefix_match = re.match(r'^(.*?)(zed_camera_.+?)_camera_link$', prim_name)
+left_path = f"/{prefix}{camera_base}_camera_center/{prefix}{camera_base}_left_camera_frame/CameraLeft"
+```
+
+That prefix pattern is exactly this repository's URDF: `left_`, `front_` and
+`right_` on `zed_camera_x`. **The upstream extension cannot locate the cameras on
+a robot spawned from our URDF.** The same commit pins the OmniGraph ABI
+`TARGET_VERSION` from `(2,184,5)` down to `(2,184,2)`.
+
+This is not an image change and has **not** been altered here, because
+repointing a submodule is a decision about which baseline the 2027 fork tracks,
+and that belongs to the team lead. It is recorded so nobody spends a day
+debugging why the simulated cameras never appear.
+
+### 9.4 `ipc: host` and `pid: host` for the ZED simulation path
+
+The competition branch added both to `igvc_dev_zed` in `docker-compose.yml`.
+`docker-compose.jetson.yml` already carried them.
+
+The reason is the ZED SDK's simulation input. `common_stereo_sim.yaml` sets
+`sim_address: '127.0.0.1'`, and the Stereolabs Isaac extension streams over
+**IPC** rather than RTSP when source and consumer are on the same machine. A
+container in its own IPC namespace cannot attach to that.
+
+Added to `igvc_zed_humble` and `igvc_zed_humble_upstream` in
+`docker-compose.yml`. **Not** added to `docker-compose.windows.yml`: under Docker
+Desktop the "host" is the WSL2 VM, not Windows, so sharing the namespace cannot
+reach an Isaac Sim running on the Windows side. That limitation is independent of
+these two flags.
+
+### 9.5 What this does not resolve
+
+Which branch the 2027 fork should track is an open question and outranks
+everything else in the simulation work. See `RESEARCH_QUESTIONS_AND_UNRESOLVED.md`
+section 3.0 and RQ-25. The images are now able to build either baseline, which is
+the part that could be settled without the team lead.
