@@ -62,17 +62,38 @@
       <wheel_radius>${wheel_radius}</wheel_radius>
       <max_linear_acceleration>2.0</max_linear_acceleration>
       <topic>/cmd_vel</topic>
-      <odom_topic>/odom</odom_topic>
-      <tf_topic>/tf</tf_topic>
+      <!-- NOT /odom and NOT /tf, on purpose.
+
+           DiffDrive starts its odometry at identity, so this frame's axes are
+           the robot's heading AT SPAWN. On the IGVC course that is 134.87 deg
+           off the world axes, and the 2026 stack assumes the opposite:
+           track_ground_truth_node builds the ground-truth grid world-aligned
+           and gt_nav_bridge_node reads the odometry pose as a grid-frame pose
+           with no TF lookup, so nothing in the TF tree can correct it.
+
+           igvc_test_bringup/gazebo_odom_shim subscribes to these,
+           rotates by the spawn yaw, and publishes /odom, the ZED contract
+           odometry topic and the odom->base_link TF. Naming these
+           /sim/*_body_frame means nobody can wire the uncorrected ones up by
+           accident. See docs/GAZEBO_SETUP.md 9.3. -->
+      <odom_topic>/sim/odom_body_frame</odom_topic>
+      <tf_topic>/sim/tf_body_frame</tf_topic>
       <frame_id>odom</frame_id>
       <child_frame_id>base_link</child_frame_id>
       <odom_publish_frequency>30</odom_publish_frequency>
     </plugin>
 
     <!-- Publishes joint positions so robot_state_publisher can animate the
-         wheels. Bridged to /joint_states in the launch file. -->
+         wheels, and feeds both /joint_states and the contract's
+         /isaac_joint_state.
+
+         <topic> is not cosmetic. Without it the plugin falls back to the
+         scoped default /world/<world>/model/<model>/joint_state, which bakes
+         the world name and the spawned entity name into the bridge config and
+         breaks silently the moment either changes. -->
     <plugin filename="gz-sim-joint-state-publisher-system"
             name="gz::sim::systems::JointStatePublisher">
+      <topic>/joint_states</topic>
       <joint_name>left_wheel_joint</joint_name>
       <joint_name>right_wheel_joint</joint_name>
       <joint_name>caster_raceway_joint</joint_name>
@@ -142,12 +163,31 @@
        Attached to the *_left_camera_frame, not the optical frame: Gazebo
        cameras look down +X, which is what that frame gives. The optical frame
        stays the correct frame_id for downstream perception, and
-       robot_state_publisher still supplies it from the URDF. -->
+       robot_state_publisher still supplies it from the URDF.
+
+       THE OPTICAL FRAME IS SPELLED *_left_camera_frame_optical, with the
+       words in that order. zed_macro.urdf.xacro line 236 creates
+       "${name}_left_camera_frame_optical" and that is the only optical frame
+       robot_state_publisher ever broadcasts. This file previously stamped
+       "_left_camera_optical_frame", the Stereolabs upstream spelling, which
+       names a frame that DOES NOT EXIST in our TF tree.
+
+       That defect is invisible to every obvious check. The images publish,
+       the topics carry data, the frame_id string looks right, and
+       `ros2 topic echo` shows exactly what you expect. What fails is the TF
+       lookup in igvc_lane_detection's projection_utils, so lane pixels never
+       become ground-plane points - lane detection that appears to work and
+       silently produces nothing. lane_seg_zed2i_test.launch.py already uses
+       the *_frame_optical spelling, so the rest of the 2026 code agrees with
+       the URDF and this file was the outlier.
+
+       bringup_smoke_test.sh now resolves the camera's stamped frame_id
+       through TF for exactly this reason. Verified 2026-09-15. -->
   <xacro:macro name="sim_rgbd" params="prefix">
     <gazebo reference="${prefix}_zed_camera_x_left_camera_frame">
       <sensor name="${prefix}_zed_rgbd" type="rgbd_camera">
         <topic>/${prefix}_zed</topic>
-        <gz_frame_id>${prefix}_zed_camera_x_left_camera_optical_frame</gz_frame_id>
+        <gz_frame_id>${prefix}_zed_camera_x_left_camera_frame_optical</gz_frame_id>
         <update_rate>$(arg sim_camera_hz)</update_rate>
         <always_on>1</always_on>
         <camera>

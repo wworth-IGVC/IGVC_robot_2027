@@ -28,7 +28,9 @@ GPU, with nothing ROS-version-specific in them.
 | Three cameras at 30 Hz | **No.** At 1280x720/30 Hz you get ~7 Hz each |
 | Three cameras, workable | **Yes at 640x360/15 Hz**: ~11 Hz each, physics at real time |
 | A robot that drives | **Yes.** IGVC course world plus a spawn/bridge launch file; 7 of 7 topics and the drive test pass. See section 8 |
-| Downstream nodes | **No.** Topic names are raw Gazebo, not the section 3.7 contract. That is RQ-03 and it is the next job |
+| Downstream nodes | **Yes.** The bridge publishes the section 3.7 contract names; the real 2026 ground-truth, navigator and Nav2 stack run against it. Section 9 |
+| A robot that drives ITSELF | **Yes.** 122.9 m of autonomous driving, max 1.79 m off the lane centreline, no `/cmd_vel` from the test. Section 10 |
+| Perception | **No, and do not imply otherwise.** Lanes and barrels come from `track_points.json`; nothing plans on the camera or lidar. Section 10.3 |
 
 Run it **from a WSL2 shell, not PowerShell** (see section 3A):
 
@@ -741,6 +743,12 @@ Three traps met while writing it, all of which fail confusingly:
 RTX 5070 Ti Laptop, 2026-09-15. Run twice: headless, and again from a WSL2
 shell with `RVIZ=1` so the Gazebo and RViz windows are exercised too.
 
+**Superseded by the far stronger version in sections 9 and 10.** The current
+test checks the section 3.7 contract topics, resolves camera frame ids through
+TF, and compares odometry against `gz model -p` ground truth in both heading
+and distance. Latest run: **18 of 18, 0 failures**, heading disagreement
+0.13 degrees, distance ratio 0.9988.
+
 ```text
 /clock /odom /scan /imu /joint_states /tf /front_zed/image   7 of 7 PASS
 rviz2 node running                                           PASS
@@ -774,24 +782,53 @@ unsafe direction. **The second run does not support that**: it came in below
 4.8 m, which is what spin-up alone would produce.
 
 So the likeliest explanation is jitter in when `ros2 topic echo --once`
-connects and returns, not a missing timeout. **Unresolved either way.** The
+connects and returns, not a missing timeout. **Unresolved either way.**
+
+**A third attempt, 2026-09-15, also failed, and failed in a way worth
+recording.** A rebuilt test drove 0.6 m/s for 8 s then watched for 5 s with no
+commands. The robot kept moving, reproducibly, across two runs, and the result
+was written up as "DiffDrive applies no `/cmd_vel` timeout". It was wrong. The
+robot had driven off the edge of the 39.54 x 33.62 m ground slab - only about
+9.5 m away on the spawn heading - and was falling, wheels spinning freely,
+odometry counting up exactly as though it were driving. `world_z` read -15 m by
+the third sample and -94,612 m by the end. **Free-spinning wheels and a held
+command produce identical odometry**, so no odometry-only test can separate
+them. `bringup_smoke_test.sh` now drives 0.4 m/s for 3 s, which keeps the robot
+on the slab, and refuses to report a timeout verdict unless both samples were
+taken with the wheels on the ground.
+
+**A fourth measurement, clean this time, points the same way - and the question
+is still not being called settled.** With the robot on the slab throughout,
+nothing else publishing `/cmd_vel` (`nav2:=false`), and one simulator running,
+it moved **3.767 m after the command burst ended**. That is far more than a
+deceleration tail. It is NOT 4 s of travel though: each `ros2 topic echo
+--once` sample costs seconds, so the real window was closer to 9 s, which at
+the commanded 0.4 m/s is about what was measured. So the evidence says
+DiffDrive holds the last command, and the honest position is that this has
+been asserted and withdrawn twice already. A test that timestamps the last
+command against the last odometry change, rather than inferring duration from
+echo latency, would settle it. Outstanding item 17.
+
+The
 smoke test was never built to measure this and its timing is too loose to
 settle it. If it matters - and for a competition robot a command-timeout
 difference does - it needs a purpose-built test that timestamps the last
 command and the last odometry change. Recorded as outstanding item 17.
 
-### 8.7 What this still does not give you
+### 8.7 What this did not give you - SUPERSEDED by sections 9 and 10
 
-**The topic names are raw Gazebo, not the interface contract.** Section 3.7 of
-`RESEARCH_QUESTIONS_AND_UNRESOLVED.md` specifies
-`/{cam}/zed_node/rgb/color/rect/image`,
-`/front_zed_camera_x/zed_node/odom` and `/isaac_joint_state`. This launch file
-publishes `/front_zed/image`, `/odom` and `/joint_states`.
+**Everything in this subsection was true when written and is no longer.** It is
+kept because the rest of section 8 describes the state it belonged to.
 
-**So nothing downstream runs yet.** Not lane detection, not Nav2, not the
-navigator. Closing that gap is **RQ-03**, it is P0, and it is the next piece of
-work. `isaac_nav_test.launch.py` is the template for what the Gazebo equivalent
-should look like once the names line up.
+~~The topic names are raw Gazebo, not the interface contract, so nothing
+downstream runs - not lane detection, not Nav2, not the navigator.~~
+**Closed 2026-09-15.** The bridge publishes the section 3.7 names (section 9)
+and `gazebo_nav_test.launch.py` runs the real 2026 navigation stack against
+them, with the robot driving the course by itself (section 10).
+
+Two parts of it turned out not to be renames at all: Gazebo's odometry frame is
+rotated by the spawn yaw (9.3), and the camera frame id was a one-word typo
+naming a frame that does not exist in the TF tree (9.4).
 
 Also still open: `sim_cameras:=all` has not been run against this world, so the
 three-camera budget from section 4 is measured on a bare test scene rather than
@@ -800,3 +837,303 @@ which matters because the camera budget forces that resolution.
 
 ---
 
+
+## 9. RQ-03: the interface contract, and the two things that were not renames
+
+**Status: closed, 2026-09-15.** The simulation now publishes the topic names in
+section 3.7 of `RESEARCH_QUESTIONS_AND_UNRESOLVED.md`, so `igvc_lane_detection`,
+Nav2 and the navigator run against Gazebo unmodified. Section 8.7 said nothing
+downstream ran; that is no longer true, and section 10 is the proof.
+
+### 9.1 One YAML file is the contract
+
+`src/igvc_test_bringup/config/gazebo_bridge.yaml` drives a single
+`ros_gz_bridge` `parameter_bridge`. The YAML form matters and is not a style
+choice: `parameter_bridge`'s `topic@ros_type[gz_type` argument syntax forces
+the ROS name to equal the Gazebo name, so renaming would have to happen in a
+launch remapping, invisible from the config. The YAML form takes
+`ros_topic_name` and `gz_topic_name` separately, so the file **is** the
+contract table rather than a description of one.
+
+It also maps one Gazebo topic to two ROS names, verified 2026-09-15, which is
+how `/joint_states` and `/isaac_joint_state` come from the same publisher at no
+extra cost.
+
+| Gazebo | ROS, the contract name |
+| --- | --- |
+| `/front_zed/image` | `/front_zed_camera_x/zed_node/rgb/color/rect/image` |
+| `/front_zed/camera_info` | `/front_zed_camera_x/zed_node/rgb/color/rect/camera_info` |
+| `/front_zed/depth_image` | `/front_zed_camera_x/zed_node/depth/depth_registered` |
+| `/front_zed/points` | `/front_zed_camera_x/zed_node/point_cloud/cloud_registered` |
+| `/sim/odom_body_frame` | `/odom` **and** `/front_zed_camera_x/zed_node/odom` |
+| `/joint_states` | `/joint_states` **and** `/isaac_joint_state` |
+| `/scan`, `/imu`, `/clock` | unchanged, already contract names |
+
+All three cameras are listed unconditionally, so under the default
+`sim_cameras:=front` the left and right topics are **advertised but never
+publish**. Judge a camera by whether messages arrive, never by whether
+`ros2 topic list` shows it.
+
+This is the approach research pass 2 recommended for RQ-03, reached more
+cheaply than it expected: pass 2 called for a `zed_sim_bridge` node
+republishing each topic, and no node is needed, because the bridge can simply
+be told the other name. That avoids a second serialisation of 640x360 RGB and
+32FC1 depth at 15 Hz per camera.
+
+### 9.2 What this is NOT
+
+Stereolabs have publicly declined to support Gazebo and have no timeline. This
+reproduces the **geometric** interface: the same topic names, message types,
+frame ids and intrinsics. ZED NEURAL depth, visual odometry, confidence maps
+and object detection have no Gazebo equivalent and are not approximated. Gazebo
+depth is an exact ray-cast range with `+inf` past the far clip; ZED depth is a
+neural estimate with its own failure modes on the texture-poor surfaces that
+make up most of an IGVC course. **Do not report this as ZED parity.** Lane
+perception work belongs on recorded SVO files and `yolopv2_bag/`.
+
+### 9.3 Not a rename: Gazebo's odom frame is rotated by the spawn yaw
+
+Gazebo's DiffDrive starts its odometry at identity, so the odom frame's axes
+follow the robot's heading **at spawn**. The 2026 stack assumes the opposite.
+`track_ground_truth_node._track_to_map` says so outright:
+
+```text
+# Odom/map frame is world-axis aligned with the spawn point at (0, 0).
+# Only translate by -origin_offset; Isaac Sim's odom inherits world axes
+# from the spawn pose, so the map must NOT be rotated by start yaw.
+```
+
+Measured on the IGVC course, 2026-09-15: spawned at world
+`(-11.8817, 0.4511)` yaw `134.87 deg`, `/odom` read `(0.0000, 0.0000)` yaw
+`0.00 deg` at the same instant. The two frames are 135 degrees apart.
+
+Nothing in the TF tree can fix this, because `gt_nav_bridge_node` reads the
+odometry pose **as a pose in the ground-truth grid's frame with no TF lookup at
+all**. Fed raw Gazebo odometry it crops the local costmap from a point rotated
+135 degrees away from the robot, every cycle, silently, with every topic green.
+
+So `gazebo_odom_shim` rotates the odometry by the spawn yaw and owns
+`odom -> base_link`. Gazebo's own odometry and TF outputs are renamed
+`/sim/odom_body_frame` and `/sim/tf_body_frame` in the xacro so they cannot be
+wired up by accident.
+
+**Gazebo is not wrong here; Isaac was unusual.** Wheel odometry on the real
+robot also starts at identity wherever the robot booted, because there is no
+world frame to inherit axes from - that is what `map -> odom` absorbs. Isaac
+published a ground-truth pose that happened to carry world axes and the stack
+was written against the convenience.
+
+The check that catches it is in `bringup_smoke_test.sh`: drive, stop, and
+compare the odometry displacement against `gz model -p` ground truth. Three
+runs, 2026-09-15:
+
+```text
+heading disagreement  0.13 deg      (a wrong odom frame shows up here)
+distance ratio        0.9975, 0.9972, 0.9973
+```
+
+The ratio is a free second result: it corroborates `wheel_radius: 0.1016`. The
+`0.2032` in `controllers.yaml` would have produced a ratio near 2.0. That is
+evidence for team-lead question 2, from the simulator rather than from a tape
+measure.
+
+### 9.4 Not a rename: a one-word frame id typo that fails silently
+
+`zed_macro.urdf.xacro:236` creates `${name}_left_camera_frame_optical`.
+`gazebo_sim.urdf.xacro` stamped `${prefix}_zed_camera_x_left_camera_optical_frame`
+- the Stereolabs upstream spelling, words transposed. **Every simulated camera
+image carried a frame id naming a frame that does not exist in our TF tree.**
+
+Nothing obvious catches it. The images publish, the topics carry data, the
+frame id string looks exactly right in `ros2 topic echo`, and every name check
+passes. `lane_detection.py:296-305` then falls back to **pinhole-only
+projection** when the TF lookup fails, still publishes a costmap, and RViz
+still draws plausible lane lines that are wrong by however far the camera sits
+from `base_link`. The only tell is a warning throttled to once every 2 seconds.
+
+This was found by a parallel audit, `docs/RQ03_AUDIT.md` item 2, and it is the
+single most valuable thing that audit produced. It predates RQ-03 and would
+have survived it.
+
+`bringup_smoke_test.sh` now takes the frame id off the image and resolves it
+through `tf2_echo base_link <frame>`. Checking the string against the xacro is
+not a test; resolving it is.
+
+---
+
+## 10. The robot drives the course by itself
+
+**Status: working, 2026-09-15.** `gazebo_nav_test.launch.py` is the Gazebo twin
+of `isaac_nav_test.launch.py`, and unlike that file it is not commented out.
+Start it, touch nothing, and the robot navigates the IGVC course.
+
+```bash
+# from a WSL2 shell, NOT PowerShell
+docker exec -it igvc_gazebo bash scripts/gazebo/start_sim.sh   # NAV=1 for nav
+# or the check that grades it
+docker exec -it igvc_gazebo bash scripts/gazebo/autonomy_check.sh
+```
+
+### 10.1 What is actually in the loop
+
+```text
+track_points.json
+   -> track_ground_truth_node    /lane_ground_truth   (reads JSON, no sim input)
+   -> gt_nav_bridge_node         /lane_map, /lane_costmap  (+ obstacles stamped)
+   -> igvc_navigator             extracts a lane path, calls FollowPath
+   -> Nav2 controller_server     RegulatedPurePursuit
+   -> velocity_smoother          acceleration limits
+   -> collision_monitor          stop/slow polygons
+   -> /cmd_vel                   Gazebo DiffDrive
+```
+
+Every node above is the 2026 code, unmodified, with the real robot's
+`nav2_lane_follow_config.yaml`. The only Gazebo-specific file is
+`config/gazebo_nav_test_nav2_overrides.yaml`, and it changes exactly two
+things: which costmap layers load, and that the last hop publishes `/cmd_vel`
+instead of `/diff_drive_controller/cmd_vel_unstamped`.
+
+### 10.2 Measured
+
+`scripts/gazebo/autonomy_check.sh`, RTX 5070 Ti Laptop, 2026-09-15, one
+simulator, GUI and RViz both up, **no `/cmd_vel` published by the test at any
+point**:
+
+```text
+samples              : 289          over 143.3 s of simulation time
+distance travelled   : 122.9 m      entirely under its own control
+furthest two points  : 29.9 m apart
+centreline deviation : mean 0.72 m, max 1.79 m
+final height         : 0.231 m, 0.000 off the spawn height
+navigator            : aborts=4, grid=yes, path_reason=centreline has 35 points
+
+MOVED       PASS      PROGRESS    PASS
+IN LANE     PASS      ON THE SLAB PASS
+```
+
+The lane is about 3 m wide, so a mean deviation of 0.72 m and a worst case of
+1.79 m is inside the lines but not hugging the centre - which is expected,
+because the robot is steering around barrels rather than tracking the centre.
+
+**Four FollowPath aborts in 143 s is the rough edge.** The navigator recovers
+each time by replanning, so the run completes, but `controller_server` logs
+`Failed to make progress` and the robot pauses before carrying on. That is
+worth tuning before anyone films this for the design report, and it is the
+first thing to look at alongside the corridor arithmetic in 10.3.
+
+### 10.3 It is NOT detecting the barrels, and that distinction matters
+
+The robot drives around the barrels, and it is tempting to call that obstacle
+detection. It is not. `obstacle_layer` is **disabled** in both costmaps;
+`gt_nav_bridge_node` reads the barrel positions out of `track_points.json` and
+stamps them into the grid as lethal cells, inflated by
+`obstacle_inflate_radius_m`. The camera, the depth image, the point cloud and
+the lidar are all publishing, and **nothing is planning on any of them.**
+
+This is deliberate and it is what a ground-truth nav test is for: it proves the
+navigation, control and simulation loop works, so that when perception is added
+a failure can be attributed to perception. Claiming it as obstacle detection
+would mean the first real perception bug looks like a regression in navigation.
+
+The same applies to lane following. The robot stays between the lines because
+the lines came out of `track_points.json`, not because anything looked at them.
+
+### 10.4 The corridor is tight, and here is the arithmetic
+
+Worth knowing before tuning anything. Obstacle 0 sits **0.245 m** from the lane
+centreline with radius 0.344 m. `gt_nav_bridge_node` inflates it by a further
+0.30 m, so it blocks lateral -0.40 m to +0.89 m. With a 10 ft lane the painted
+lines' inner edges are at +/-1.27 m, so the passable gap is **0.87 m** for a
+robot **0.70 m** wide, before Nav2's own `inflation_radius: 0.75` is applied on
+top. It works, but there is very little margin, and it is the first thing to
+look at if the robot starts refusing to pass a barrel.
+
+### 10.5 Three things that cost an hour, all worth knowing
+
+**Nav2 starts 15 seconds after Gazebo, on purpose.** Nav2 brings ten lifecycle
+nodes up in sequence and the whole bringup aborts if any one is slow -
+`Failed to change state for node: smoother_server`, after which nothing
+navigates and the cause is nowhere near the message. Launching it while Gazebo
+is still loading meshes and rendering its first frame caused exactly that:
+`controller_server` took 3.4 s of a 4 s bond timeout and the next node failed
+outright. The lifecycle manager's `bond_timeout` cannot be raised from the
+params file, because `navigation_no_docking.launch.py` constructs that node
+with only `autostart` and `node_names`. So `nav2_delay` stops the race instead
+of widening the window.
+
+**Two simulators at once produce results that look real and are not.** A run
+showed the robot driving well and then turning in circles at a barrel, plus the
+lifecycle failure above. Both were investigated as navigation problems. Neither
+was: `ps` showed **six `gz sim` processes, two `rviz2` and three
+`parameter_bridge`** left over from earlier runs whose cleanup had not worked.
+
+Two simulators on one ROS domain is not a degraded version of one. Both publish
+`/clock`, so time moves in both directions. Both publish `/odom` and `/tf` for
+a model named `igvc_robot`, so the TF tree holds two disagreeing answers and
+consumers take whichever arrived last. Nav2 then plans against a pose that
+teleports, which looks precisely like a controller tuning problem. The second
+Gazebo is also rendering the same course on the same GPU.
+
+`scripts/gazebo/sim_preflight.sh` now refuses to start on top of a running
+simulator. The test scripts call it with `FORCE=1` and clean up first;
+`start_sim.sh` refuses and tells you to restart the container. This is the same
+family of mistake as `docker compose run` creating a new container each time,
+and it earns the same treatment: check what is running before adding to it.
+
+Its first version matched a list of node names and **missed five of them**,
+leaving a second `gazebo_odom_shim` publishing `/odom` after a cleanup that
+reported success - because killing `ros2 launch` does not reap its children,
+they are reparented to init and carry on. It now matches on where the
+executable lives (`/opt/ros/jazzy/lib/`, `/root/ros2_ws/install/`), which
+catches every node in the stack and needs no maintenance when one is added.
+
+**Two things must not drive the robot at once either.** `bringup_smoke_test.sh`
+PART 2 and 3 command a velocity and measure the result, and Nav2 publishes to
+the same `/cmd_vel`. Run together, the test found the robot already 21 m from
+spawn before commanding anything, "coasting" 9.6 m after the burst, and
+disagreeing with ground truth by 4.62 degrees instead of the usual 0.13. Every
+one of those numbers was Nav2. The smoke test now passes `nav2:=false`;
+`autonomy_check.sh` is where Nav2 is measured, and it measures it correctly by
+never touching `/cmd_vel` at all.
+
+One more false alarm worth recording, because it is the mirror image of the
+useful kind. The smoke test reported the camera frame id missing from TF, and
+it was present and correct the whole time - verified by hand with the identical
+command. The cause was in the test, not the robot:
+
+```bash
+set -o pipefail                     # this script sets it
+timeout 25 ros2 run tf2_ros tf2_echo base_link "$FID" 2>&1 | grep -q "Translation:"
+```
+
+`tf2_echo` prints once a second until the timeout. `grep -q` matches on the
+first line and exits immediately, `tf2_echo` takes SIGPIPE, and **`pipefail`
+then reports the whole pipeline as 141** - so a successful lookup reads as a
+failure. Reduced:
+
+```bash
+set -o pipefail
+(echo a; sleep 3; echo Translation:; sleep 3) | grep -q Translation:; echo $?
+# -> 141
+```
+
+`set -o pipefail` and `grep -q` on a long-running producer are a silent
+false-negative generator, and this repo's scripts all set `pipefail` because
+`set -u` breaks the ROS setup scripts. The fix is to capture first and match
+second. Both the TF check and the RViz check now do.
+
+### 10.6 What is still not closed
+
+- **`/isaac_joint_cmd` is not bridged, so ros2_control is not in the loop.**
+  Nav2's twist goes straight to Gazebo's DiffDrive, which does the wheel
+  kinematics itself. Joint limits, the controller update rate and its
+  interaction with the physics step are therefore untested. That is RQ-06 and
+  it needs a team decision, not a launch file.
+- **`/fix` is not published.** Gazebo has a `navsat` sensor but the world needs
+  `<spherical_coordinates>` first, and every sim config runs `gps_enabled:
+  false`, as the Isaac path did.
+- **Nothing perceives anything.** See 10.2.
+- **The point cloud's orientation is unverified.** All four rgbd outputs are
+  tagged with the optical frame, which is right for the 2D rasters and may be
+  wrong for the cloud. It is bridged but unused, and `obstacle_layer` is off,
+  so it cannot currently cause harm. Check it before enabling that layer.

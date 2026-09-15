@@ -28,6 +28,7 @@ setup(
     entry_points={
         'console_scripts': [
             'sim_startup_helper = igvc_test_bringup.sim_startup_helper:main',
+            'gazebo_odom_shim = igvc_test_bringup.gazebo_odom_shim:main',
         ],
     },
 )

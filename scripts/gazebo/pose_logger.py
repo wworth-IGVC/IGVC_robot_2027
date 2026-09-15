@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""
+pose_logger.py
+
+Log the robot's WORLD pose to a file at a fixed rate, for autonomy_check.sh.
+
+Why not `gz model -m igvc_robot -p`, which is the obvious answer and is what
+this replaced: each call is a gz-transport service round trip that starts a new
+process, and under a loaded simulator it took roughly 20 SECONDS to return. A
+60-sample run would have taken 20 minutes, and the samples would have been
+spaced by however long the simulator happened to be busy - which is exactly
+when the robot is doing something interesting. One subscriber costs nothing and
+samples on a real clock.
+
+WORLD POSE FROM ODOMETRY, AND WHY THAT IS LEGITIMATE HERE
+
+gazebo_odom_shim publishes odometry in a frame whose axes are the world's and
+whose origin is the spawn point, so
+
+    world = odom + spawn_position
+
+exactly, by construction. That is not an assumption: bringup_smoke_test.sh
+measures odometry against `gz model -p` ground truth every run and got a
+heading disagreement of 0.13 degrees and a distance ratio of 0.997 across
+three runs on 2026-09-15.
+
+It does mean this logger cannot detect the robot falling off the ground slab,
+because odometry keeps counting while the wheels spin in mid-air. The caller
+still takes one `gz model -p` reading at the end for that.
+
+Usage:
+    pose_logger.py OUT_FILE DURATION_S SPAWN_X SPAWN_Y [RATE_HZ]
+
+Each line: world_x world_y sim_time
+"""
+
+import sys
+import time
+
+import rclpy
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+
+class PoseLogger(Node):
+    """Subscribe to /odom and keep only the most recent message."""
+
+    def __init__(self):
+        super().__init__('pose_logger')
+        self.last = None
+        qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
+                         history=HistoryPolicy.KEEP_LAST, depth=10)
+        self.create_subscription(Odometry, '/odom', self._on_odom, qos)
+
+    def _on_odom(self, msg):
+        self.last = msg
+
+
+def main():
+    out, dur = sys.argv[1], float(sys.argv[2])
+    sx, sy = float(sys.argv[3]), float(sys.argv[4])
+    rate = float(sys.argv[5]) if len(sys.argv) > 5 else 2.0
+
+    rclpy.init()
+    node = PoseLogger()
+
+    # Deliberately a wall-clock loop rather than create_timer().
+    #
+    # A ROS timer on this node runs on the node clock, and with
+    # use_sim_time the first version of this file produced ZERO samples: the
+    # timer waits on /clock, and setting use_sim_time through set_parameters
+    # after construction did not reliably attach the time source. The sampling
+    # CADENCE does not need to be simulation time - only the timestamp written
+    # into each row does, and that is taken from the message header.
+    written = 0
+    deadline = time.time() + dur
+    next_write = time.time()
+    with open(out, 'w') as fh:
+        while time.time() < deadline and rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=0.05)
+            now = time.time()
+            if now < next_write or node.last is None:
+                continue
+            next_write = now + 1.0 / rate
+            p = node.last.pose.pose.position
+            t = (node.last.header.stamp.sec
+                 + node.last.header.stamp.nanosec * 1e-9)
+            fh.write('%.6f %.6f %.3f\n' % (p.x + sx, p.y + sy, t))
+            fh.flush()
+            written += 1
+
+    print('pose_logger: %d samples' % written)
+    node.destroy_node()
+    rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
+    main()

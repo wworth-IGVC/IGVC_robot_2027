@@ -192,4 +192,33 @@ and keep it able to fail.
 2. **Settle the `camera_info` name** with `gz topic -l` in the same session.
 3. **Then** the rename, the params override, and the image rebuild.
 
-Nothing above was applied to the repo. Another agent holds that tree.
+~~Nothing above was applied to the repo. Another agent holds that tree.~~
+
+**Applied 2026-09-15.** What this audit got right, wrong, and missed:
+
+- **Item 2, the frame typo: right, and the most valuable thing here.** Fixed in
+  `gazebo_sim.urdf.xacro`. `bringup_smoke_test.sh` now resolves the frame id
+  off the image through `tf2_echo`, so the class of bug cannot return silently.
+- **Item 6, "do not write a shim node": right about the cameras, wrong in
+  general.** The bridge's YAML form renames topics with no node at all, which
+  is cheaper than even this audit expected. But odometry needed one anyway, for
+  a reason item 5 half-anticipated: Gazebo's odom frame is rotated by the spawn
+  yaw, `gt_nav_bridge_node` reads odometry as a map-frame pose with no TF
+  lookup, and therefore no amount of renaming or remapping can fix it. See
+  `GAZEBO_SETUP.md` 9.3 for the measurement.
+- **Item 6, "`igvc_simulation_interface` is the wrong home": right.**
+  `gazebo_odom_shim` lives in `igvc_test_bringup`.
+- **Item 5, "`/lane_ground_truth` may not be simulator-independent": the
+  caution was justified and the conclusion was not.** The node itself is
+  simulator-independent - it reads JSON and subscribes to nothing. What is not
+  independent is the frame its grid is published in, which is the odom
+  rotation above.
+- **Item 7: right.** The smoke test was updated in the same change.
+- **Item 3, `camera_info`: verified present** and carrying data.
+- **Item 1: still the best part of this document,** because it is about method
+  rather than fact.
+
+**What it missed,** and what a future audit should look for: nothing here
+checked whether two simulators were running at once. Six `gz sim` processes
+produced a robot that circled at a barrel and a Nav2 lifecycle abort, both of
+which read as navigation bugs and were neither. See `GAZEBO_SETUP.md` 10.5.

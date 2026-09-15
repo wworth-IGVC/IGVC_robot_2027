@@ -923,22 +923,48 @@ pass.
     them under `osrf/ros:jazzy-desktop`; all 22 have not been tried.
 14. **The robot-side Jetson images are still Humble** (section 11.6) and face
     the same May 2027 EOL. Not started, not in this repo, needs the team lead.
-15. **RQ-03, the ZED namespace shim** (section 12.6). P0 and now the critical
-    path: no downstream node runs against Gazebo until the topic names match
-    the section 3.7 interface contract. **See `RQ03_AUDIT.md`** for the mapped
-    requirements, and note its first finding: the Gazebo image installs no
-    `cv_bridge`, `python3-opencv`, `image_geometry`, `message_filters` or Nav2,
-    so it cannot run a single downstream node until it is rebuilt.
+15. ~~**RQ-03, the ZED namespace shim**~~ **RESOLVED 2026-09-15, section 13.**
+    The bridge publishes the section 3.7 contract names,
+    `gazebo_nav_test.launch.py` runs the real 2026 navigation stack against
+    them, and the robot drives the course by itself. `RQ03_AUDIT.md` item 2
+    found a frame-id typo that would have made lane projection silently wrong;
+    it is fixed and `bringup_smoke_test.sh` now resolves camera frame ids
+    through TF. Of the five packages that audit believed were missing from the
+    image, four were already present; `image_geometry` and Nav2 really were
+    absent and are now installed.
 16. **Repair the four zero-normal collision meshes** (section 12.4), or decide
     the primitive colliders are the permanent answer for simulation. The
     meshes are still broken for Isaac and MoveIt either way.
-17. **Settle whether Gazebo's DiffDrive has a `/cmd_vel` timeout** (section
-    12.5). Two runs disagreed and the smoke test cannot resolve it; needs a
-    test that timestamps the last command against the last odometry change.
-    `diff_drive_controller` on the real robot does time out, so a difference
-    here runs in the unsafe direction.
+17. **Settle whether Gazebo's DiffDrive has a `/cmd_vel` timeout.** STILL
+    OPEN, and a third measurement has now been retracted as well. A run on
+    2026-09-15 appeared to settle it - the robot kept moving for 5 s after the
+    command burst ended, twice, reproducibly - and that result was **wrong**:
+    the robot had driven off the edge of the ground slab and was falling, with
+    its wheels spinning freely and odometry counting up as though it were
+    driving. `world_z` was -15 m at the third sample and -94,612 m by the end.
+    `bringup_smoke_test.sh` now drives 0.4 m/s for 3 s instead of 0.6 m/s for
+    8 s, so the robot stays on the slab, and refuses to report a timeout result
+    unless both samples were taken with the wheels on the ground. The question
+    itself is unchanged and still matters: `diff_drive_controller` on the real
+    robot does time out, so a difference runs in the unsafe direction.
 18. **Decide RQ-11**, whether barrels should be solid. Gazebo says yes today,
     Isaac's generated field says no. The two simulators disagree right now.
+19. **Decide RQ-06, the control path.** Nav2's twist now goes straight to
+    Gazebo's DiffDrive, so `ros2_control` is not in the loop at all:
+    `/isaac_joint_cmd` is unbridged and joint limits, the controller update
+    rate and its interaction with the physics step are untested. The choice is
+    `gz_ros2_control` in-process versus a `GazeboDriveHardware` mirroring
+    `IsaacDriveHardware` over topics. It has real control-loop-timing
+    consequences and needs the team lead.
+20. **Publish `/fix`.** The last unbridged row of the 3.7 contract. Gazebo has
+    a `navsat` sensor but the world needs `<spherical_coordinates>` first.
+    Small; nothing consumes it today because every sim config sets
+    `gps_enabled: false`, as the Isaac path did.
+21. **Verify the camera point cloud's orientation.** All four `rgbd_camera`
+    outputs are tagged with the optical frame. That is right for the image and
+    depth rasters and may rotate the cloud by 90 degrees. It is bridged but
+    unused and `obstacle_layer` is disabled, so it cannot currently do harm -
+    check it before enabling that layer, or Nav2 will mark the floor lethal.
 
 ---
 
@@ -1460,3 +1486,75 @@ Section 3.7 of `RESEARCH_QUESTIONS_AND_UNRESOLVED.md` specifies
 and `/isaac_joint_state`. **No downstream node runs until those line up**: not
 lane detection, not Nav2, not the navigator. That is RQ-03, it is P0, and it is
 the next piece of work.
+
+---
+
+## 13. Nav2 in the Gazebo image, and the robot driving itself
+
+**2026-09-15.** Four packages added to `docker/Dockerfile.gazebo-jazzy`:
+
+```text
+ros-jazzy-navigation2      the full metapackage, 34 nav2_* packages
+ros-jazzy-nav2-bringup     navigation_no_docking.launch.py imports nav2_common
+ros-jazzy-image-geometry   igvc_lane_detection's PinholeCameraModel
+ros-jazzy-twist-stamper    the real robot's Twist/TwistStamped conversion
+```
+
+`navigation2` is not optional-with-a-subset: `navigation_no_docking.launch.py`
+lists `route_server` among its lifecycle nodes, so a partial install fails at
+bringup. `ros-jazzy-navigation2 1.3.13` does include `nav2_route`.
+
+### 13.1 A correction to `RQ03_AUDIT.md`, and to how it was checked
+
+That audit reported five packages missing from the image. **Four were already
+present.** `cv_bridge`, `message_filters`, `python3-opencv` and `python3-numpy`
+all import and always did; they arrive transitively through `rviz2` and the
+desktop base rather than as explicit apt lines. Only `image_geometry` and Nav2
+were genuinely absent.
+
+The method error is the interesting part and the audit records it against
+itself: the claim was checked by grepping the Dockerfile's `apt-get install`
+list, which can only establish *not explicitly listed*, and that was read as
+*not present*. The check that settles it runs against the built image:
+
+```bash
+docker run --rm igvc-gazebo-jazzy:latest python3 -c "import cv_bridge"
+```
+
+The conclusion survived anyway - the rebuild was needed - but only by luck.
+
+### 13.2 Verified
+
+`scripts/gazebo/autonomy_check.sh`, which publishes no `/cmd_vel` at all and
+grades the robot on where it goes. The chain is the 2026 stack unmodified:
+`track_ground_truth_node` -> `gt_nav_bridge_node` -> `igvc_navigator` ->
+Nav2 `controller_server` -> `velocity_smoother` -> `collision_monitor` ->
+`/cmd_vel`. The only Gazebo-specific file is
+`config/gazebo_nav_test_nav2_overrides.yaml`, which changes the costmap layer
+list and the topic of the final hop.
+
+See `GAZEBO_SETUP.md` section 10, including 10.2, which is the part to read
+before describing this to anyone: **the robot is not detecting the barrels.**
+They are stamped into the costmap from `track_points.json`. The camera, depth,
+point cloud and lidar all publish and nothing plans on any of them.
+
+### 13.3 Two failures worth keeping
+
+**Nav2 now starts 15 s after Gazebo** (`nav2_delay`). Its ten lifecycle nodes
+activate in sequence and the whole bringup aborts if one is slow, reporting
+`Failed to change state for node: smoother_server` - a message that points
+nowhere near the cause. Started alongside Gazebo's mesh loading and first GPU
+render, `controller_server` consumed 3.4 s of a 4 s bond timeout and the next
+node failed. The lifecycle manager's `bond_timeout` is not reachable from the
+params file, because `navigation_no_docking.launch.py` builds that node with
+only `autostart` and `node_names`.
+
+**Two simulators at once.** A run showed the robot driving well, then circling
+at a barrel, plus the lifecycle failure above. Both were investigated as
+navigation problems and neither was: six `gz sim`, two `rviz2` and three
+`parameter_bridge` processes were alive from earlier runs whose cleanup had
+silently failed. Two simulators on one ROS domain both publish `/clock`,
+`/odom` and `/tf` for a model called `igvc_robot`, so time and pose jump
+between them and Nav2 plans against a teleporting robot.
+`scripts/gazebo/sim_preflight.sh` now refuses to start on top of one. This is
+the same mistake as `docker compose run` creating a new container each time.

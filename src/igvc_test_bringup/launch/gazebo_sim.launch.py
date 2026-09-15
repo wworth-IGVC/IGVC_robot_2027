@@ -17,6 +17,17 @@ The world and this launch file read the SAME track_points.json, so the course
 geometry, the robot spawn pose and igvc_lane_detection's ground-truth navigator
 all share one coordinate frame with no alignment step.
 
+TOPIC NAMES ARE THE SECTION 3.7 CONTRACT, not raw Gazebo names. The bridge is
+driven by config/gazebo_bridge.yaml, which maps Gazebo's /front_zed/image onto
+/front_zed_camera_x/zed_node/rgb/color/rect/image and so on, so lane detection,
+Nav2 and the navigator can run against Gazebo unmodified. That file is the
+contract; read it before changing anything here.
+
+One thing renaming could not fix: Gazebo's odometry frame follows the SPAWN
+HEADING, while the stack assumes it carries world axes. gazebo_odom_shim
+rotates it back and is the only publisher of odom -> base_link. Section 9.3 of
+docs/GAZEBO_SETUP.md has the measurement.
+
 RUN IT FROM WSL2, NOT POWERSHELL, or there will be no window. See
 docs/GAZEBO_SETUP.md section 3A.
 
@@ -197,44 +208,49 @@ def _setup(context, *args, **kwargs):
     )
 
     # ── the bridge ───────────────────────────────────────────────────────────
-    # Direction matters and is easy to get backwards:
-    #   [  gz  -> ROS        ]  ROS -> gz        @  both
-    # /cmd_vel is the only thing flowing INTO the simulator.
-    bridge_args = [
-        "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-        "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-        "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-        "/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
-        "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
-        "/imu@sensor_msgs/msg/Imu[gz.msgs.IMU",
-    ]
-
-    # JointStatePublisher publishes gz.msgs.Model on a world-scoped topic, so
-    # it has to be named in full and remapped back to the conventional name.
-    world_name = "igvc_course"
-    js_topic = "/world/%s/model/%s/joint_state" % (world_name, robot_name)
-    bridge_args.append(js_topic + "@sensor_msgs/msg/JointState[gz.msgs.Model")
-
-    cam_prefixes = []
-    if cams in ("front", "all"):
-        cam_prefixes.append("front")
-    if cams == "all":
-        cam_prefixes += ["left", "right"]
-    for p in cam_prefixes:
-        bridge_args += [
-            "/%s_zed/image@sensor_msgs/msg/Image[gz.msgs.Image" % p,
-            "/%s_zed/depth_image@sensor_msgs/msg/Image[gz.msgs.Image" % p,
-            "/%s_zed/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo" % p,
-            "/%s_zed/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked" % p,
-        ]
+    #
+    # One parameter_bridge driven by config/gazebo_bridge.yaml, which IS the
+    # section 3.7 interface contract rather than a description of it. The YAML
+    # form is what lets the ROS name differ from the Gazebo name, so the
+    # simulator can publish /front_zed_camera_x/zed_node/rgb/color/rect/image
+    # while Gazebo still calls it /front_zed/image, and nothing downstream has
+    # to be told it is talking to Gazebo. Read that file before changing this.
+    bridge_cfg = _find(
+        os.path.join("src", "igvc_test_bringup", "config",
+                     "gazebo_bridge.yaml"),
+        "igvc_test_bringup",
+        os.path.join("config", "gazebo_bridge.yaml"),
+    )
 
     bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
+        name="igvc_gz_bridge",
         output="screen",
-        arguments=bridge_args,
-        remappings=[(js_topic, "/joint_states")],
-        parameters=[{"use_sim_time": use_sim_time}],
+        parameters=[{
+            "config_file": bridge_cfg,
+            "use_sim_time": use_sim_time,
+        }],
+    )
+
+    # ── the odometry shim ────────────────────────────────────────────────────
+    #
+    # Not a nicety. Gazebo's DiffDrive starts odometry at identity, so its odom
+    # axes follow the spawn heading - 134.87 deg off the world axes here -
+    # while track_ground_truth_node assumes odom carries world axes and
+    # gt_nav_bridge_node reads the odometry pose as a grid-frame pose with no
+    # TF lookup at all. Raw Gazebo odometry puts the local costmap 135 deg away
+    # from the robot with every topic still green. This node rotates it back
+    # and owns odom -> base_link. See docs/GAZEBO_SETUP.md 9.3.
+    odom_shim = Node(
+        package="igvc_test_bringup",
+        executable="gazebo_odom_shim",
+        name="gazebo_odom_shim",
+        output="screen",
+        parameters=[{
+            "spawn_yaw_rad": syaw,
+            "use_sim_time": use_sim_time,
+        }],
     )
 
     # ── RViz, optional ───────────────────────────────────────────────────────
@@ -248,7 +264,7 @@ def _setup(context, *args, **kwargs):
     # only the model and TF, so a driving robot appears to stand still while
     # the world slides past. gazebo_sim.rviz is fixed to odom and adds the
     # laser, camera and odometry displays.
-    actions = [gz, rsp, spawn, bridge]
+    actions = [gz, rsp, spawn, bridge, odom_shim]
 
     use_rviz = cfg("rviz").lower() in ("true", "1", "yes")
     if use_rviz:
@@ -272,7 +288,9 @@ def _setup(context, *args, **kwargs):
     print("  world     : %s" % world)
     print("  spawn     : x=%.4f y=%.4f z=%.2f yaw=%.6f" % (sx, sy, sz, syaw))
     print("  cameras   : %s" % cams)
-    print("  bridging  : %d topics" % len(bridge_args))
+    print("  bridge    : %s" % bridge_cfg)
+    print("  odom shim : rotating by %.6f rad (%.2f deg)"
+          % (syaw, syaw * 180.0 / 3.141592653589793))
     print("  rviz      : %s" % ("on" if use_rviz else "off"))
 
     return actions

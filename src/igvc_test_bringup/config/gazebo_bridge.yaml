@@ -1,0 +1,251 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  gazebo_bridge.yaml
+#
+#  THE INTERFACE CONTRACT, as a ros_gz_bridge configuration.
+#
+#  This file is the whole answer to RQ-03 for everything except depth semantics
+#  and the odometry frame. Section 3.7 of RESEARCH_QUESTIONS_AND_UNRESOLVED.md
+#  lists the topic names every downstream node was written against - they are
+#  the names the real ZED wrapper publishes, which Isaac Sim reproduced by
+#  streaming synthetic stereo into the actual ZED SDK. Gazebo emits its own
+#  short names instead. Rather than rename anything downstream, the bridge
+#  publishes the contract names directly.
+#
+#  WHY A YAML FILE AND NOT THE COMMAND-LINE FORM
+#
+#  parameter_bridge's `topic@ros_type[gz_type` argument syntax forces the ROS
+#  topic name to equal the Gazebo one, so the only way to rename is a launch
+#  remapping - which is invisible from here and cannot map one Gazebo topic to
+#  two ROS names. The YAML form takes ros_topic_name and gz_topic_name
+#  separately, so this file can BE the contract table rather than describe it.
+#  Verified 2026-09-15 that one bridge maps /odom to two ROS names at once.
+#
+#  direction:  GZ_TO_ROS | ROS_TO_GZ | BIDIRECTIONAL
+#  /cmd_vel is the only thing flowing INTO the simulator.
+#
+#  ALL THREE CAMERAS ARE LISTED, always. Which cameras actually exist is set by
+#  the sim_cameras launch argument, which controls the robot description. An
+#  entry whose Gazebo topic has no publisher costs one idle subscription and
+#  advertises a ROS topic that never publishes - so `ros2 topic list` will show
+#  left and right camera topics under the default sim_cameras:=front. Judge
+#  cameras by whether messages arrive, never by whether the topic is listed;
+#  bringup_smoke_test.sh checks the active set for flow.
+#
+#  WHAT THIS FILE DOES NOT AND CANNOT FIX
+#
+#  Stereolabs has declined to support Gazebo and has no timeline. Renaming a
+#  Gazebo rgbd_camera onto the ZED namespace reproduces the GEOMETRIC interface
+#  - same topic names, same message types, same frame ids, same intrinsics -
+#  and nothing else. ZED NEURAL depth, visual odometry, confidence maps and
+#  object detection have no Gazebo equivalent and are not being approximated
+#  here. Perception results obtained against this bridge are results against a
+#  pinhole camera with exact ray-cast depth, which is easier than a real ZED in
+#  some ways and harder in others. Do not report it as ZED parity.
+#
+#  See docs/GAZEBO_SETUP.md section 9.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── simulation clock ─────────────────────────────────────────────────────────
+# Every node in the stack runs use_sim_time: true, so this one is load-bearing.
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
+
+# ── the only ROS to Gazebo direction ─────────────────────────────────────────
+# Gazebo's DiffDrive takes an unstamped Twist. The real robot's
+# diff_drive_controller takes TwistStamped via twist_stamper; that difference
+# belongs to the control path, RQ-06, and is not bridged here.
+- ros_topic_name: "/cmd_vel"
+  gz_topic_name: "/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "gz.msgs.Twist"
+  direction: ROS_TO_GZ
+
+# ── odometry, RAW ────────────────────────────────────────────────────────────
+# Deliberately NOT called /odom. Gazebo's DiffDrive starts its odometry at
+# identity, so this frame's axes are the robot's heading AT SPAWN - 134.87 deg
+# off the world axes for the IGVC course. track_ground_truth_node assumes the
+# opposite ("Isaac Sim's odom inherits world axes from the spawn pose"), and
+# gt_nav_bridge_node reads the odometry pose as a map-frame pose with no TF
+# lookup at all, so a rotated odom silently puts the local costmap in the wrong
+# place. gazebo_odom_shim rotates this into the convention the stack expects
+# and publishes /odom, the ZED contract name, and the odom->base_link TF.
+#
+# Measured, 2026-09-15: spawned at world (-11.8817, 0.4511) yaw 134.87 deg,
+# /odom read (0, 0) yaw 0.00 deg. See docs/GAZEBO_SETUP.md 9.3.
+- ros_topic_name: "/sim/odom_body_frame"
+  gz_topic_name: "/sim/odom_body_frame"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+# NOTE: Gazebo's DiffDrive TF output is deliberately NOT bridged. It publishes
+# the same uncorrected odom->base_link transform as the topic above, and two
+# publishers of one transform that disagree is the worst of both. The xacro
+# points it at /sim/tf_body_frame so it cannot be mistaken for the ROS /tf.
+# /tf and /tf_static come from gazebo_odom_shim and robot_state_publisher.
+
+# ── joint states ─────────────────────────────────────────────────────────────
+# The Gazebo topic is /joint_states because the xacro sets <topic> on the
+# JointStatePublisher system. Without it the plugin defaults to the scoped name
+# /world/<world>/model/<model>/joint_state, which bakes the world name and the
+# spawned entity name into this file and breaks silently if either changes.
+#
+# /isaac_joint_state is the contract name from section 3.7. It is the same
+# message; the name is historical, from IsaacDriveHardware.
+- ros_topic_name: "/joint_states"
+  gz_topic_name: "/joint_states"
+  ros_type_name: "sensor_msgs/msg/JointState"
+  gz_type_name: "gz.msgs.Model"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/isaac_joint_state"
+  gz_topic_name: "/joint_states"
+  ros_type_name: "sensor_msgs/msg/JointState"
+  gz_type_name: "gz.msgs.Model"
+  direction: GZ_TO_ROS
+
+# ── lidar ────────────────────────────────────────────────────────────────────
+# RPLidar C1. Already the contract name; nothing to rename.
+- ros_topic_name: "/scan"
+  gz_topic_name: "/scan"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "gz.msgs.LaserScan"
+  direction: GZ_TO_ROS
+
+# ── imu ──────────────────────────────────────────────────────────────────────
+# Not in the 3.7 table: the Isaac ZED extension published no IMU at all
+# (common_stereo_sim.yaml sets imu_fusion: false, publish_imu_tf: false), so
+# there is no ZED namespace to reproduce. This is the chassis IMU, and Gazebo
+# gives it to us for free.
+- ros_topic_name: "/imu"
+  gz_topic_name: "/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: GZ_TO_ROS
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  CAMERAS
+#
+#  Gazebo's rgbd_camera sensor publishes four topics under one <topic> prefix
+#  and the four suffixes are FIXED: /image, /depth_image, /camera_info,
+#  /points. The ZED namespace does not use those suffixes, which is precisely
+#  why the sensor <topic> alone cannot produce the contract names and this file
+#  has to exist.
+#
+#  Frame ids come from the same URDF the rest of the stack uses, so they cost
+#  nothing here - but they are NOT free, and they were wrong until 2026-09-15.
+#  gazebo_sim.urdf.xacro stamped <cam>_left_camera_optical_frame, the
+#  Stereolabs upstream spelling, while zed_macro.urdf.xacro actually creates
+#  <cam>_left_camera_frame_optical. Images published happily under a frame id
+#  naming a frame that did not exist, and only a TF lookup could tell.
+#  bringup_smoke_test.sh now does that lookup.
+#
+#  DEPTH IS NOT ZED DEPTH. Both are 32FC1 metres, but Gazebo returns an exact
+#  ray-cast range with +inf beyond the far clip, while the ZED SDK returns a
+#  NEURAL network's estimate with its own invalid-value conventions and its own
+#  characteristic failure modes on texture-poor surfaces - which is most of an
+#  IGVC course. Anything trained or tuned on this depth has not been tuned on
+#  ZED depth.
+#
+#  point_cloud/cloud_registered is not in the 3.7 table but is what
+#  nav2_lane_follow_config.yaml names for its voxel and obstacle layers, so it
+#  is bridged too.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── front camera ─────────────────────────────────────────────────────────────
+- ros_topic_name: "/front_zed_camera_x/zed_node/rgb/color/rect/image"
+  gz_topic_name: "/front_zed/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/front_zed_camera_x/zed_node/rgb/color/rect/camera_info"
+  gz_topic_name: "/front_zed/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/front_zed_camera_x/zed_node/depth/depth_registered"
+  gz_topic_name: "/front_zed/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/front_zed_camera_x/zed_node/point_cloud/cloud_registered"
+  gz_topic_name: "/front_zed/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS
+
+# ── left camera  (only publishes under sim_cameras:=all) ─────────────────────
+- ros_topic_name: "/left_zed_camera_x/zed_node/rgb/color/rect/image"
+  gz_topic_name: "/left_zed/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/left_zed_camera_x/zed_node/rgb/color/rect/camera_info"
+  gz_topic_name: "/left_zed/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/left_zed_camera_x/zed_node/depth/depth_registered"
+  gz_topic_name: "/left_zed/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/left_zed_camera_x/zed_node/point_cloud/cloud_registered"
+  gz_topic_name: "/left_zed/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS
+
+# ── right camera  (only publishes under sim_cameras:=all) ────────────────────
+- ros_topic_name: "/right_zed_camera_x/zed_node/rgb/color/rect/image"
+  gz_topic_name: "/right_zed/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/right_zed_camera_x/zed_node/rgb/color/rect/camera_info"
+  gz_topic_name: "/right_zed/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/right_zed_camera_x/zed_node/depth/depth_registered"
+  gz_topic_name: "/right_zed/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/right_zed_camera_x/zed_node/point_cloud/cloud_registered"
+  gz_topic_name: "/right_zed/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STILL MISSING FROM THE 3.7 CONTRACT, deliberately
+#
+#  /fix  (sensor_msgs/NavSatFix)
+#      Gazebo has a navsat sensor and it would be a short xacro block, but the
+#      world needs <spherical_coordinates> before it produces anything sane,
+#      and every sim config in this repo runs with gps_enabled: false - the
+#      Isaac path did not publish it either. Small, queued, not urgent.
+#
+#  /isaac_joint_cmd  (sensor_msgs/JointState, ROS to sim)
+#      The control path, not the sensor path. Gazebo's DiffDrive takes
+#      /cmd_vel and has no joint-velocity input, so honouring this topic means
+#      choosing between the two options in RQ-06: run gz_ros2_control (now a
+#      binary on Jazzy) inside Gazebo, or write a GazeboDriveHardware that
+#      mirrors IsaacDriveHardware over topics. That is a team decision with
+#      real consequences for control-loop timing and it is not made here.
+#      Until it is, Nav2 cannot close the loop on Gazebo - and Nav2 is not in
+#      the Gazebo image yet either. See DOCKER_CHANGES.md outstanding item 19.
+# ─────────────────────────────────────────────────────────────────────────────

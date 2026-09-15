@@ -7,12 +7,24 @@
 #
 # It also adds the two displays that make the point that this is a real ROS
 # robot rather than a rendering: the lidar returns on /scan, and the simulated
-# camera on /front_zed/image.
+# camera on the front ZED's rectified colour topic.
 #
-# Topic names here are the RAW GAZEBO names the bridge currently publishes. If
-# and when RQ-03 lands the ZED namespace shim, /front_zed/image becomes
-# /front_zed_camera_x/zed_node/rgb/color/rect/image and this file needs
-# updating with it.
+# Topic names here are the SECTION 3.7 CONTRACT names, not raw Gazebo names.
+# RQ-03 landed 2026-09-15: config/gazebo_bridge.yaml renames /front_zed/image
+# to /front_zed_camera_x/zed_node/rgb/color/rect/image on the way out, so this
+# file names what the rest of the stack names.
+#
+# /odom here is the CORRECTED odometry from gazebo_odom_shim, not Gazebo's own.
+# Gazebo's raw odometry frame follows the spawn heading; pointing this at
+# /sim/odom_body_frame instead would draw the trail 135 degrees off the robot.
+#
+# CAREFUL: RViz WRITES THIS FILE. With --symlink-install the installed copy is
+# a symlink to this one, so saving a view from the GUI - or RViz deciding to
+# save on exit - rewrites it in RViz's own serialisation, replacing 0.03 with
+# 0.029999999329447746, baking in window geometry, and deleting every comment
+# above. That happened on 2026-09-15 and was reverted. If `git diff` on this
+# file is suddenly 350 lines, that is what happened; revert and re-apply the
+# real change by hand.
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
@@ -99,7 +111,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /front_zed/image
+        Value: /front_zed_camera_x/zed_node/rgb/color/rect/image
       Value: true
     - Angle Tolerance: 0.1
       Class: rviz_default_plugins/Odometry

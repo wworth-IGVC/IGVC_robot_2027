@@ -77,6 +77,25 @@ ENV NVIDIA_DRIVER_CAPABILITIES=all
 # remaps to /diff_drive_controller/cmd_vel rather than the /cmd_vel the
 # built-in DiffDrive plugin listens on. Keyboard teleop needs no hardware and
 # talks straight to /cmd_vel.
+#
+# navigation2 + nav2_bringup are what let the robot drive the course BY
+# ITSELF rather than being pushed around by `ros2 topic pub /cmd_vel`. Without
+# them gazebo_nav_test.launch.py can publish the ground-truth lane grid and
+# nothing can act on it, which is a demo of a costmap and not of a robot.
+# navigation_no_docking.launch.py imports nav2_common and lists route_server
+# among its lifecycle nodes, so it needs the full metapackage, not a subset;
+# ros-jazzy-navigation2 1.3.13 does include nav2_route.
+#
+# image-geometry is igvc_lane_detection's PinholeCameraModel dependency, used
+# by projection_utils to turn lane pixels into ground-plane points. cv_bridge,
+# message_filters, python3-opencv and python3-numpy were already present as
+# dependencies of rviz2 and the desktop base - that is worth stating because
+# docs/RQ03_AUDIT.md claimed all of them were missing, and four of the five
+# were not.
+#
+# twist-stamper converts Nav2's TwistStamped /cmd_vel into the unstamped Twist
+# Gazebo's DiffDrive subscribes to. The real robot uses the same package for
+# the mirror-image reason, so this is parity rather than a simulator hack.
 # ---------------------------------------------------------------------------
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -87,6 +106,10 @@ RUN apt-get update \
         ros-jazzy-robot-state-publisher \
         ros-jazzy-rviz2 \
         ros-jazzy-teleop-twist-keyboard \
+        ros-jazzy-navigation2 \
+        ros-jazzy-nav2-bringup \
+        ros-jazzy-image-geometry \
+        ros-jazzy-twist-stamper \
         mesa-utils \
         vulkan-tools \
         python3-colcon-common-extensions \

@@ -1,0 +1,49 @@
+# ── Nav2-only overrides for the Gazebo ground-truth nav test ──────────────────
+#
+# Passed exclusively as extra_params_file to the Nav2 nodes via
+# navigation_no_docking.launch.py. It must NOT be passed to any other node.
+#
+# Two changes from nav2_lane_follow_config.yaml, and only two.
+#
+# 1. THE COSTMAP LAYERS. Same reasoning as isaac_nav_test_nav2_overrides.yaml:
+#    drop obstacle_layer from both costmaps. Setting enabled: false is not
+#    enough, because the plugin still creates TF message filters for every
+#    observation source it was configured with; overriding `plugins` stops it
+#    being instantiated at all.
+#
+#    Obstacles are NOT lost by doing this. gt_nav_bridge_node stamps every
+#    obstacle in track_points.json into /lane_map and /lane_costmap as lethal
+#    cells, inflated by obstacle_inflate_radius_m, so lane_layer carries them.
+#    This is ground-truth obstacle avoidance rather than perceived, which is
+#    exactly what a ground-truth nav test is for.
+#
+#    Keeping obstacle_layer would also be wrong for a different reason: the
+#    default sim_cameras:=front creates ONE camera, so the left and right
+#    pointcloud sources would never publish and the layer would sit waiting on
+#    them.
+#
+# 2. WHERE THE VELOCITY COMMAND GOES. The real robot ends the Nav2 chain at
+#    /diff_drive_controller/cmd_vel_unstamped, where ros2_control picks it up.
+#    Gazebo's DiffDrive system subscribes to /cmd_vel instead, so the last hop
+#    is repointed. Everything upstream of it - controller_server,
+#    velocity_smoother, collision_monitor, the polygons, the velocity and
+#    acceleration limits - is unchanged, so the robot is driven through the
+#    same chain the real one uses.
+#
+#    See docs/GAZEBO_SETUP.md section 10.
+# ──────────────────────────────────────────────────────────────────────────────
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      plugins: ["lane_layer", "inflation_layer"]
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      plugins: ["lane_layer", "inflation_layer"]
+
+collision_monitor:
+  ros__parameters:
+    # The one hop that differs between the real robot and Gazebo.
+    cmd_vel_out_topic: "/cmd_vel"

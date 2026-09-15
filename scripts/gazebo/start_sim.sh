@@ -8,6 +8,9 @@
 #   RVIZ=0        skip RViz
 #   HEADLESS=1    no Gazebo window either; for automated checks
 #   CAMERAS=all   all three cameras instead of just the front one
+#   NAV=1         also start the ground-truth navigation inputs
+#                 (track_ground_truth_node, gt_nav_bridge_node, localization),
+#                 i.e. gazebo_nav_test.launch.py instead of gazebo_sim
 #
 # TO DRIVE IT you need a second shell in the SAME container, which is the one
 # awkward part of the workflow and is worth reading before the meeting.
@@ -31,6 +34,9 @@
 set -o pipefail
 source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
 
+. "$(dirname "$0")/sim_preflight.sh"
+sim_preflight || exit 1
+
 REPO=/root/ros2_ws/src/IGVC_robot_2026
 RVIZ="${RVIZ:-1}"
 HEADLESS="${HEADLESS:-0}"
@@ -40,11 +46,13 @@ echo "=============================================================="
 echo " IGVC Gazebo simulation"
 echo "=============================================================="
 
-echo "--- building igvc_test_description, igvc_test_bringup, zed_description ---"
+echo "--- building the four packages the bringup needs ---"
 cd /root/ros2_ws || exit 1
 colcon build --symlink-install \
     --base-paths "$REPO/src" \
-    --packages-select zed_description igvc_test_description igvc_test_bringup \
+    --packages-select zed_description igvc_test_description \
+                      igvc_test_bringup \
+                      igvc_lane_detection \
     > /tmp/colcon.log 2>&1
 RC=$?
 if [ "$RC" -ne 0 ]; then
@@ -77,9 +85,12 @@ echo "  if that container name does not exist, you started this with"
 echo "  'compose run' instead of 'compose up -d'. See the header of this file."
 echo
 
+LAUNCH_FILE="gazebo_sim.launch.py"
+[ "${NAV:-0}" = "1" ] && LAUNCH_FILE="gazebo_nav_test.launch.py"
+
 ARGS="sim_cameras:=$CAMERAS"
 [ "$RVIZ" = "1" ] && ARGS="$ARGS rviz:=true"
 [ "$HEADLESS" = "1" ] && ARGS="$ARGS headless:=true rviz:=false"
 
-echo "--- ros2 launch igvc_test_bringup gazebo_sim.launch.py $ARGS ---"
-exec ros2 launch igvc_test_bringup gazebo_sim.launch.py $ARGS
+echo "--- ros2 launch igvc_test_bringup $LAUNCH_FILE $ARGS ---"
+exec ros2 launch igvc_test_bringup "$LAUNCH_FILE" $ARGS
