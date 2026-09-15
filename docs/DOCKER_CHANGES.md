@@ -1558,3 +1558,45 @@ silently failed. Two simulators on one ROS domain both publish `/clock`,
 between them and Nav2 plans against a teleporting robot.
 `scripts/gazebo/sim_preflight.sh` now refuses to start on top of one. This is
 the same mistake as `docker compose run` creating a new container each time.
+
+### 13.4 A Gazebo service for native Linux, which did not exist
+
+`igvc_gazebo` was defined **only** in `docker-compose.windows.yml`. Anyone on
+native Linux following any of our documentation found no service to run and no
+explanation, which is its own answer to "why has nobody else got this working".
+
+`docker-compose.yml` now has `igvc_gazebo_linux`, the same image with the WSL
+machinery swapped for the native equivalents:
+
+| Windows / Docker Desktop | native Linux |
+| --- | --- |
+| `gpus: all` | `runtime: nvidia` |
+| `/dev/dxg` + `/usr/lib/wsl` mount | `/dev/dri` |
+| `GALLIUM_DRIVER=d3d12` | not set; the real GL driver |
+| `MESA_D3D12_DEFAULT_ADAPTER_NAME` | not applicable |
+| `/mnt/wslg` + WSLg sockets | `/tmp/.X11-unix` and `$DISPLAY` |
+
+```bash
+xhost +local:docker
+docker compose up -d igvc_gazebo_linux
+docker exec -it igvc_gazebo_linux bash scripts/gazebo/start_sim.sh
+```
+
+**Not verified on a real Linux machine**, and the service says so in its own
+comment. Nobody on the 2027 team runs Linux on the desktop, so it is written
+from the Windows service plus the standard ROS-in-Docker GUI recipe. It
+validates (`docker compose config`) and the image is identical, so the risk is
+confined to the GPU and display plumbing. Likely failure modes are
+`nvidia-container-toolkit` missing and a forgotten `xhost`. AMD and Intel users
+drop `runtime: nvidia` and the `NVIDIA_*` variables and keep `/dev/dri`.
+
+### 13.5 Documentation for people who are not us
+
+`docs/GAZEBO_QUICKSTART.md` and the Word file generated from it by
+`docs/make_gazebo_docx.py` take someone from a fresh machine to a robot driving
+the course. The part worth keeping current is section 1A, which covers machines
+unlike the one everything was verified on: Windows 10 and its WSLg build floor,
+native Linux, AMD and Intel GPUs, no usable GPU at all, macOS, and Docker
+Desktop's resource limits. The simulator does **not** need an NVIDIA GPU to
+run - only to run fast and to make camera results mean anything - and saying so
+plainly is what stops someone concluding it is broken.

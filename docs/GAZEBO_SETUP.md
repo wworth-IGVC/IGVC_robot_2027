@@ -32,18 +32,35 @@ GPU, with nothing ROS-version-specific in them.
 | A robot that drives ITSELF | **Yes.** 122.9 m of autonomous driving, max 1.79 m off the lane centreline, no `/cmd_vel` from the test. Section 10 |
 | Perception | **No, and do not imply otherwise.** Lanes and barrels come from `track_points.json`; nothing plans on the camera or lidar. Section 10.3 |
 
+**New here? Read `GAZEBO_QUICKSTART.md` instead**, or the Word version of it.
+This file is the reference and explains why; that one gets you to a driving
+robot in about 45 minutes without assuming you have read this.
+
 Run it **from a WSL2 shell, not PowerShell** (see section 3A):
 
 ```bash
 cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
 docker compose -f docker-compose.windows.yml build igvc_gazebo
-docker compose -f docker-compose.windows.yml run --rm igvc_gazebo
+docker compose -f docker-compose.windows.yml up -d igvc_gazebo
 ```
 
-Then, inside the container, before trusting anything:
+**`up -d`, not `run --rm`.** `run` creates a new container with a random name
+every time, so a second `run` gives you a second simulator rather than a second
+shell into the first. Two simulators on one ROS domain both publish `/clock`,
+`/odom` and `/tf` for a model named `igvc_robot`, and the navigation stack then
+plans against a robot whose pose jumps between them - which reads as a
+navigation bug and is not one. That cost real time on 2026-09-15; see 10.5.
+
+Then, before trusting anything:
 
 ```bash
-bash /root/ros2_ws/src/IGVC_robot_2026/scripts/gazebo/render_check.sh
+docker exec -it igvc_gazebo bash -c   "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/render_check.sh"
+```
+
+And to see the robot drive the course by itself:
+
+```bash
+docker exec -it igvc_gazebo bash -c "NAV=1 bash scripts/gazebo/start_sim.sh"
 ```
 
 ---
@@ -358,6 +375,23 @@ path, but colcon output already lives in named volumes, so this costs little.
 
 ---
 
+### Native Linux, where none of this applies
+
+Everything in 3A is about WSL2. On native Linux there is a real GPU and a real
+X or Wayland server, so OpenGL works the ordinary way. Use `igvc_gazebo_linux`
+in `docker-compose.yml`:
+
+```bash
+xhost +local:docker
+docker compose up -d igvc_gazebo_linux
+```
+
+It is **not yet verified on a Linux machine** - see `DOCKER_CHANGES.md` 13.4.
+Run `render_check.sh` there too: a missing or mismatched NVIDIA driver still
+falls back to software silently, it just does so for different reasons.
+
+---
+
 ## 4A. Verification log
 
 Two runs are recorded. The **2026-09-15 Jazzy** run is current. The
@@ -488,8 +522,11 @@ never shrinks and Windows 11 Home has no Hyper-V to compact it.
 | `scripts/gazebo/three_camera_load.sdf` | Three ZED-placed rgbd cameras plus the RPLiDAR, at the URDF poses from section 3.3 |
 | `scripts/gazebo/bridge_smoke_test.sh` | Proves `ros_gz` carries Image, LaserScan and Clock into ROS 2. Exit 0 on all pass |
 | `scripts/gazebo/generate_igvc_world.py` | Builds `worlds/igvc_course.sdf` from `track_points.json`. See section 8.2 |
-| `scripts/gazebo/start_sim.sh` | One command to bring the whole thing up inside the container: build, regenerate the world if the track data is newer, launch Gazebo plus RViz. Prints the teleop instructions |
-| `scripts/gazebo/bringup_smoke_test.sh` | **The one that matters.** Launches the full stack, then commands a velocity and checks the odometry actually moves. Exit 0 only if the robot drives |
+| `scripts/gazebo/start_sim.sh` | One command to bring the whole thing up inside the container: build, regenerate the world if the track data is newer, launch Gazebo plus RViz. Prints the teleop instructions. **`NAV=1` also starts Nav2 and the navigator, so the robot drives itself**; `RVIZ=0`, `HEADLESS=1`, `CAMERAS=all` |
+| `scripts/gazebo/bringup_smoke_test.sh` | **The simulator and the contract.** 18 checks: every section 3.7 topic carries a message, the camera frame ids resolve in TF, and a commanded velocity moves the odometry in the right direction by the right distance against `gz` ground truth. Exit 0 only if the robot drives. `NAV=0` for the simulator alone, `RVIZ=1` for the GUI checks |
+| `scripts/gazebo/autonomy_check.sh` | **Does the robot drive the course BY ITSELF.** Never publishes `/cmd_vel`; grades distance travelled, ground covered, deviation from the lane centreline, and whether it stayed on the ground slab. `DURATION`, `TOL`, `RVIZ` are env vars |
+| `scripts/gazebo/sim_preflight.sh` | Sourced by the others. Refuses to start on top of a running simulator, because two on one ROS domain both publish `/clock`, `/odom` and `/tf` and produce results that look real and are not. `FORCE=1` cleans up instead of refusing |
+| `scripts/gazebo/pose_logger.py` | Logs the robot's world pose at a fixed rate for `autonomy_check.sh`. Exists because `gz model -p` took ~20 s per call under a loaded simulator |
 
 The scripts run inside the container, against the repo bind mount at
 `/root/ros2_ws/src/IGVC_robot_2026`. `.gitattributes` already forces `eol=lf`

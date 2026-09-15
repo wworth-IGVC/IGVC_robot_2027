@@ -230,7 +230,80 @@ services:
       - DEVENV_HOST_PATH=${DEVENV_HOST_PATH:-}
     command: ["bash"]
 
+  # ---------------------------------------------------------------------
+  # Gazebo Harmonic (gz-sim 8) + ROS 2 Jazzy, NATIVE LINUX.
+  #
+  # The Windows equivalent is igvc_gazebo in docker-compose.windows.yml, and
+  # until 2026-09-15 it was the ONLY one - so anyone on native Linux following
+  # the documentation found no service to run. That is fixed here.
+  #
+  # The two files differ only in how the GPU and the display are reached:
+  #
+  #   Windows / Docker Desktop        native Linux
+  #   ------------------------        ------------
+  #   gpus: all                       runtime: nvidia
+  #   /dev/dxg + /usr/lib/wsl         /dev/dri, the real DRM devices
+  #   GALLIUM_DRIVER=d3d12            no override; use the real GL driver
+  #   MESA_D3D12_DEFAULT_ADAPTER      not applicable
+  #   /mnt/wslg, WSLg sockets         /tmp/.X11-unix and $DISPLAY
+  #
+  # On native Linux none of the WSL machinery applies: there is a real GPU and
+  # a real X or Wayland server, so OpenGL works the ordinary way and the
+  # silent-llvmpipe trap that dominates the Windows path does not arise in the
+  # same form. Run render_check.sh anyway - a machine with no NVIDIA driver, or
+  # with the wrong one, still falls back to software silently.
+  #
+  #   xhost +local:docker            # once per login, so the container can draw
+  #   docker compose up -d igvc_gazebo_linux
+  #   docker exec -it igvc_gazebo_linux bash scripts/gazebo/start_sim.sh
+  #
+  # NOT VERIFIED ON NATIVE LINUX. Nobody on the 2027 team runs Linux on the
+  # desktop, so this service is written from the Windows one and the standard
+  # ROS-in-Docker GUI recipe rather than from a machine it has been tested on.
+  # If it works, delete this paragraph. If it does not, the likely culprits are
+  # `runtime: nvidia` needing nvidia-container-toolkit installed, and xhost.
+  #
+  # AMD or Intel GPUs: drop `runtime: nvidia` and the NVIDIA_* environment
+  # variables, keep /dev/dri, and Mesa will use the open driver directly.
+  # ---------------------------------------------------------------------
+  igvc_gazebo_linux:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gazebo-jazzy
+    image: igvc-gazebo-jazzy:latest
+    container_name: igvc_gazebo_linux
+    stdin_open: true
+    tty: true
+    runtime: nvidia
+    working_dir: /root/ros2_ws
+    shm_size: "2gb"
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - igvc_gazebo_linux_build:/root/ros2_ws/build
+      - igvc_gazebo_linux_install:/root/ros2_ws/install
+      - igvc_gazebo_linux_log:/root/ros2_ws/log
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - GZ_VERSION=harmonic
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DISTRO=jazzy
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+    command: ["bash"]
+
 volumes:
+  igvc_gazebo_linux_build:
+  igvc_gazebo_linux_install:
+  igvc_gazebo_linux_log:
+
   igvc_humble_build:
   igvc_humble_install:
   igvc_humble_log:

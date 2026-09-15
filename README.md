@@ -15,9 +15,29 @@ ROS 2 workspace for Gold Rush Robotics' 2027 IGVC robot, forked from [Gold-Rush-
 - **Windows is supported.** `scripts/setup-windows.ps1` checks and installs the
   prerequisites, and `docker-compose.windows.yml` works on Docker Desktop.
 
+- **The simulator works, and the robot drives the IGVC course by itself.**
+  Gazebo Harmonic on ROS 2 Jazzy, running the real 2026 navigation stack -
+  ground-truth lane grid, IGVC navigator, Nav2 - with none of those nodes
+  modified. It is **not** perceiving anything yet; the lane lines and barrels
+  come from `track_points.json`. See
+  [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) sections 9 and 10.
+
 Every change, its root cause, and how it was verified is recorded in
-[docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md). New to Docker? Start with
-[docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx).
+[docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md).
+
+## Start here
+
+| You want to | Read |
+| --- | --- |
+| **Run the simulator and watch the robot drive the course** | [docs/IGVC_2027_Gazebo_Setup_Guide.docx](docs/IGVC_2027_Gazebo_Setup_Guide.docx), or [docs/GAZEBO_QUICKSTART.md](docs/GAZEBO_QUICKSTART.md) |
+| Set up a machine from scratch, new to Docker | [docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx) |
+| Understand how the simulator works, or change it | [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) |
+| Know what is in each image and why | [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) |
+| Find the right branch | [docs/BRANCHES.md](docs/BRANCHES.md) |
+
+The Gazebo quickstart has a section for machines unlike the one it was built
+on - Windows 10, native Linux, AMD/Intel GPUs, and no GPU at all - because most
+"it works for you and not for me" reports trace back to one of those.
 
 ## Repository layout
 
@@ -45,7 +65,7 @@ unsupported before the team ever competes on it. Jazzy runs to May 2029.
 
 | Target | Use case | Status |
 | --- | --- | --- |
-| ROS 2 Jazzy in Docker | **The simulator.** Gazebo Harmonic, `ros_gz`, `gz_ros2_control`. | **Supported.** `docker/Dockerfile.gazebo-jazzy`. 1023 MB pulled, 4.89 GB on disk. |
+| ROS 2 Jazzy in Docker | **The simulator.** Gazebo Harmonic, `ros_gz`, `gz_ros2_control`. | **Supported, and the robot drives the course autonomously.** `docker/Dockerfile.gazebo-jazzy`. ~5.6 GB on disk, now including Nav2. |
 | ROS 2 Humble in Docker | Fused-drive runtime, still the default for everyday work. | **Pending port to Jazzy.** `docker/Dockerfile.humble-fused-drive`. |
 | ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | **Pending port to Jazzy.** `docker/Dockerfile.igvc-zed-humble` — CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
 | ROS 2 Jazzy on host | Local debug GUI and host-side tools. | Host tools can see Docker topics when the shared DDS helper is sourced. |
@@ -228,10 +248,21 @@ WSL2**, because the `igvc_gazebo` service is defined there:
 
 ```bash
 cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
-docker compose -f docker-compose.windows.yml run --rm igvc_gazebo
-# inside the container, the GUI opens as a normal Windows window:
-gz sim /root/ros2_ws/src/IGVC_robot_2026/scripts/gazebo/render_check.sdf
+docker compose -f docker-compose.windows.yml up -d igvc_gazebo
+
+# prove the GPU is actually in use before anything else
+docker exec -it igvc_gazebo bash -c   "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/render_check.sh"
+
+# the robot drives the course by itself
+docker exec -it igvc_gazebo bash -c "NAV=1 bash scripts/gazebo/start_sim.sh"
 ```
+
+**`up -d`, not `run --rm`.** `run` creates a new container every time, so a
+second `run` gives you a second *simulator* rather than a second shell into the
+first. Two of them on one ROS domain both publish `/clock`, `/odom` and `/tf`
+for the same robot, and the result looks like a navigation bug. On native Linux
+use `docker compose up -d igvc_gazebo_linux` instead - same image, different
+GPU and display plumbing.
 
 Verified 2026-09-15: GUI **and** GPU, `OpenGL renderer string: D3D12 (NVIDIA
 GeForce RTX 5070 Ti Laptop GPU)`. From PowerShell the same service still runs
@@ -318,7 +349,7 @@ rather than naming volumes by hand.
 | `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default** — 3.98 GB. |
 | `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus the ZED SDK and ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 28.6 GB on disk. |
 | `igvc_zed_humble_upstream` | Same Dockerfile, different build args | Same as above but built against **upstream** `zed-ros2-wrapper` v5.4.1 with SDK 5.3.0 — the same wrapper and SDK as the Jetson image. See below. |
-| `igvc_gazebo` | Built from `docker/Dockerfile.gazebo-jazzy` | **Gazebo Harmonic** (`gz-sim` 8.15.0) + **Jazzy** + `ros_gz` + `gz_ros2_control`. The simulator for everyday development. Windows compose file only. 1023 MB pulled, 4.89 GB on disk. Run it from WSL2. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md). |
+| `igvc_gazebo` | Built from `docker/Dockerfile.gazebo-jazzy` | **Gazebo Harmonic** (`gz-sim` 8.15.0) + **Jazzy** + `ros_gz` + `gz_ros2_control`. The simulator for everyday development, plus Nav2. ~5.6 GB on disk. Run it from WSL2; `igvc_gazebo_linux` in `docker-compose.yml` is the native-Linux twin. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md). |
 
 All three services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
 

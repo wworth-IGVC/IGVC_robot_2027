@@ -3,17 +3,25 @@
 A map of this folder. Every file below is verified work, not notes: if something
 here says a thing was measured, there is a command and a number behind it.
 
-**If you are new, read the `.docx` setup guide.** It is the only document
+**If you are new, read a `.docx` setup guide.** They are the only documents
 written for someone who has not used Docker before. Everything else assumes you
 have the container running.
 
+**If you just want the simulator running tonight**, read
+`IGVC_2027_Gazebo_Setup_Guide.docx`, or `GAZEBO_QUICKSTART.md` which is the same
+content in Markdown. It ends with a robot driving the IGVC course by itself and
+takes about 45 minutes, most of it one image build you can walk away from.
+
 | File | One line | Read it when |
 | --- | --- | --- |
-| `IGVC_2027_Docker_Setup_Guide.docx` | Install-to-running walkthrough for a new team member | You are setting up a machine |
-| `GAZEBO_SETUP.md` | The simulator: which version, the GPU, the course, the robot | Any Gazebo work |
+| `IGVC_2027_Gazebo_Setup_Guide.docx` | **Zero to a robot driving the course, on your own machine** | You want the simulator running |
+| `GAZEBO_QUICKSTART.md` | The same guide, in Markdown, and the source the .docx is built from | Same, but you prefer the terminal |
+| `IGVC_2027_Docker_Setup_Guide.docx` | Install-to-running walkthrough for a new team member | You are setting up a machine from scratch |
+| `GAZEBO_SETUP.md` | The simulator: which version, the GPU, the course, the robot, the interface contract, autonomy | Any Gazebo work |
 | `DOCKER_CHANGES.md` | Every image and compose change, with evidence | You are changing an image, or wondering why one looks like that |
 | `BRANCHES.md` | The 15 upstream branches, the submodule pin, what ran at competition | Choosing a baseline, or cloning |
 | `RQ03_AUDIT.md` | Audit of what the downstream stack actually subscribes to | Wiring Gazebo to lane detection or Nav2 |
+| `make_gazebo_docx.py` | Builds the Word guide from the Markdown one | You edited `GAZEBO_QUICKSTART.md` |
 
 ---
 
@@ -32,6 +40,25 @@ people; Part 6 known limitations; and a quick reference of every command.
 **Careful:** Word locks the file. `make_docx.py` honours a `DOCX_OUT`
 environment variable so it can be generated elsewhere and copied in.
 
+## `IGVC_2027_Gazebo_Setup_Guide.docx` and `GAZEBO_QUICKSTART.md`
+
+**For:** anyone who wants the simulator running and has not done it before. The
+Markdown is the source of truth; the Word file is generated from it by
+`make_gazebo_docx.py` and is overwritten on every run, so edit the Markdown.
+
+```bash
+python3 docs/make_gazebo_docx.py
+DOCX_OUT=/tmp/guide.docx python3 docs/make_gazebo_docx.py   # if Word has it open
+```
+
+**Contains:** the WSL2-not-PowerShell rule and why it is absolute; the
+prerequisites including the WSL Integration toggle people miss; build and run;
+the GPU check that must pass before any camera work; running it with and
+without autonomy; keyboard teleop; the two verification scripts; ten
+troubleshooting entries taken from failures that actually happened; and a
+section on what the simulator does NOT do, which is the part to read before
+describing it to anyone.
+
 ## `GAZEBO_SETUP.md`
 
 **For:** the simulator. This is the system of record for it; if Gazebo and this
@@ -48,12 +75,19 @@ forces 640x360. **4A** the verification log, with the actual command output.
 **5** what is installed in the image and why. **6** the diagnostic scripts.
 **7** what this still does not settle. **8** the generated IGVC course, the
 bringup launch file, and the collision-mesh defect that used to crash the
-physics engine.
+physics engine. **9** RQ-03, the section 3.7 interface contract as one bridge
+config, plus the two things that turned out not to be renames: Gazebo's
+odometry frame is rotated by the spawn yaw, and a one-word frame-id typo named
+a TF frame that did not exist. **10** the robot driving the course by itself -
+what is in the loop, what it measured, and what it is emphatically not doing.
 
-**The two things worth knowing before you touch anything:** rendering can fail
-silently (section 3), and `real_time_factor` lies about sensor rates because
+**The four things worth knowing before you touch anything:** rendering can fail
+silently (section 3); `real_time_factor` lies about sensor rates because
 physics and rendering run on separate threads, so you must count messages
-(section 4).
+(section 4); **the robot is not perceiving anything** - lane lines and barrels
+come from `track_points.json`, not the camera (section 10.3); and two
+simulators running at once produce results that look entirely plausible and are
+worthless (section 10.5).
 
 ## `DOCKER_CHANGES.md`
 
@@ -142,3 +176,26 @@ code is newer.
 - **A test has to be able to fail.** A world with no robot still publishes
   `/clock`; a robot with the wrong wheel radius still publishes `/odom`. Checks
   in this project are written to fail on the thing they claim to check.
+
+
+---
+
+## Keeping these current
+
+`GAZEBO_QUICKSTART.md` is the source; the `.docx` is generated from it and
+overwritten on every run, so **edit the Markdown**:
+
+```bash
+python3 docs/make_gazebo_docx.py
+DOCX_OUT=/tmp/g.docx python3 docs/make_gazebo_docx.py    # if Word has it open
+```
+
+Two things in the quickstart go stale fastest and are worth checking whenever
+someone new sets up:
+
+1. **Section 1A, the machine matrix.** The native-Linux service is written but
+   unverified, and says so. When someone runs it successfully, delete that
+   caveat in both `GAZEBO_QUICKSTART.md` and `DOCKER_CHANGES.md` 13.4.
+2. **Section 9, troubleshooting.** Every entry there came from a failure that
+   actually happened. When you lose an hour to something new, add it - that is
+   what has made the list worth reading.
