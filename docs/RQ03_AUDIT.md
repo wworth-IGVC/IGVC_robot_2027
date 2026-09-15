@@ -15,27 +15,58 @@ logs nothing, a synchroniser that never fires because a parameter still says
 three cameras. Those are the ones worth re-testing after any change here.
 
 **All three critics returned FLAWED** on the first design. They agreed on what
-was right and independently found the same blocker. Read items 1 and 2 before
-writing any code.
+was right and independently found the same blocker - which then turned out to
+be **four-fifths wrong**; see item 1, kept and corrected, for both the fact and
+the method error that produced it. Item 2 is the finding that held up and is
+the one worth acting on.
 
 ---
 
-## 1. BLOCKER: the Gazebo container cannot run any downstream node
+## 1. PARTLY WRONG, corrected 2026-09-15: the container was mostly fine
 
-`docker/Dockerfile.gazebo-jazzy` installs exactly: `ros-jazzy-ros-gz`,
-`gz-ros2-control`, `simulation-interfaces`, `xacro`, `robot-state-publisher`,
-`rviz2`, `teleop-twist-keyboard`, `mesa-utils`, `vulkan-tools`,
-`python3-colcon-common-extensions`.
+**The audit claimed the Gazebo image could not run any downstream node, naming
+five missing packages. Four of the five were present. This section is kept, and
+corrected, rather than deleted.**
 
-**Verified by grep: it has no `cv_bridge`, no `python3-opencv`, no
-`image_geometry`, no `message_filters`, no Nav2.**
+What was actually true, measured in the built image with `apt-mark`:
 
-`lane_detection_node` needs all four of the first group. `start_sim.sh` also
-builds only three packages, so `igvc_lane_detection` is not even importable.
+```text
+manual: ros-jazzy-image-geometry     <- genuinely absent, now added
+auto:   ros-jazzy-cv-bridge          <- already present, pulled in transitively
+auto:   ros-jazzy-message-filters    <- already present, pulled in transitively
+        python3-opencv, numpy        <- already present
+```
 
-**Nothing downstream can run until the image is rebuilt.** Plan for that up
-front rather than discovering it after the naming work is done. Two critics
-called this the single reason the original design could not execute.
+`cv_bridge`, `message_filters`, `python3-opencv` and `numpy` all import in the
+image and always did; they arrive as dependencies rather than as explicit apt
+lines. Genuinely missing were **`image_geometry`**, which
+`igvc_lane_detection`'s `PinholeCameraModel` needs, and **Nav2**, without which
+the ground-truth lane grid can be published but nothing can act on it. Both are
+now installed in `docker/Dockerfile.gazebo-jazzy`.
+
+**How the error was made, because the method matters more than the fact.** Two
+critics asserted the packages were missing. The claim was then "verified" by
+`grep` against the Dockerfile's explicit `apt-get install` list. That grep can
+only establish **not explicitly listed**, which is a different claim from **not
+present**, and the two were conflated. A transitive dependency satisfies the
+second while failing the first.
+
+The check that would have settled it in one command, and the one to use next
+time, runs against the built image rather than the recipe:
+
+```bash
+docker run --rm igvc-gazebo-jazzy:latest python3 -c "import cv_bridge"
+```
+
+The general lesson is this project's own rule, applied to itself: **a test has
+to be able to fail in the right direction.** Grepping a Dockerfile cannot
+distinguish absent from inherited, so it was never capable of confirming the
+claim it was used to confirm.
+
+**What survives.** Checking the container can run a node *before* designing
+around it is still right, and Nav2 and `image_geometry` really did have to be
+added, so the rebuild the audit called for was necessary. The conclusion held
+while the evidence for it did not.
 
 ## 2. A real bug, independently confirmed, and it predates RQ-03
 
