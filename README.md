@@ -32,6 +32,7 @@ Every change, its root cause, and how it was verified is recorded in
 | **Run the simulator and watch the robot drive the course** | [docs/IGVC_2027_Gazebo_Setup_Guide.docx](docs/IGVC_2027_Gazebo_Setup_Guide.docx), or [docs/GAZEBO_QUICKSTART.md](docs/GAZEBO_QUICKSTART.md) |
 | Set up a machine from scratch, new to Docker | [docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx) |
 | Understand how the simulator works, or change it | [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) |
+| **See what is done and what is left on the simulator** | [docs/GAZEBO_TODO.md](docs/GAZEBO_TODO.md) |
 | Know what is in each image and why | [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) |
 | Find the right branch | [docs/BRANCHES.md](docs/BRANCHES.md) |
 
@@ -251,10 +252,10 @@ cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
 docker compose -f docker-compose.windows.yml up -d igvc_gazebo
 
 # prove the GPU is actually in use before anything else
-docker exec -it igvc_gazebo bash -c   "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/render_check.sh"
+docker exec -it igvc_gazebo bash -c   "source /opt/ros/jazzy/setup.bash && bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh"
 
 # the robot drives the course by itself
-docker exec -it igvc_gazebo bash -c "NAV=1 bash scripts/gazebo/start_sim.sh"
+docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
 ```
 
 **`up -d`, not `run --rm`.** `run` creates a new container every time, so a

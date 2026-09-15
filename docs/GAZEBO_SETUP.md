@@ -27,7 +27,7 @@ GPU, with nothing ROS-version-specific in them.
 | GPU rendering | **Yes**, `D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`, but only with four specific settings |
 | Three cameras at 30 Hz | **No.** At 1280x720/30 Hz you get ~7 Hz each |
 | Three cameras, workable | **Yes at 640x360/15 Hz**: ~11 Hz each, physics at real time |
-| A robot that drives | **Yes.** IGVC course world plus a spawn/bridge launch file; 7 of 7 topics and the drive test pass. See section 8 |
+| A robot that drives | **Yes.** IGVC course world plus a spawn/bridge launch file. `bringup_smoke_test.sh`: 18 of 18 checks, 0 failures. See section 8 |
 | Downstream nodes | **Yes.** The bridge publishes the section 3.7 contract names; the real 2026 ground-truth, navigator and Nav2 stack run against it. Section 9 |
 | A robot that drives ITSELF | **Yes.** 122.9 m of autonomous driving, max 1.79 m off the lane centreline, no `/cmd_vel` from the test. Section 10 |
 | Perception | **No, and do not imply otherwise.** Lanes and barrels come from `track_points.json`; nothing plans on the camera or lidar. Section 10.3 |
@@ -54,13 +54,13 @@ navigation bug and is not one. That cost real time on 2026-09-15; see 10.5.
 Then, before trusting anything:
 
 ```bash
-docker exec -it igvc_gazebo bash -c   "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/render_check.sh"
+docker exec -it igvc_gazebo bash -c   "source /opt/ros/jazzy/setup.bash && bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh"
 ```
 
 And to see the robot drive the course by itself:
 
 ```bash
-docker exec -it igvc_gazebo bash -c "NAV=1 bash scripts/gazebo/start_sim.sh"
+docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
 ```
 
 ---
@@ -495,14 +495,23 @@ same Gazebo build the Humble image ran. The simulator did not change when the
 distro did, so every performance number in section 4 carries over exactly
 rather than by analogy.
 
-Size **1023 MB downloaded, 4.89 GB on disk**. The two figures disagree because
-the containerd image store unpacks layers lazily; `inspect` reports the former
-and `image ls` the latter. For comparison the Humble image was 920 MB / 4.24
-GB, so Jazzy costs about 100 MB more, which is `gz_ros2_control` and the
-`ros2_control` stack it pulls.
+Size **5.57 GB on disk** as of 2026-09-15, up from 4.89 GB when the distro
+moved to Jazzy. The extra ~0.7 GB is Nav2: `ros-jazzy-navigation2` and
+`ros-jazzy-nav2-bringup`, plus `image-geometry` and `twist-stamper`, added so
+the robot can navigate rather than only be driven (section 10). For comparison
+the Humble image was 4.24 GB.
 
-It does **not** contain the workspace's Python/ML stack; it is a simulator, not
-a replacement for `igvc-humble-fused-drive`.
+`docker image ls` and `docker inspect` disagree on size because the containerd
+store unpacks layers lazily; `image ls` reports the on-disk figure used here.
+
+It does **not** contain the workspace's Python/ML stack: **no `torch`, no
+`ultralytics`, and no `models/yolopv2.pt`.** `numpy`, `cv2`, `cv_bridge`,
+`message_filters` and `image_geometry` are all present, so the geometric half
+of `igvc_lane_detection` runs and the ground-truth nodes run - but the lane
+detector itself cannot, and that is the gap between today's ground-truth
+navigation and real perception. Adding torch to this image is a deliberate
+decision, not an oversight: it roughly triples the size, and perception work
+has a home already in `igvc-humble-fused-drive`.
 
 Base image note: this is `ros:jazzy-ros-base`, not the `osrf/ros:jazzy-desktop`
 that the team standardised on for DevEnv. Desktop is roughly 3.5 GB against 800
@@ -549,15 +558,27 @@ rather than adding `tr -d '\r'` calls.
   the Dockerfile on `main` of `IGVC_robot_2026` is what ran at competition. The
   trace, and the part of the question that is still open, are in
   [BRANCHES.md](BRANCHES.md) under "What actually ran at competition".
-- **RQ-03, the ZED path.** Nothing in *this* section replaces the ZED SDK; the
-  three `rgbd_camera` sensors in `three_camera_load.sdf` are a load test, not
-  the shim. **A nine-agent audit of what the downstream stack actually
-  subscribes to is in [RQ03_AUDIT.md](RQ03_AUDIT.md)**, including a real
-  frame-name bug, a container that cannot run any consumer, and four failures
-  that produce no error at all. Read it before or alongside the implementation.
+- ~~**RQ-03, the ZED path.**~~ **Answered 2026-09-15, sections 9 and 10.** The
+  bridge publishes the section 3.7 contract names and the real 2026 navigation
+  stack runs against them. The three `rgbd_camera` sensors in
+  `three_camera_load.sdf` remain a load test, not the shim.
+  [RQ03_AUDIT.md](RQ03_AUDIT.md) is the audit that fed it, and its closing
+  section now records which of its findings held. The one that mattered most
+  was a real frame-name bug that fails silently (9.4). Its claim that the
+  container could not run any consumer was **four-fifths wrong** - four of the
+  five packages were already present - and it corrects itself on both the fact
+  and the method.
+- **What the simulator still cannot do: perceive.** Lane lines and barrel
+  positions come from `track_points.json`. The camera, depth, point cloud and
+  lidar all publish and nothing plans on any of them, and running the real lane
+  detector needs `torch` and the YOLOPv2 weights, neither of which is in the
+  image. See 10.3 before describing this to anyone.
 - **RQ-06**, and therefore whether `gz_ros2_control` gets used at all. It is
-  installed since the move to Jazzy, so this is now a design choice rather than
-  a build problem.
+  installed since the move to Jazzy, so this is a design choice rather than a
+  build problem - and it is now the **last** thing between the simulator and a
+  full-fidelity control path. Nav2's twist currently goes straight to Gazebo's
+  DiffDrive, so `/isaac_joint_cmd` is unbridged and `ros2_control` is not
+  exercised at all. Outstanding item 19.
 - **Native dual-boot versus WSL2.** Effectively answered: **stay on WSL2.** It
   reaches the GPU (section 3) and, launched from a WSL2 shell, it also gives a
   working GUI (section 3A). A native Ubuntu install would very likely be faster,
@@ -566,7 +587,9 @@ rather than adding `tr -d '\r'` calls.
   worth asking three Windows users to install a second operating system for.
   Revisit only if measured performance blocks real work.
 - **The other two team machines.** The RTX 5080 Laptop and the Windows 10
-  machine have not been tested. The Intel-adapter crash in particular depends
+  machine have still not been tested, and **native Linux has no verified path
+  either** - `igvc_gazebo_linux` is written but unrun (`DOCKER_CHANGES.md`
+  13.4). `GAZEBO_QUICKSTART.md` section 1A is written for exactly this gap. The Intel-adapter crash in particular depends
   on the iGPU, so it will differ per machine. `render_check.sh` exists so each
   member can settle it in one command.
 ## 8. The world and the launch file: a robot that drives
@@ -587,7 +610,7 @@ than a second shell into the one you are looking at. `up` honours
 # terminal 1, from a WSL2 shell - NOT PowerShell, see section 3A
 cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
 docker compose -f docker-compose.windows.yml up -d igvc_gazebo
-docker exec -it igvc_gazebo bash scripts/gazebo/start_sim.sh
+docker exec -it igvc_gazebo bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh
 ```
 
 `start_sim.sh` builds what it needs, regenerates the world if
@@ -1006,9 +1029,9 @@ Start it, touch nothing, and the robot navigates the IGVC course.
 
 ```bash
 # from a WSL2 shell, NOT PowerShell
-docker exec -it igvc_gazebo bash scripts/gazebo/start_sim.sh   # NAV=1 for nav
+docker exec -it igvc_gazebo bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh   # NAV=1 for nav
 # or the check that grades it
-docker exec -it igvc_gazebo bash scripts/gazebo/autonomy_check.sh
+docker exec -it igvc_gazebo bash src/IGVC_robot_2026/scripts/gazebo/autonomy_check.sh
 ```
 
 ### 10.1 What is actually in the loop

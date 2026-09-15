@@ -17,6 +17,7 @@ takes about 45 minutes, most of it one image build you can walk away from.
 | `IGVC_2027_Gazebo_Setup_Guide.docx` | **Zero to a robot driving the course, on your own machine** | You want the simulator running |
 | `GAZEBO_QUICKSTART.md` | The same guide, in Markdown, and the source the .docx is built from | Same, but you prefer the terminal |
 | `IGVC_2027_Docker_Setup_Guide.docx` | Install-to-running walkthrough for a new team member | You are setting up a machine from scratch |
+| `GAZEBO_TODO.md` | **What is done and what is next, one page** | Picking up simulator work, or reporting status |
 | `GAZEBO_SETUP.md` | The simulator: which version, the GPU, the course, the robot, the interface contract, autonomy | Any Gazebo work |
 | `DOCKER_CHANGES.md` | Every image and compose change, with evidence | You are changing an image, or wondering why one looks like that |
 | `BRANCHES.md` | The 15 upstream branches, the submodule pin, what ran at competition | Choosing a baseline, or cloning |

@@ -109,7 +109,7 @@ Use the other compose file and the Linux service:
 ```bash
 xhost +local:docker                      # once per login
 docker compose up -d igvc_gazebo_linux
-docker exec -it igvc_gazebo_linux bash scripts/gazebo/start_sim.sh
+docker exec -it igvc_gazebo_linux bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh
 ```
 
 That service is new as of 2026-09-15 and is **not yet verified on a real Linux
@@ -157,7 +157,7 @@ Navigation, lidar, odometry and control work are all still valid, because
 
 ```bash
 docker exec -it igvc_gazebo bash -c \
-  "CAMERAS=none NAV=1 HEADLESS=1 bash scripts/gazebo/start_sim.sh"
+  "CAMERAS=none NAV=1 HEADLESS=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
 ```
 
 ### macOS
@@ -238,7 +238,7 @@ position jumps between the two. It looks exactly like a navigation bug.
 
 ```bash
 docker exec -it igvc_gazebo bash -c \
-  "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/render_check.sh"
+  "source /opt/ros/jazzy/setup.bash && bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh"
 ```
 
 Want:
@@ -260,11 +260,18 @@ on a software rasteriser.
 ## 6. Run it
 
 ```bash
-docker exec -it igvc_gazebo bash scripts/gazebo/start_sim.sh
+docker exec -it igvc_gazebo bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh
 ```
 
 Two windows open: **Gazebo** with the IGVC course, and **RViz** showing the
 robot, the lidar returns and the front camera.
+
+**Why `src/IGVC_robot_2026/` is in that path.** The container's working
+directory is `/root/ros2_ws`, the colcon workspace, and the repo is mounted one
+level down at `/root/ros2_ws/src/IGVC_robot_2026`. The directory keeps the 2026
+name on purpose: the compose files, `IGVC_WORKSPACE_ROOT` and the DDS profile
+all reference it. Drop the prefix and you get
+`bash: scripts/gazebo/start_sim.sh: No such file or directory`.
 
 Options, set before the command:
 
@@ -279,7 +286,7 @@ Options, set before the command:
 So the demo - the robot driving the course by itself:
 
 ```bash
-docker exec -it igvc_gazebo bash -c "NAV=1 bash scripts/gazebo/start_sim.sh"
+docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
 ```
 
 Give it about 60 seconds. Gazebo loads, then Nav2 starts 15 seconds later on
@@ -320,7 +327,7 @@ something is wrong, rather than to look reassuring.
 ```bash
 # the simulator and the topic contract: ~4 minutes
 docker exec -it igvc_gazebo bash -c \
-  "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/bringup_smoke_test.sh"
+  "source /opt/ros/jazzy/setup.bash && bash src/IGVC_robot_2026/scripts/gazebo/bringup_smoke_test.sh"
 ```
 
 Expect `topic checks passed: 18   failed: 0`, plus `DRIVE TEST: PASS` and
@@ -332,7 +339,7 @@ setup.
 ```bash
 # does the robot drive the course by itself: ~5 minutes
 docker exec -it igvc_gazebo bash -c \
-  "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/autonomy_check.sh"
+  "source /opt/ros/jazzy/setup.bash && bash src/IGVC_robot_2026/scripts/gazebo/autonomy_check.sh"
 ```
 
 Expect `AUTONOMY CHECK: PASS`. This script **never publishes a velocity
@@ -423,7 +430,7 @@ post them; they identify almost every cause:
 ```bash
 wsl -l -v                                        # from PowerShell
 docker version | head -20
-docker exec igvc_gazebo bash -c "source /opt/ros/jazzy/setup.bash && bash scripts/gazebo/render_check.sh" | tail -5
+docker exec igvc_gazebo bash -c "source /opt/ros/jazzy/setup.bash && bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh" | tail -5
 docker exec igvc_gazebo ps -ef | grep -cE "gz sim|rviz2"
 ```
 
@@ -469,15 +476,16 @@ docker compose -f docker-compose.windows.yml restart igvc_gazebo   # reset
 docker compose -f docker-compose.windows.yml down                  # stop
 
 # inside the container
-docker exec -it igvc_gazebo bash scripts/gazebo/start_sim.sh                    # drive it yourself
-docker exec -it igvc_gazebo bash -c "NAV=1 bash scripts/gazebo/start_sim.sh"    # it drives itself
+docker exec -it igvc_gazebo bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh                    # drive it yourself
+docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"    # it drives itself
 docker exec -it igvc_gazebo bash          # a shell, for teleop
 
-# checks, each needs ROS sourced first
+# checks, from a shell inside the container (docker exec -it igvc_gazebo bash).
+# cwd is /root/ros2_ws; the repo is one level down in src/IGVC_robot_2026.
 source /opt/ros/jazzy/setup.bash
-bash scripts/gazebo/render_check.sh          # GPU. run this first, on every machine
-bash scripts/gazebo/bringup_smoke_test.sh    # simulator + topic contract
-bash scripts/gazebo/autonomy_check.sh        # does it drive the course itself
+bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh          # GPU. run this first, on every machine
+bash src/IGVC_robot_2026/scripts/gazebo/bringup_smoke_test.sh    # simulator + topic contract
+bash src/IGVC_robot_2026/scripts/gazebo/autonomy_check.sh        # does it drive the course itself
 ```
 
 | Topic | What |

@@ -1579,7 +1579,7 @@ machinery swapped for the native equivalents:
 ```bash
 xhost +local:docker
 docker compose up -d igvc_gazebo_linux
-docker exec -it igvc_gazebo_linux bash scripts/gazebo/start_sim.sh
+docker exec -it igvc_gazebo_linux bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh
 ```
 
 **Not verified on a real Linux machine**, and the service says so in its own
