@@ -43,12 +43,19 @@
           <mesh filename="package://igvc_test_description/meshes/caster_raceway_link_Part_2_Part_2.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
-      <collision>
-        <origin xyz="-0.0003886 -0.0011449 -0.0088217" rpy="0. 0. ${0.9071883-3.14152/4}" />
-        <geometry>
-          <mesh filename="package://igvc_test_description/meshes/caster_raceway_link_Part_2_Part_2.obj" scale="1. 1. 1." />
-        </geometry>
-      </collision>
+      <!-- SIM: no collider. This is the swivel bracket above the caster wheel;
+           it never touches the ground, and its mesh is one of the four with
+           zero vertex normals that crash dartsim (see the note on
+           left_wheel_link). Omitting it avoids both a bad guess at its shape
+           and a spurious contact. -->
+      <xacro:unless value="$(arg sim)">
+        <collision>
+          <origin xyz="-0.0003886 -0.0011449 -0.0088217" rpy="0. 0. ${0.9071883-3.14152/4}" />
+          <geometry>
+            <mesh filename="package://igvc_test_description/meshes/caster_raceway_link_Part_2_Part_2.obj" scale="1. 1. 1." />
+          </geometry>
+        </collision>
+      </xacro:unless>
     </link>
     <link name="caster_wheel_link">
       <inertial>
@@ -62,12 +69,28 @@
           <mesh filename="package://igvc_test_description/meshes/caster_wheel_link__in_Caster__in_Caster.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
-      <collision>
-        <origin xyz="-0.1135063 0.0373062 -0.0238125" rpy="-1.570796 -1e-07 1.570796" />
-        <geometry>
-          <mesh filename="package://igvc_test_description/meshes/caster_wheel_link__in_Caster__in_Caster.obj" scale="1. 1. 1." />
-        </geometry>
-      </collision>
+      <!-- SIM: sphere. A sphere is the right collider for a caster anyway,
+           since it rolls in every direction without the mesh's facet edges
+           catching. Radius 0.0801 comes from the joint chain worked out in
+           urdf/gazebo/gazebo_sim.urdf.xacro: the caster contacts the ground at
+           -0.0307033 + -0.1223279 - 0.0801 = -0.2331, which is 4 mm below the
+           drive wheels at -0.2290. That 4 mm is build tolerance. -->
+      <xacro:if value="$(arg sim)">
+        <collision>
+          <origin xyz="0. 0. 0." rpy="0. 0. 0." />
+          <geometry>
+            <sphere radius="0.0801" />
+          </geometry>
+        </collision>
+      </xacro:if>
+      <xacro:unless value="$(arg sim)">
+        <collision>
+          <origin xyz="-0.1135063 0.0373062 -0.0238125" rpy="-1.570796 -1e-07 1.570796" />
+          <geometry>
+            <mesh filename="package://igvc_test_description/meshes/caster_wheel_link__in_Caster__in_Caster.obj" scale="1. 1. 1." />
+          </geometry>
+        </collision>
+      </xacro:unless>
     </link>
     <link name="left_wheel_link">
       <inertial>
@@ -81,12 +104,41 @@
           <mesh filename="package://igvc_test_description/meshes/left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
-      <collision>
-        <origin xyz="9.06e-05 -0.0010859 -0.0010079" rpy="0. 0.8801533 -3.141593" />
-        <geometry>
-          <mesh filename="package://igvc_test_description/meshes/left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
-        </geometry>
-      </collision>
+      <!-- SIM: cylinder, not the mesh. Two independent reasons.
+
+           1. The mesh CRASHES the physics engine. Verified 2026-09-15:
+              left_wheel, right_wheel, caster_wheel and caster_raceway have
+              528, 528, 500 and 209 vertices and ZERO vertex normals. dartsim
+              reports "does not have a normal count [0] that matches its
+              vertex count [3168]. This submesh will be ignored!", then
+              segfaults in OdeMesh::fillArrays on the empty result. gz sim
+              dies on the first physics step, exit 139. Those four are exactly
+              the parts that must collide for the robot to move.
+           2. Even repaired, a faceted mesh is a poor wheel: it rolls on flats
+              and catches on edges. RQ-11 makes the same point about cost.
+
+           Radius 0.1016 and width 0.0640 are the mesh's own measured bounding
+           box (0.2032 x 0.0640 x 0.2032), so 0.2032 is the DIAMETER. See the
+           long note in urdf/gazebo/gazebo_sim.urdf.xacro. The rpy rotates the
+           cylinder's Z axis onto Y, which is the wheel joint axis.
+
+           The real robot keeps the mesh, below. -->
+      <xacro:if value="$(arg sim)">
+        <collision>
+          <origin xyz="0. 0. 0." rpy="1.5707963 0. 0." />
+          <geometry>
+            <cylinder radius="0.1016" length="0.0640" />
+          </geometry>
+        </collision>
+      </xacro:if>
+      <xacro:unless value="$(arg sim)">
+        <collision>
+          <origin xyz="9.06e-05 -0.0010859 -0.0010079" rpy="0. 0.8801533 -3.141593" />
+          <geometry>
+            <mesh filename="package://igvc_test_description/meshes/left_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
+          </geometry>
+        </collision>
+      </xacro:unless>
     </link>
     <link name="right_wheel_link">
       <inertial>
@@ -100,12 +152,23 @@
           <mesh filename="package://igvc_test_description/meshes/right_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
         </geometry>
       </visual>
-      <collision>
-        <origin xyz="-0.0007409 0.0085441 0.0012195" rpy="-3.141593 0. -7.32051e-08" />
-        <geometry>
-          <mesh filename="package://igvc_test_description/meshes/right_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
-        </geometry>
-      </collision>
+      <!-- SIM: cylinder. Same reasoning as left_wheel_link above. -->
+      <xacro:if value="$(arg sim)">
+        <collision>
+          <origin xyz="0. 0. 0." rpy="1.5707963 0. 0." />
+          <geometry>
+            <cylinder radius="0.1016" length="0.0640" />
+          </geometry>
+        </collision>
+      </xacro:if>
+      <xacro:unless value="$(arg sim)">
+        <collision>
+          <origin xyz="-0.0007409 0.0085441 0.0012195" rpy="-3.141593 0. -7.32051e-08" />
+          <geometry>
+            <mesh filename="package://igvc_test_description/meshes/right_wheel_link__in_Wheel_Stand_In_01__in_Wheel_Stand_In.obj" scale="1. 1. 1." />
+          </geometry>
+        </collision>
+      </xacro:unless>
     </link>
     <link name="chassis_link">
       <inertial>

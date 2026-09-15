@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name='igvc_test_robot'>
+    <!-- Declared FIRST, before any include or macro call, because
+         test_robot_body.urdf.xacro reads $(arg sim) to choose primitive
+         collision shapes over the mesh ones. xacro evaluates $(arg) at macro
+         invocation time, and <xacro:robot_body /> below runs before the
+         declaration that used to sit at the bottom of this file. -->
+    <xacro:arg name="sim" default="false" />
+
     <xacro:include filename="$(find igvc_test_description)/urdf/parts/test_robot_body.urdf.xacro" />
     <xacro:include filename="$(find igvc_test_description)/urdf/control/ros2_control_info.urdf.xacro" />
     <xacro:include filename="$(find igvc_test_description)/urdf/parts/zed_camera_x.urdf.xacro" />
@@ -30,8 +37,8 @@
     </xacro:gps_antenna>
 
     <!-- Gazebo-only plugins and sensors. Inert on the real robot: pass
-         sim:=true to load them. See urdf/gazebo/gazebo_sim.urdf.xacro. -->
-    <xacro:arg name="sim" default="false" />
+         sim:=true to load them. See urdf/gazebo/gazebo_sim.urdf.xacro.
+         The sim arg itself is declared at the top of this file. -->
     <xacro:if value="$(arg sim)">
         <xacro:include filename="$(find igvc_test_description)/urdf/gazebo/gazebo_sim.urdf.xacro" />
     </xacro:if>
