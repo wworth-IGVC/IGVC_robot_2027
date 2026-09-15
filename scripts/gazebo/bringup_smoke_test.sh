@@ -37,7 +37,15 @@ echo "=============================================================="
 echo " Gazebo IGVC bringup smoke test"
 echo "=============================================================="
 
-ros2 launch igvc_test_bringup gazebo_sim.launch.py headless:=true \
+# RVIZ=1 additionally starts RViz and checks the node comes up. That needs
+# a display, so it only works from a WSL2 shell, never from PowerShell.
+LAUNCH_ARGS="headless:=true"
+if [ "${RVIZ:-0}" = "1" ]; then
+    LAUNCH_ARGS="headless:=false rviz:=true"
+fi
+echo "launch args: $LAUNCH_ARGS"
+
+ros2 launch igvc_test_bringup gazebo_sim.launch.py $LAUNCH_ARGS \
     > /tmp/bringup.log 2>&1 &
 LAUNCH_PID=$!
 
@@ -76,6 +84,18 @@ check_topic /imu             sensor_msgs/msg/Imu
 check_topic /joint_states    sensor_msgs/msg/JointState
 check_topic /tf              tf2_msgs/msg/TFMessage
 check_topic /front_zed/image sensor_msgs/msg/Image 25
+
+if [ "${RVIZ:-0}" = "1" ]; then
+    echo
+    echo "--- RViz ---"
+    if ros2 node list 2>/dev/null | grep -q rviz2; then
+        printf "  %-30s PASS\n" "rviz2 node running"
+        PASS=$((PASS + 1))
+    else
+        printf "  %-30s FAIL\n" "rviz2 node running"
+        FAIL=$((FAIL + 1))
+    fi
+fi
 
 odom_x () {
     timeout 15 ros2 topic echo --once /odom nav_msgs/msg/Odometry 2>/dev/null \

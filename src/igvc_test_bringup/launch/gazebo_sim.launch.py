@@ -46,6 +46,7 @@ Arguments
     sim_camera_height  int                        (default: 360)
     sim_camera_hz      int                        (default: 15)
     headless           true | false               (default: false)
+    rviz               true | false               (default: false)
     use_sim_time       true | false               (default: true)
     robot_name         spawned entity name        (default: igvc_robot)
     spawn_{x,y,z,yaw}  override the json spawn pose
@@ -236,14 +237,45 @@ def _setup(context, *args, **kwargs):
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
+    # ── RViz, optional ───────────────────────────────────────────────────────
+    #
+    # Deliberately NOT an include of rviz.launch.py. That file starts its own
+    # robot_state_publisher, and two of them publishing /robot_description and
+    # /tf_static against each other is a confusing mess. This runs the rviz2
+    # node directly and reuses the one already started above.
+    #
+    # It also uses its own config. config.rviz is fixed to base_link and shows
+    # only the model and TF, so a driving robot appears to stand still while
+    # the world slides past. gazebo_sim.rviz is fixed to odom and adds the
+    # laser, camera and odometry displays.
+    actions = [gz, rsp, spawn, bridge]
+
+    use_rviz = cfg("rviz").lower() in ("true", "1", "yes")
+    if use_rviz:
+        rviz_cfg = _find(
+            os.path.join("src", "igvc_test_bringup", "config",
+                         "gazebo_sim.rviz"),
+            "igvc_test_bringup",
+            os.path.join("config", "gazebo_sim.rviz"),
+        )
+        actions.append(Node(
+            package="rviz2",
+            executable="rviz2",
+            name="rviz2",
+            output="screen",
+            arguments=["-d", rviz_cfg],
+            parameters=[{"use_sim_time": use_sim_time}],
+        ))
+
     print("gazebo_sim.launch.py")
     print("  repo root : %s" % repo)
     print("  world     : %s" % world)
     print("  spawn     : x=%.4f y=%.4f z=%.2f yaw=%.6f" % (sx, sy, sz, syaw))
     print("  cameras   : %s" % cams)
     print("  bridging  : %d topics" % len(bridge_args))
+    print("  rviz      : %s" % ("on" if use_rviz else "off"))
 
-    return [gz, rsp, spawn, bridge]
+    return actions
 
 
 def generate_launch_description():
@@ -293,6 +325,7 @@ def generate_launch_description():
         DeclareLaunchArgument("sim_camera_height", default_value="360"),
         DeclareLaunchArgument("sim_camera_hz", default_value="15"),
         DeclareLaunchArgument("headless", default_value="false"),
+        DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("robot_name", default_value="igvc_robot"),
         DeclareLaunchArgument("spawn_x", default_value=""),

@@ -929,8 +929,11 @@ pass.
 16. **Repair the four zero-normal collision meshes** (section 12.4), or decide
     the primitive colliders are the permanent answer for simulation. The
     meshes are still broken for Isaac and MoveIt either way.
-17. **Confirm the `/cmd_vel` timeout divergence** (section 12.5) and either
-    configure Gazebo to match `diff_drive_controller` or document it loudly.
+17. **Settle whether Gazebo's DiffDrive has a `/cmd_vel` timeout** (section
+    12.5). Two runs disagreed and the smoke test cannot resolve it; needs a
+    test that timestamps the last command against the last odometry change.
+    `diff_drive_controller` on the real robot does time out, so a difference
+    here runs in the unsafe direction.
 18. **Decide RQ-11**, whether barrels should be solid. Gazebo says yes today,
     Isaac's generated field says no. The two simulators disagree right now.
 
@@ -1433,11 +1436,18 @@ The test commands a velocity and checks the odometry moves, rather than
 checking that topics exist. A world with no robot in it still publishes
 `/clock`; a robot with a wrong wheel radius still publishes `/odom`.
 
-**Read that distance twice.** 8 s at 0.6 m/s is 4.8 m, but the robot travelled
-5.466 m, which is 9.1 s of motion. It kept driving after the commands stopped.
-Gazebo's DiffDrive appears to apply no `/cmd_vel` timeout where
-`diff_drive_controller` does. Confirm it, then configure or document it
-loudly - that divergence runs in the unsafe direction.
+**A second run corrected an early reading of that distance.** 8 s at 0.6 m/s
+is 4.8 m. The headless run gave 5.466 m, or 9.1 s of motion, which looked like
+the robot continuing after the command burst stopped - and therefore like
+Gazebo's DiffDrive applying no `/cmd_vel` timeout where `diff_drive_controller`
+does. The GUI run gave **4.622 m, or 7.7 s**, which is *below* 4.8 m and is
+what spin-up alone produces.
+
+So the overshoot was most likely jitter in when `ros2 topic echo --once`
+connected, not a missing timeout, and the claim does not stand. **The question
+is open, not answered in either direction.** The smoke test's timing is too
+loose to settle it; a purpose-built test would timestamp the last command and
+the last odometry change. Outstanding item 17.
 
 ### 12.6 Not done
 

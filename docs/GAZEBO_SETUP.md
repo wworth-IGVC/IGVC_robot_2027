@@ -486,6 +486,7 @@ never shrinks and Windows 11 Home has no Hyper-V to compact it.
 | `scripts/gazebo/three_camera_load.sdf` | Three ZED-placed rgbd cameras plus the RPLiDAR, at the URDF poses from section 3.3 |
 | `scripts/gazebo/bridge_smoke_test.sh` | Proves `ros_gz` carries Image, LaserScan and Clock into ROS 2. Exit 0 on all pass |
 | `scripts/gazebo/generate_igvc_world.py` | Builds `worlds/igvc_course.sdf` from `track_points.json`. See section 8.2 |
+| `scripts/gazebo/start_sim.sh` | One command to bring the whole thing up inside the container: build, regenerate the world if the track data is newer, launch Gazebo plus RViz. Prints the teleop instructions |
 | `scripts/gazebo/bringup_smoke_test.sh` | **The one that matters.** Launches the full stack, then commands a velocity and checks the odometry actually moves. Exit 0 only if the robot drives |
 
 The scripts run inside the container, against the repo bind mount at
@@ -530,40 +531,79 @@ robot spawns in the IGVC course and drives.
 
 ### 8.1 Run it
 
+**Use `up -d`, not `run`.** This is the one thing worth getting right before a
+demo. `docker compose run` creates a new container with a random name every
+time, so a second `run` gives you a second, entirely separate simulator rather
+than a second shell into the one you are looking at. `up` honours
+`container_name: igvc_gazebo`, which is what `docker exec` needs.
+
 ```bash
-# from a WSL2 shell, NOT PowerShell - see section 3A
+# terminal 1, from a WSL2 shell - NOT PowerShell, see section 3A
 cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
-docker compose -f docker-compose.windows.yml run --rm igvc_gazebo
-
-# inside the container, once per container
-cd /root/ros2_ws
-colcon build --symlink-install \
-    --base-paths src/IGVC_robot_2026/src \
-    --packages-select zed_description igvc_test_description igvc_test_bringup
-source install/setup.bash
-
-ros2 launch igvc_test_bringup gazebo_sim.launch.py
+docker compose -f docker-compose.windows.yml up -d igvc_gazebo
+docker exec -it igvc_gazebo bash scripts/gazebo/start_sim.sh
 ```
 
-The colcon build is **required**, and is seconds rather than a real build: all
-three packages are install-only. `test_robot.urdf.xacro` resolves its includes
-with `$(find igvc_test_description)`, which needs the ament index.
-`zed_description` is in the list because `igvc_test_description` depends on it.
-
-Then drive it, from a second shell into the same container:
+`start_sim.sh` builds what it needs, regenerates the world if
+`track_points.json` is newer than the world file, and starts Gazebo, the robot,
+the bridge and RViz. Environment knobs: `RVIZ=0`, `HEADLESS=1`, `CAMERAS=all`.
 
 ```bash
-docker exec -it igvc_gazebo bash          # or another compose run
+# terminal 2, another WSL2 shell - drive it
+docker exec -it igvc_gazebo bash
 source /root/ros2_ws/install/setup.bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
-Or without teleop:
+Keyboard teleop is deliberate. **The repo's `teleop.launch.py` cannot drive the
+simulated robot**: it wants a physical joystick at `/dev/input/js0`, it pulls in
+`motor_controllers.launch.py` with the `CanInterface` ros2_control stack that
+Stage 1 does not use, and it remaps to `/diff_drive_controller/cmd_vel` rather
+than the `/cmd_vel` that Gazebo's built-in DiffDrive listens on.
+`teleop_twist_keyboard` needs no hardware and publishes straight to `/cmd_vel`.
+
+Without teleop, the equivalent one-liner:
 
 ```bash
 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
     "{linear: {x: 0.5}, angular: {z: 0.2}}"
 ```
+
+### Doing it by hand
+
+If you would rather not use the script, or something in it fails:
+
+```bash
+cd /root/ros2_ws
+colcon build --symlink-install \
+    --base-paths src/IGVC_robot_2026/src \
+    --packages-select zed_description igvc_test_description igvc_test_bringup
+source install/setup.bash
+ros2 launch igvc_test_bringup gazebo_sim.launch.py rviz:=true
+```
+
+The colcon build is **required**, and is seconds rather than a real build: all
+three packages are install-only. `test_robot.urdf.xacro` resolves its includes
+with `$(find igvc_test_description)`, which needs the ament index.
+`zed_description` is in the list because `igvc_test_description` depends on it,
+and leaving it out fails the build outright.
+
+### RViz
+
+`rviz:=true` uses `config/gazebo_sim.rviz`, which is **not** the existing
+`config.rviz`. That one is fixed to `base_link` and shows only the robot model
+and TF, so a driving robot appears to stand still while the world slides past
+it. The sim config is fixed to `odom` and adds the displays that show this is a
+real ROS graph rather than a rendering: `/scan` returns, the `/front_zed/image`
+camera, and an `/odom` trail.
+
+It is a node in the same launch file rather than an include of
+`rviz.launch.py`, because that file starts its own `robot_state_publisher` and
+two of those publishing `/robot_description` and `/tf_static` against each
+other is a confusing mess.
+
+Those topic names are the raw Gazebo ones. When RQ-03 lands the ZED namespace
+shim, the camera display needs updating with it. See section 8.7.
 
 ### 8.2 The world is generated, not converted
 
@@ -690,16 +730,14 @@ Three traps met while writing it, all of which fail confusingly:
 
 ### 8.6 Verified
 
-Through the compose service on the RTX 5070 Ti Laptop, 2026-09-15, by
-`scripts/gazebo/bringup_smoke_test.sh`:
+`scripts/gazebo/bringup_smoke_test.sh`, through the compose service on the
+RTX 5070 Ti Laptop, 2026-09-15. Run twice: headless, and again from a WSL2
+shell with `RVIZ=1` so the Gazebo and RViz windows are exercised too.
 
 ```text
-/clock  /odom  /scan  /imu  /joint_states  /tf  /front_zed/image
-                                            7 of 7 PASS
-
-odom x before : -3.8e-12
-odom x after  :  5.4663
-DRIVE TEST: PASS   robot moved 5.466 m on /cmd_vel
+/clock /odom /scan /imu /joint_states /tf /front_zed/image   7 of 7 PASS
+rviz2 node running                                           PASS
+DRIVE TEST: PASS
 ```
 
 The test commands a velocity and checks the odometry moves, because "gz sim
@@ -707,13 +745,33 @@ started" and "the topics exist" both pass on a badly broken setup: a world with
 no robot still publishes `/clock`, and a robot with a wrong wheel radius still
 publishes `/odom`.
 
-**One number in that result is worth reading twice.** 8 s at 0.6 m/s is 4.8 m,
-but the robot moved 5.466 m, which is 9.1 s of motion. **It kept driving after
-the commands stopped.** Gazebo's built-in DiffDrive appears to apply no command
-timeout, where `diff_drive_controller` on the real robot does. That is a
-sim-versus-hardware divergence in a safety-relevant direction and it should be
-confirmed and then either configured or documented loudly. Do not discover it
-at competition.
+Confirmed visually in the same run: the Gazebo window shows the course with
+white lane lines and orange barrels at 97.4% real-time factor, and RViz shows
+the robot model, `/scan` returns, an `/odom` trail and a camera panel in which
+**the lane lines are clearly readable against the asphalt**. That last one is
+the RQ-08 emissive fix doing its job.
+
+#### An open question the two runs raised, and did not settle
+
+Eight seconds at 0.6 m/s should be 4.8 m. The two runs disagree:
+
+| Run | Distance | Implied duration |
+| --- | --- | --- |
+| headless | 5.466 m | 9.1 s |
+| GUI | 4.622 m | 7.7 s |
+
+The first looked like the robot continuing after the command burst ended,
+which would mean Gazebo's built-in DiffDrive applies no `/cmd_vel` timeout
+where `diff_drive_controller` does - a sim-versus-hardware divergence in the
+unsafe direction. **The second run does not support that**: it came in below
+4.8 m, which is what spin-up alone would produce.
+
+So the likeliest explanation is jitter in when `ros2 topic echo --once`
+connects and returns, not a missing timeout. **Unresolved either way.** The
+smoke test was never built to measure this and its timing is too loose to
+settle it. If it matters - and for a competition robot a command-timeout
+difference does - it needs a purpose-built test that timestamps the last
+command and the last odometry change. Recorded as outstanding item 17.
 
 ### 8.7 What this still does not give you
 
