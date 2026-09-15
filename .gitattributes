@@ -17,6 +17,8 @@
 *.xml       text eol=lf
 *.urdf      text eol=lf
 *.xacro     text eol=lf
+*.sdf       text eol=lf
+*.world     text eol=lf
 *.launch    text eol=lf
 *.cmake     text eol=lf
 CMakeLists.txt  text eol=lf

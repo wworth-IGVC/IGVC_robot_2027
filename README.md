@@ -202,6 +202,23 @@ essentially as written. On Windows 11, WSLg supplies an X server, which means
 Docker Desktop shares its daemon with WSL when the distro is enabled under
 Settings > Resources > WSL Integration, so you do not install Docker twice.
 
+**Gazebo must be run this way, and it needs the Windows compose file even from
+WSL2**, because the `igvc_gazebo` service is defined there:
+
+```bash
+cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
+docker compose -f docker-compose.windows.yml run --rm igvc_gazebo
+# inside the container, the GUI opens as a normal Windows window:
+gz sim /root/ros2_ws/src/IGVC_robot_2026/scripts/gazebo/render_check.sdf
+```
+
+Verified 2026-09-15: GUI **and** GPU, `OpenGL renderer string: D3D12 (NVIDIA
+GeForce RTX 5070 Ti Laptop GPU)`. From PowerShell the same service still runs
+headless but can never show a window, because Docker Desktop's own VM has no
+display of any kind. The distro version does not matter - ROS lives in the
+container - so Ubuntu 26.04 is a perfectly good launcher. See
+[docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) section 3A.
+
 ### Option B - from PowerShell
 
 If you do not have WSL2 set up, use the Windows-specific compose file, passed
@@ -244,6 +261,21 @@ The images here use CUDA 13, and the bundled PyTorch (2.14 + cu130) ships
 Install the NVIDIA driver on **Windows** only. Do not install Linux NVIDIA
 drivers inside WSL - that breaks the passthrough.
 
+**CUDA passthrough is not the same as GPU rendering.** `--gpus all` gets you
+CUDA, and that is all it gets you. There is no native NVIDIA OpenGL driver in a
+WSL2 container: GL goes through Mesa's `d3d12` driver on top of `/dev/dxg`, and
+if that driver cannot load, Mesa falls back to `llvmpipe` software rendering
+**silently**, with no error and no warning. Gazebo will start, load a world and
+publish camera frames while rendering entirely on the CPU.
+
+The `igvc_gazebo` service already carries the four settings that fix this, and
+`scripts/gazebo/render_check.sh` is the one-command check. Anything else doing
+GPU rendering in a container needs the same treatment - see
+[docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) section 3. On a dual-GPU laptop
+(Intel iGPU plus NVIDIA) you must also set
+`MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`, or Mesa picks the Intel adapter and
+the process aborts inside Intel's WSL driver.
+
 ### ZED cameras on Windows
 
 A ZED camera cannot be reached from Docker Desktop, and `/dev` inside WSL2 has
@@ -265,6 +297,7 @@ rather than naming volumes by hand.
 | `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default** — 3.98 GB. |
 | `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus the ZED SDK and ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 28.6 GB on disk. |
 | `igvc_zed_humble_upstream` | Same Dockerfile, different build args | Same as above but built against **upstream** `zed-ros2-wrapper` v5.4.1 with SDK 5.3.0 — the same wrapper and SDK as the Jetson image. See below. |
+| `igvc_gazebo` | Built from `docker/Dockerfile.gazebo-harmonic` | **Gazebo Harmonic** (`gz-sim` 8.15.0) + Humble + `ros_gz`. The simulator for everyday development. Windows compose file only. 920 MB. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md). |
 
 All three services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
 

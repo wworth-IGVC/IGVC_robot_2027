@@ -1,0 +1,98 @@
+# ---------------------------------------------------------------------------
+# ROS 2 Humble + Gazebo Harmonic (gz-sim 8), Ubuntu 22.04 Jammy.
+#
+# Why Harmonic and not Fortress, the pairing question in RQ-01:
+#   * Fortress is the "recommended" Humble pairing but reaches EOL May 2027,
+#     the competition month. Harmonic is supported to May 2029, which also
+#     covers the 2028 team.
+#   * The WSLg GPU rendering fixes landed in Garden and Harmonic and were never
+#     backported to Fortress. This team is all-Windows, so that matters.
+#
+# Why this is NOT a source build, correcting the research artifact:
+#   packages.osrfoundation.org ships prebuilt jammy binaries of the Harmonic
+#   flavour of ros_gz. Verified against the live apt index on 2026-09-10:
+#       ros-humble-ros-gzharmonic           0.244.12-3jammy
+#       ros-humble-ros-gzharmonic-bridge    0.244.12-3jammy
+#       ros-humble-ros-gzharmonic-image     0.244.12-3jammy
+#       ros-humble-ros-gzharmonic-interfaces 0.244.12-3jammy
+#       ros-humble-ros-gzharmonic-sim       0.244.12-3jammy
+#       ros-humble-ros-gzharmonic-sim-demos 0.244.12-3jammy
+#   The research artifact's claim that Humble + Harmonic requires building
+#   ros_gz from source is wrong. No colcon build is needed for the bridge.
+#
+# The package conflict from RQ-01 is real but trivial, and it is a plain
+# Debian Conflicts, not something needing a resolution procedure:
+#       ros-humble-ros-gzharmonic         Conflicts: ros-humble-ros-gz,
+#                                                    ros-humble-ros-gzgarden
+#       ros-humble-ros-gzharmonic-bridge  Conflicts: ros-humble-ros-gz-bridge,
+#                                                    ros-humble-ros-gzgarden-bridge
+#   They are mutually exclusive. Install one flavour, never both. This image
+#   installs the Harmonic flavour only and never pulls ros-humble-ros-gz.
+#
+# Known remaining gap, do not lose this:
+#   gz_ros2_control has NO Harmonic binary for Humble anywhere. The official
+#   packages.ros.org package ros-humble-gz-ros2-control 0.7.20 is built against
+#   libignition-gazebo6, which is FORTRESS, despite the "gz-" name.
+#   ros-humble-ign-ros2-control is only a transitional alias for it.
+#   packages.osrfoundation.org ships no gz_ros2_control at all.
+#   So on Humble + Harmonic, gz_ros2_control is the one genuine source build.
+#   It is deliberately NOT built here, because RQ-06 has not been decided yet:
+#   a grr_hardware/GazeboDriveHardware topic bridge mirroring IsaacDriveHardware
+#   would avoid it entirely. Decide RQ-06 first, then add it if needed.
+# ---------------------------------------------------------------------------
+FROM ros:humble-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Ask the NVIDIA container runtime for the GRAPHICS capability, not just
+# compute. Without this the default is utility,compute, the GL/EGL driver
+# libraries are never injected, and ogre2 silently falls back to llvmpipe
+# software rendering. That silent fallback is exactly the dangerous failure
+# mode called out in RQ-02.
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=all
+
+# ---------------------------------------------------------------------------
+# Gazebo Harmonic from packages.osrfoundation.org
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        gnupg \
+        lsb-release \
+        ca-certificates \
+    && curl -sSL https://packages.osrfoundation.org/gazebo.gpg \
+        -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+        > /etc/apt/sources.list.d/gazebo-stable.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gz-harmonic \
+        ros-humble-ros-gzharmonic \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Enough ROS to spawn the URDF robot and to diagnose rendering.
+#
+# ros-humble-simulation-interfaces is the message definitions only. It is
+# apt-provided on Humble (1.4.0) and it builds, but per RQ-05 there is no
+# Gazebo server on Harmonic that answers those services; the server landed in
+# Jetty. Installed so igvc_simulation_interface still compiles, NOT because
+# the services will work here.
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ros-humble-xacro \
+        ros-humble-robot-state-publisher \
+        ros-humble-simulation-interfaces \
+        ros-humble-rviz2 \
+        mesa-utils \
+        vulkan-tools \
+        python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
+# Gazebo writes its render log here; the RQ-02 hardware-versus-software check
+# greps it for "NVIDIA" against "llvmpipe".
+ENV GZ_VERSION=harmonic
+
+WORKDIR /root/ros2_ws

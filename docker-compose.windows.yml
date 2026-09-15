@@ -140,6 +140,96 @@ services:
       - DEVENV_HOST_PATH=${DEVENV_HOST_PATH:-}
     command: ["bash"]
 
+  # ---------------------------------------------------------------------
+  # Gazebo Harmonic (gz-sim 8) + ROS 2 Humble.
+  #
+  # RUN THIS FROM WSL2, NOT POWERSHELL. From a WSL2 Ubuntu shell:
+  #
+  #   cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
+  #   docker compose -f docker-compose.windows.yml build igvc_gazebo
+  #   docker compose -f docker-compose.windows.yml run --rm igvc_gazebo
+  #
+  # Why WSL2 and not PowerShell: Docker Desktop's own Linux VM has NO display -
+  # /tmp/.X11-unix is empty and there is no WSLg in it - so a container launched
+  # from PowerShell can never show a window. Launched from a WSL2 distro, the
+  # distro's WSLg sockets are mounted through and the Gazebo GUI opens as a
+  # normal Windows window, on the same D3D12 NVIDIA render path. Verified
+  # 2026-09-15.
+  #
+  # This requires Docker Desktop -> Settings -> Resources -> WSL Integration
+  # enabled for the distro. Headless work still functions from PowerShell.
+  #
+  # Verify GPU rendering before doing any camera work:
+  #   bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh
+  #
+  # THE FOUR SETTINGS BELOW ARE NOT OPTIONAL AND NOT COSMETIC.
+  # Measured on the RTX 5070 Ti Laptop, 2026-09-10:
+  #   without them   GL_RENDERER = llvmpipe (LLVM 15.0.7, 256 bits)  <- CPU
+  #   with them      GL_RENDERER = D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
+  #
+  # Why each one:
+  #  1. device /dev/dxg          the WSL2 GPU device. Present already, but the
+  #                              container needs it declared.
+  #  2. /usr/lib/wsl mount       holds libd3d12core.so and libdxcore.so. Mesa's
+  #                              d3d12_dri.so is in the image but cannot load
+  #                              without these, and Mesa then falls back to
+  #                              llvmpipe SILENTLY. This is the whole trick.
+  #  3. GALLIUM_DRIVER=d3d12     select the WSL GPU path rather than software.
+  #  4. MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+  #                              this is a dual-GPU laptop (Intel Arc iGPU on
+  #                              the Core Ultra 9 275HX plus the RTX 5070 Ti).
+  #                              Without this Mesa picks the INTEL adapter and
+  #                              gz sim aborts inside Intel's WSL driver with an
+  #                              LLVM fatal error in libigc.so. The crash looks
+  #                              like a Gazebo bug and is not one.
+  #
+  # NVIDIA_DRIVER_CAPABILITIES=all is set in the Dockerfile for the same class
+  # of reason: the container runtime default is utility,compute, which does not
+  # include graphics.
+  igvc_gazebo:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gazebo-harmonic
+    image: igvc-gazebo-harmonic:latest
+    container_name: igvc_gazebo
+    stdin_open: true
+    tty: true
+    gpus: all
+    devices:
+      - /dev/dxg
+    working_dir: /root/ros2_ws
+    shm_size: "2gb"
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      # The WSL GPU driver libraries. Read-only: nothing should write here.
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+      # WSLg display. These are what make the Gazebo GUI appear as a normal
+      # Windows window. They only resolve when `docker compose` is run from
+      # INSIDE the WSL2 distro - see the RUN THIS FROM WSL2 note above.
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+      - igvc_gazebo_build:/root/ros2_ws/build
+      - igvc_gazebo_install:/root/ros2_ws/install
+      - igvc_gazebo_log:/root/ros2_ws/log
+    environment:
+      - GALLIUM_DRIVER=d3d12
+      - MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib:/opt/ros/humble/lib
+      # Inherited from the WSL2 shell. Unset if run from PowerShell, in which
+      # case the GUI is unavailable and headless still works.
+      - DISPLAY=${DISPLAY:-}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - GZ_VERSION=harmonic
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DISTRO=humble
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+    command: ["bash"]
+
 volumes:
   igvc_humble_build:
   igvc_humble_install:
@@ -150,3 +240,6 @@ volumes:
   igvc_zed_up_build:
   igvc_zed_up_install:
   igvc_zed_up_log:
+  igvc_gazebo_build:
+  igvc_gazebo_install:
+  igvc_gazebo_log:

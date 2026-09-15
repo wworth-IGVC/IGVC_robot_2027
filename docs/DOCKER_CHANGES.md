@@ -900,6 +900,17 @@ pass.
 6. **ZED camera on Windows.** `usbipd-win` can attach USB devices into WSL2, but
    ZED cameras are high-bandwidth USB3 and USB/IP handles that poorly. Test
    before relying on it.
+7. **Run `render_check.sh` on the other two machines** (§10.2). The RTX 5080
+   Laptop and the Windows 10 machine are untested. The Intel-adapter crash
+   depends on which GPUs a laptop has, so results will differ per machine.
+8. **Confirm WSLg on the Windows 10 machine** (§10.3). It should work on 22H2
+   with the Store version of WSL (`wsl --update`), but nobody has tried it. If
+   it does not, that machine is headless-only and everything else still works.
+9. **`gz_ros2_control` source build** (§10.1), blocked on RQ-06 deciding whether
+   it is needed at all.
+10. **Decide whether the other images need the GPU rendering settings** (§10.2).
+    They would render `rviz2` on `llvmpipe` today. Fine for RViz; the ZED images
+    set their own `LD_LIBRARY_PATH` for the SDK, so that change needs care.
 
 ---
 
@@ -1062,3 +1073,119 @@ Which branch the 2027 fork should track is an open question and outranks
 everything else in the simulation work. See `RESEARCH_QUESTIONS_AND_UNRESOLVED.md`
 section 3.0 and RQ-25. The images are now able to build either baseline, which is
 the part that could be settled without the team lead.
+
+---
+
+## 10. The Gazebo image, and the two Windows traps it exposed
+
+Added 2026-09-15. Full detail in `GAZEBO_SETUP.md`; this section records what
+changed in the Docker layer and why.
+
+### 10.1 New image and service
+
+| | |
+| --- | --- |
+| Dockerfile | `docker/Dockerfile.gazebo-harmonic` |
+| Image | `igvc-gazebo-harmonic:latest`, 920 MB |
+| Service | `igvc_gazebo`, in `docker-compose.windows.yml` only |
+| Contents | Gazebo Harmonic (`gz-sim` 8.15.0), ROS 2 Humble, all six `ros_gz` packages, `simulation_interfaces` message definitions, `rviz2`, `xacro`, `mesa-utils`, `vulkan-tools` |
+
+It is a simulator, not a replacement for `igvc-humble-fused-drive`: it carries
+no PyTorch or ML stack.
+
+**No source build is required.** `ros-humble-ros-gzharmonic` 0.244.12-3jammy and
+its five siblings ship as prebuilt jammy debs from
+`packages.osrfoundation.org`. The apparent conflict with the official
+`ros-humble-ros-gz*` packages is a plain Debian `Conflicts:` between the
+Fortress and Harmonic flavours: install one, never both. The Dockerfile installs
+the Harmonic flavour only.
+
+**`gz_ros2_control` is deliberately absent.** `ros-humble-gz-ros2-control`
+0.7.20 on packages.ros.org depends on `libignition-gazebo6`, which is
+**Fortress**, despite the `gz-` name; `ros-humble-ign-ros2-control` is only a
+transitional alias for it. Installing it would drag a second Gazebo into the
+image. A Harmonic build for Humble is packaged nowhere, so that package is the
+one genuine source build, and it is on hold pending RQ-06.
+
+### 10.2 Trap one: `--gpus all` does not give you OpenGL
+
+The first run of this image rendered **entirely on the CPU while looking
+completely healthy**: `gz sim` started, the world loaded, camera and lidar
+topics published at plausible rates, and `GL_RENDERER` was
+`llvmpipe (LLVM 15.0.7, 256 bits)`.
+
+`--gpus all` provides CUDA. It does not provide OpenGL, and there is no native
+NVIDIA GL driver inside a WSL2 container at all. GL is served by Mesa's `d3d12`
+driver on top of `/dev/dxg`. Four things are required, and missing any one of
+them yields software rendering with no error:
+
+1. `NVIDIA_DRIVER_CAPABILITIES=all` (set in the Dockerfile). The runtime default
+   is `utility,compute`, which excludes graphics.
+2. `--device=/dev/dxg`.
+3. Mount `/usr/lib/wsl` and put `/usr/lib/wsl/lib` on `LD_LIBRARY_PATH`. The
+   image already contains `d3d12_dri.so`, but it cannot load without
+   `libd3d12core.so` and `libdxcore.so`, which are **not** in the container.
+4. `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`. On a dual-GPU laptop Mesa otherwise
+   selects the Intel iGPU and `gz sim` aborts inside Intel's own WSL driver with
+   an LLVM fatal error in `libigc.so`. That crash looks like a Gazebo bug and is
+   not one.
+
+All four are in the `igvc_gazebo` service. Verify with
+`scripts/gazebo/render_check.sh`, never with `nvidia-smi`, which reports CUDA
+working while OpenGL is on a software rasteriser.
+
+This applies to any container doing GPU rendering, not just this one.
+`igvc_humble_fused_drive` and the ZED images would render `rviz2` on `llvmpipe`
+today; acceptable for RViz, but do not treat it as a GPU-accurate preview.
+
+### 10.3 Trap two: Docker Desktop has no display, WSL2 does
+
+Docker Desktop's own Linux VM contains **no display**: `/tmp/.X11-unix` is empty
+and there is no WSLg in it. A container launched from PowerShell therefore can
+never show a window, regardless of GPU configuration.
+
+Launch the same container from a **WSL2 shell** and the distro's WSLg sockets
+mount through. The Gazebo GUI then opens as an ordinary Windows window on the
+same D3D12 NVIDIA path. Verified through the compose service:
+
+```text
+DISPLAY=:0
+OpenGL renderer string: D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
+```
+
+This settles the dual-boot-versus-WSL2 question in favour of **WSL2**: no second
+operating system, no X server, no change to a working Docker setup. It is also
+the workflow §4.2 of the setup guide already recommended for `rviz2`.
+
+`DISPLAY` is passed as `${DISPLAY:-}`, so the service still runs headless from
+PowerShell with no error. Verified both ways after the change.
+
+**Windows 10:** WSLg ships with the Microsoft Store version of WSL, which
+supports Windows 10 build 19044 (22H2) and newer as well as Windows 11. It is
+not in the older in-box WSL. `wsl --update` moves to the Store version;
+`wsl --version` confirms it. The setup guide's stated minimum is already 22H2,
+so the Windows 10 machine qualifies, but this has not been tested on it.
+
+### 10.4 Verification
+
+Through the committed compose service, not hand-built `docker run` commands:
+
+- `render_check.sh` from PowerShell: `RESULT: HARDWARE RENDERING (NVIDIA)`
+- `render_check.sh` from WSL2: same, plus `DISPLAY=:0` and a visible GUI
+- `bridge_smoke_test.sh`: camera to `sensor_msgs/Image`, lidar to
+  `sensor_msgs/LaserScan`, `/clock` to `rosgraph_msgs/Clock`, 3/3 pass
+- Sensor budget: 3x RGBD at 1280x720/30 Hz gives about 7 Hz each and is below
+  spec; 3x at 640x360/15 Hz gives about 11 Hz each with physics at real time
+
+Known and harmless: `gz sim` segfaults on **teardown** (exit 139) on this render
+path. Runs themselves are clean.
+
+### 10.5 Documentation updated alongside
+
+- `docs/GAZEBO_SETUP.md`, new
+- `docs/IGVC_2027_Docker_Setup_Guide.docx`: new section 4.8, four new
+  troubleshooting entries, Part 6 rewritten for Gazebo plus RViz and Windows 10,
+  a WSL Store step in 2.2, a requirements bullet in 2.1, and a Gazebo block in
+  the quick reference
+- `README.md`: `igvc_gazebo` in the service table, GPU notes, and the WSL2
+  Gazebo commands
