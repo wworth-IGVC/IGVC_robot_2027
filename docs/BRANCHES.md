@@ -46,8 +46,9 @@ the single most useful thing to know before checking one out.
 
 `2026/more_diverging_changes` is 61 ahead of `main` and 0 behind, ending
 "final push +1" on 2026-06-01, and is a strict superset of
-`test_comp_changes_isaac_smi`. It is the leading candidate for what ran at the
-2026 competition. That question is still open for the team lead.
+`test_comp_changes_isaac_smi`. It was the leading candidate for what ran at the
+2026 competition. **See "What actually ran at competition" below: the team lead
+answered part of that on 2026-09-15, and the answer was `main`.**
 
 ## The `isaac/exts` pin, and why it is fragile
 
@@ -101,3 +102,115 @@ Fork `stereolabs/zed-isaac-sim` under an account this team controls, apply that
 one file on top of the current pin, and point `isaac/exts` there. Upstream
 history is kept, every branch resolves from a single URL this team owns, and the
 dependency on the organisation's fork continuing to exist goes away.
+
+
+---
+
+## What actually ran at competition
+
+**Answered 2026-09-15.** The team lead says **the Dockerfile on `main` of
+`IGVC_robot_2026`** is what ran. Traced through both compose files on
+`upstream/main` and verified against the `Gold-Rush-Robotics/docker_images`
+repository, exactly **two** services are uncommented:
+
+| Compose file | Active service | Image | Distro |
+| --- | --- | --- | --- |
+| `docker-compose.yml` | `igvc_dev_zed` | `dev-zed:5.1.0-13.0.0` | **Jazzy** |
+| `docker-compose.jetson.yml` | `igvc_jetson_zed` | `jetson-zed:5.3-36.4.7` | **Humble** |
+
+`igvc_humble_fused_drive` and `igvc_jetson_stack`
+(`jetson-ros-base:humble-36.4.7`) are **both commented out**, on `main`, in
+upstream. Both files use `network_mode: host` with a shared FastDDS/Zenoh
+profile, so this was **one ROS graph spread across two machines**.
+
+`jetson-zed` is Humble beyond doubt:
+`docker_images/jetson-zed/Dockerfile` line 14 reads `ARG ROS2_DIST=humble`, on
+base image `nvcr.io/nvidia/l4t-jetpack:r36.4.0`. Its `build` script sets
+`VERSION="5.3-36.4.7"`, matching the tag in the compose file.
+
+**Strong inference, which nobody has stated outright:** the drive and navigation
+stack ran on a laptop rather than on the robot, because the Jetson's own stack
+service is disabled. That reconciles two facts that otherwise contradict each
+other - the competition code is Jazzy (`igvc_pointcloud_tools` fails to compile
+on Humble, since `rclcpp::Clock::now()` is const in Jazzy and not in Humble)
+while the Jetson container is Humble. They were different machines. **Worth
+confirming with the team lead.**
+
+### The part that is still open
+
+`main` pins `isaac/exts` at `375eddd1`, stereolabs upstream. Per the section
+above, upstream **cannot resolve three cameras** in a URDF-imported hierarchy;
+that needs `72ff9c21`, which only the competition branches pin.
+
+So a three-camera Isaac run from `main` should not have worked. **"Which
+Dockerfile ran" and "which branch the ROS packages came from" may have different
+answers**, and only the first has been answered. Ask the second separately.
+
+---
+
+## Org-wide branch audit, 2026-09-15
+
+**The question:** does any other repository in the organisation hide competition
+work, the way this one hides `more_diverging_changes`?
+
+**No.** Every repository below was enumerated through the GitHub branches API,
+not guessed.
+
+| Repository | Default | Branches | Verdict |
+| --- | --- | --- | --- |
+| `IGVC_robot_2026` | `main` | **15** | the only one with competition branches |
+| `docker_images` | `main` | 2 | `dev_env_packages` is dev tooling |
+| `DevEnv` | `main` | 6 | nothing live outside `main`, see below |
+| `hmi` | `main` | 8 | web feature and bugfix work |
+| `discord-ros-tui` | `main` | 8 | UI work |
+| `zed-ros2-wrapper-2025` | `master` | 1 | fork of `stereolabs/zed-ros2-wrapper` |
+| `zed-isaac-sim` | `main` | 1 | fork of `stereolabs/zed-isaac-sim` |
+| `yolo_ros` | `main` | 1 | fork of `mgonzs13/yolo_ros` |
+| `VisionSense` | `main` | 1 | fork of `connected-wise/VisionSense` |
+| `grr_hardware` | `main` | 1 | organisation original |
+| `IGVC_track_generator` | `main` | 1 | fork of `lukelmg/procedural-tracks` |
+| `flipsky_odesc_ros_odrive` | `main` | 1 | fork of `odriverobotics/ros_odrive` |
+
+A keyword filter flagged `hmi/bugfix/component-updates`; that is a false
+positive, because "component" contains "comp". Recorded so nobody
+re-investigates it.
+
+### `DevEnv`: only `main` is live
+
+This matters because the 2027 team standardised DevEnv on
+`osrf/ros:jazzy-desktop` with a `jazzy_ws`, and a branch literally named `jazzy`
+invites the question of whether the real work lives there. **It does not.**
+
+| Branch | Ahead | Behind | Files | Last commit |
+| --- | --- | --- | --- | --- |
+| `IGVC` | 0 | 0 | 0 | identical to `main` |
+| `jazzy` | 0 | **4** | 0 | identical to `main`, just older |
+| `windows` | 0 | **20** | 0 | identical to `main`, just older |
+| `linux` | 4 | 11 | 91 | **2024-09-17** |
+| `mac` | 6 | 11 | 76 | **2024-09-19** |
+
+`IGVC`, `jazzy` and `windows` are stale pointers that `main` has overtaken -
+there is nothing in them to merge. `linux` and `mac` are 2024-era leftovers
+inherited from the `RoboEagles4828/DevEnv` upstream, not organisation work.
+Working on `main` is correct and there is nothing to salvage elsewhere.
+
+### What a clone without `--recursive` actually gets you
+
+Worth stating because it has already bitten the team once. The nine submodules
+are `grr_hardware`, `yolo_ros`, `ros_odrive`, `ros2-ublox-zedf9p`,
+`sllidar_ros2`, `greenwave_monitor`, `zed-description`, `isaac/exts` and
+`IGVC_track_generator`.
+
+Clone without `--recursive` and `colcon build` succeeds on exactly seven
+packages - `debug_gui`, `igvc_lane_detection`, `igvc_lidar_test`,
+`igvc_simulation_interface`, `igvc_test_bringup`, `igvc_test_description`,
+`ping_location` - because those are the only first-party packages in `src/`.
+
+**It looks like a clean build and it is not a usable robot.** Missing: the
+hardware interface, the entire perception stack, the camera URDF, the lidar
+driver, motor control and GPS. Always:
+
+```bash
+git clone --recurse-submodules https://github.com/wworth-IGVC/IGVC_robot_2027.git
+git config submodule.recurse true
+```

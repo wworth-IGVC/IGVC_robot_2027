@@ -925,7 +925,10 @@ pass.
     the same May 2027 EOL. Not started, not in this repo, needs the team lead.
 15. **RQ-03, the ZED namespace shim** (section 12.6). P0 and now the critical
     path: no downstream node runs against Gazebo until the topic names match
-    the section 3.7 interface contract.
+    the section 3.7 interface contract. **See `RQ03_AUDIT.md`** for the mapped
+    requirements, and note its first finding: the Gazebo image installs no
+    `cv_bridge`, `python3-opencv`, `image_geometry`, `message_filters` or Nav2,
+    so it cannot run a single downstream node until it is rebuilt.
 16. **Repair the four zero-normal collision meshes** (section 12.4), or decide
     the primitive colliders are the permanent answer for simulation. The
     meshes are still broken for Isaac and MoveIt either way.

@@ -506,12 +506,19 @@ rather than adding `tr -d '\r'` calls.
 
 ## 7. What this does not settle
 
-- **RQ-25, the branch question, still outranks everything.** This is simulator
-  infrastructure; it is not an opinion about which commit to convert.
-- **RQ-03, the ZED path.** Nothing here replaces the ZED SDK. The three
-  `rgbd_camera` sensors in `three_camera_load.sdf` are a load test, not the
-  shim.
-- **RQ-06**, and therefore whether `gz_ros2_control` gets built at all.
+- ~~**RQ-25, the branch question**~~ **Answered 2026-09-15.** The team lead says
+  the Dockerfile on `main` of `IGVC_robot_2026` is what ran at competition. The
+  trace, and the part of the question that is still open, are in
+  [BRANCHES.md](BRANCHES.md) under "What actually ran at competition".
+- **RQ-03, the ZED path.** Nothing in *this* section replaces the ZED SDK; the
+  three `rgbd_camera` sensors in `three_camera_load.sdf` are a load test, not
+  the shim. **A nine-agent audit of what the downstream stack actually
+  subscribes to is in [RQ03_AUDIT.md](RQ03_AUDIT.md)**, including a real
+  frame-name bug, a container that cannot run any consumer, and four failures
+  that produce no error at all. Read it before or alongside the implementation.
+- **RQ-06**, and therefore whether `gz_ros2_control` gets used at all. It is
+  installed since the move to Jazzy, so this is now a design choice rather than
+  a build problem.
 - **Native dual-boot versus WSL2.** Effectively answered: **stay on WSL2.** It
   reaches the GPU (section 3) and, launched from a WSL2 shell, it also gives a
   working GUI (section 3A). A native Ubuntu install would very likely be faster,
