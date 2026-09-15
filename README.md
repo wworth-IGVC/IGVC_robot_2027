@@ -39,19 +39,40 @@ Every change, its root cause, and how it was verified is recorded in
 
 ## Runtime targets
 
-The workspace is used in two main ROS environments:
+The workspace is consolidating on **ROS 2 Jazzy**. Humble reaches end of life in
+May 2027 and the competition is 4 to 8 June 2027, so Humble would be
+unsupported before the team ever competes on it. Jazzy runs to May 2029.
 
-| Target | Use case | Notes |
+| Target | Use case | Status |
 | --- | --- | --- |
-| ROS 2 Humble in Docker | Fused-drive runtime, and the default for everyday work. | Uses `ros:humble-ros-base` through `docker/Dockerfile.humble-fused-drive`. 13 GB on disk. |
-| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | `docker/Dockerfile.igvc-zed-humble` — CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
+| ROS 2 Jazzy in Docker | **The simulator.** Gazebo Harmonic, `ros_gz`, `gz_ros2_control`. | **Supported.** `docker/Dockerfile.gazebo-jazzy`. 1023 MB pulled, 4.89 GB on disk. |
+| ROS 2 Humble in Docker | Fused-drive runtime, still the default for everyday work. | **Pending port to Jazzy.** `docker/Dockerfile.humble-fused-drive`. |
+| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | **Pending port to Jazzy.** `docker/Dockerfile.igvc-zed-humble` — CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
 | ROS 2 Jazzy on host | Local debug GUI and host-side tools. | Host tools can see Docker topics when the shared DDS helper is sourced. |
 
-The Humble containers are the supported path. The rest of the org's robot-side
-images (`jetson-zed`, `jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros`) are
-already Humble, so `docker/Dockerfile.igvc-zed-humble` finishes that
-consolidation on the x86 side — it replaces a **private** ZED image that most
-team accounts cannot pull and that has no published build recipe.
+The two Humble images still work and have not been moved; they are the everyday
+path until their Jazzy replacements are built and verified. Retired images live
+in [docker/deprecated/](docker/deprecated/) with a README explaining what
+replaced them.
+
+Jazzy is where the **code** already was, though not the robot images. The 2026
+competition branch is Jazzy code, the competition robot ran out of a
+`jazzy_ws`, the org's `dev_env` image is Jazzy, and the 2027 team standardised
+on `osrf/ros:jazzy-desktop`. The org's **robot-side** images — `jetson-zed`,
+`jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros` — are genuinely Humble; see
+§5.4 of [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md), and beware two
+documented traps there: `docker-compose.jetson.yml`'s "ROS 2 Jazzy" comments
+are stale, and `jetson-ros-base` is tagged `jazzy-36.4.7-2` while its
+Dockerfile builds Humble.
+
+So the robot side is a real migration, not a formality, and nothing here has
+started it. The EOL date decides it anyway — Humble is unsupported before the
+team competes on it.
+
+`docker/Dockerfile.igvc-zed-humble` still does the job it was written for — it
+replaces a **private** ZED image that most team accounts cannot pull and that
+has no published build recipe. The image it replaces, `dev-zed`, is itself
+Jazzy, so porting this one to Jazzy moves it closer to what it stands in for.
 See [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md).
 
 ## ROS packages
@@ -297,7 +318,7 @@ rather than naming volumes by hand.
 | `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default** — 3.98 GB. |
 | `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus the ZED SDK and ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 28.6 GB on disk. |
 | `igvc_zed_humble_upstream` | Same Dockerfile, different build args | Same as above but built against **upstream** `zed-ros2-wrapper` v5.4.1 with SDK 5.3.0 — the same wrapper and SDK as the Jetson image. See below. |
-| `igvc_gazebo` | Built from `docker/Dockerfile.gazebo-harmonic` | **Gazebo Harmonic** (`gz-sim` 8.15.0) + Humble + `ros_gz`. The simulator for everyday development. Windows compose file only. 920 MB. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md). |
+| `igvc_gazebo` | Built from `docker/Dockerfile.gazebo-jazzy` | **Gazebo Harmonic** (`gz-sim` 8.15.0) + **Jazzy** + `ros_gz` + `gz_ros2_control`. The simulator for everyday development. Windows compose file only. 1023 MB pulled, 4.89 GB on disk. Run it from WSL2. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md). |
 
 All three services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
 

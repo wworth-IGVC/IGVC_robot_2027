@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------
+# ROS 2 Jazzy + Gazebo Harmonic (gz-sim 8), Ubuntu 24.04 Noble.
+#
+# This supersedes docker/deprecated/Dockerfile.gazebo-harmonic, which was the
+# same simulator on Humble. The simulator did not change. The distro did.
+#
+# Why Jazzy, verified against the REP 2000 source on 2026-09-15:
+#       Humble Hawksbill   May 2022 - May 2027
+#       Jazzy Jalisco      May 2024 - May 2029
+#   The competition is 4 to 8 June 2027. Humble reaches end of life the month
+#   before it. That is the same objection that ruled out Gazebo Fortress, and
+#   it applies with equal force to the distro underneath. Jazzy also covers the
+#   2028 team, which matters for a group with annual turnover.
+#
+# Why Harmonic is still the right simulator, and now more so:
+#   REP 2000 lists Fortress as Humble's pairing and Harmonic as Jazzy's. The
+#   old image ran Harmonic on Humble deliberately, but off-label. Here the
+#   pairing is the supported one, so we keep every result already measured
+#   (GPU render path, bridge, camera budget) and stop swimming upstream.
+#
+# What this deletes, relative to the Humble image:
+#   The whole packages.osrfoundation.org block. Jazzy's ros_gz and its Gazebo
+#   come from packages.ros.org itself, through the ros-jazzy-gz-*-vendor
+#   packages. No third-party apt key, no extra source list, and no
+#   Fortress/Harmonic flavour split - ros-jazzy-ros-gzharmonic and
+#   ros-jazzy-ros-gzfortress do not exist, because there is nothing to
+#   disambiguate. The Debian Conflicts problem documented for Humble is gone.
+#
+# What this ADDS, and it is the important one:
+#   ros-jazzy-gz-ros2-control 1.2.20 EXISTS as a binary, checked against the
+#   live noble index on 2026-09-15. On Humble this package was built against
+#   libignition-gazebo6 (Fortress despite the gz- name) and installing it would
+#   have dragged a second Gazebo into the image, so it was the one genuine
+#   source build blocking Stage 2. On Jazzy it depends on the same
+#   ros-jazzy-gz-*-vendor packages as ros_gz. The source build is gone.
+#
+#   Installing it is NOT the same as adopting it. RQ-06 - gz_ros2_control
+#   versus a grr_hardware/GazeboDriveHardware topic bridge - is still open and
+#   still a team decision. It is installed here only so that trying the
+#   ros2_control path costs nothing.
+#
+# Base image choice: ros:jazzy-ros-base, not osrf/ros:jazzy-desktop, which the
+# team standardised on for DevEnv. Desktop is roughly 3.5 GB against 800 MB and
+# this is a simulator image, not a dev environment. Disk is a live constraint
+# here - docker_data.vhdx never shrinks and Windows 11 Home has no Hyper-V to
+# compact it. rviz2 and xacro are installed explicitly below, so nothing that
+# the desktop image would have provided is actually missing.
+# ---------------------------------------------------------------------------
+FROM ros:jazzy-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Ask the NVIDIA container runtime for the GRAPHICS capability, not just
+# compute. Without this the default is utility,compute, the GL/EGL driver
+# libraries are never injected, and ogre2 silently falls back to llvmpipe
+# software rendering while every topic keeps publishing at a plausible rate.
+# That silent fallback is the dangerous failure mode from RQ-02 and it is
+# distro-independent - it will bite on Jazzy exactly as it did on Humble.
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=all
+
+# ---------------------------------------------------------------------------
+# Gazebo Harmonic and the ROS 2 bridge, both from packages.ros.org.
+#
+# ros-jazzy-ros-gz is the metapackage: ros_gz_sim, ros_gz_bridge, ros_gz_image
+# and ros_gz_interfaces. Gazebo itself arrives as its dependency chain of
+# ros-jazzy-gz-*-vendor packages.
+#
+# ros-jazzy-simulation-interfaces is message definitions only, installed so
+# igvc_simulation_interface still compiles. Per RQ-05 there is no Gazebo server
+# on Harmonic that answers those services; that landed in Jetty.
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ros-jazzy-ros-gz \
+        ros-jazzy-gz-ros2-control \
+        ros-jazzy-simulation-interfaces \
+        ros-jazzy-xacro \
+        ros-jazzy-robot-state-publisher \
+        ros-jazzy-rviz2 \
+        mesa-utils \
+        vulkan-tools \
+        python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
+# Read by gz_ros2_control and by anything that source-builds against Gazebo.
+ENV GZ_VERSION=harmonic
+
+WORKDIR /root/ros2_ws

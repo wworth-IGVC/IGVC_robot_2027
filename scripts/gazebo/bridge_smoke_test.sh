@@ -13,7 +13,7 @@
 # ---------------------------------------------------------------------------
 set -o pipefail
 
-source /opt/ros/humble/setup.bash
+source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
 
 WORLD="${WORLD:-$(dirname "$0")/render_check.sdf}"
 PASS=0

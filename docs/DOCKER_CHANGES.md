@@ -906,11 +906,23 @@ pass.
 8. **Confirm WSLg on the Windows 10 machine** (§10.3). It should work on 22H2
    with the Store version of WSL (`wsl --update`), but nobody has tried it. If
    it does not, that machine is headless-only and everything else still works.
-9. **`gz_ros2_control` source build** (§10.1), blocked on RQ-06 deciding whether
-   it is needed at all.
+9. ~~**`gz_ros2_control` source build**~~ **RESOLVED by section 11** — it ships
+   as a prebuilt binary on Jazzy and is installed in the image. Whether to
+   *use* it rather than a topic bridge is still RQ-06, still open.
 10. **Decide whether the other images need the GPU rendering settings** (§10.2).
     They would render `rviz2` on `llvmpipe` today. Fine for RViz; the ZED images
     set their own `LD_LIBRARY_PATH` for the SDK, so that change needs care.
+11. **Port `Dockerfile.humble-fused-drive` to Jazzy** (section 11.5). The jammy
+    to noble jump moves the Python and ML stack with it, so this is not a
+    one-line change. It is the everyday image and needs the most care.
+12. **Port `Dockerfile.igvc-zed-humble` to Jazzy** (section 11.5). ZED SDK, CUDA
+    and wrapper pinning move together; per section 4.5.1 the wrapper enforces
+    its SDK range at runtime. The private image it replaces, `dev-zed`, is
+    already Jazzy.
+13. **Verify the repo's packages build on Jazzy.** The 2027 team built four of
+    them under `osrf/ros:jazzy-desktop`; all 22 have not been tried.
+14. **The robot-side Jetson images are still Humble** (section 11.6) and face
+    the same May 2027 EOL. Not started, not in this repo, needs the team lead.
 
 ---
 
@@ -1189,3 +1201,131 @@ path. Runs themselves are clean.
   the quick reference
 - `README.md`: `igvc_gazebo` in the service table, GPU notes, and the WSL2
   Gazebo commands
+
+---
+
+## 11. Consolidating on ROS 2 Jazzy
+
+**Date:** 2026-09-15. This reverses the distro choice behind §2, §4 and §10.
+
+### 11.1 Why, and why it took this long to notice
+
+Verified against the REP 2000 source, not from memory:
+
+```text
+Humble Hawksbill (May 2022 - May 2027)
+Jazzy Jalisco   (May 2024 - May 2029)
+```
+
+The competition is **4 to 8 June 2027**. Humble reaches end of life the month
+before it.
+
+This is precisely the argument §10 used to reject Gazebo Fortress, which also
+ends May 2027. That analysis applied the EOL test to the simulator and never
+turned it on the distro underneath, then went on to build Harmonic — the
+correct simulator — on top of a distro with the identical problem. Jazzy also
+covers the 2028 team, which matters given annual turnover.
+
+The 2027 team independently reached the same place. Per the coding-discussion
+log of 2026-09-14 and 15, they standardised DevEnv on `osrf/ros:jazzy-desktop`
+with a `jazzy_ws` workspace, and built `igvc_test_bringup`,
+`igvc_test_description`, `igvc_simulation_interface` and `ping_location` under
+it successfully.
+
+### 11.2 What the port actually cost
+
+Very little, because almost nothing in §10 was ROS-version-specific.
+
+| Item | Change needed |
+| --- | --- |
+| Dockerfile | Rewritten, but only the apt section. ~15 lines *deleted*. |
+| Compose service | 4 lines: dockerfile path, image tag, `LD_LIBRARY_PATH`, `ROS_DISTRO`. |
+| `render_check.sh` | One comment. |
+| `bridge_smoke_test.sh` | One line — now `/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash`. |
+| `render_check.sdf`, `three_camera_load.sdf` | **None.** The `gz-sim-*-system` plugin names are identical. |
+| `sensor_bench.sh` | **None.** |
+| The four GPU settings | **None.** They are WSL2/Docker/GPU facts. |
+| Measured camera budget | **None.** Same `gz sim` 8.15.0 build, so the numbers transfer exactly. |
+
+### 11.3 What it bought
+
+1. **`gz_ros2_control` stops being a source build.** §10.1 recorded it as the
+   one genuine source build and the blocker on Stage 2, because
+   `ros-humble-gz-ros2-control` 0.7.20 was built against `libignition-gazebo6`
+   (Fortress, despite the `gz-` name). On Jazzy, `ros-jazzy-gz-ros2-control`
+   1.2.20 exists and depends on the same `ros-jazzy-gz-*-vendor` packages as
+   `ros_gz`. Installed, and `libgz_ros2_control-system.so` verified present in
+   the image. **Available is not adopted** — RQ-06 is still open.
+2. **No third-party apt repo.** The whole packages.osrfoundation.org block is
+   gone: no GPG key fetch, no source list.
+3. **No flavour split, so no `Conflicts:`.** `ros-jazzy-ros-gzharmonic` and
+   `ros-jazzy-ros-gzfortress` do not exist — confirmed absent from the live
+   noble index. There is one `ros-jazzy-ros-gz`.
+4. **Harmonic becomes the supported pairing.** REP 2000 lists Fortress for
+   Humble and Harmonic for Jazzy, so the same simulator goes from off-label to
+   Tier 1.
+5. **`more_diverging_changes` becomes a merge, not a port.** That branch is
+   Jazzy code; the "adopting it is a port" warning was measured against Humble.
+
+### 11.4 Verification
+
+Through the compose service, on the RTX 5070 Ti Laptop, 2026-09-15:
+
+```text
+ROS_DISTRO      = jazzy
+ubuntu          = 24.04.4 LTS (Noble Numbat)
+gz sim versions = 8.15.0
+GL_RENDERER     = D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
+RESULT: HARDWARE RENDERING (NVIDIA)                       exit 0
+
+camera  -> sensor_msgs/Image       PASS
+lidar   -> sensor_msgs/LaserScan   PASS
+clock   -> rosgraph_msgs/Clock     PASS
+passed: 3   failed: 0                                     exit 0
+
+/opt/ros/jazzy/lib/libgz_ros2_control-system.so           present
+```
+
+GUI from a WSL2 shell confirmed visually the same day: the `render_check` world
+with its full entity tree, dartsim physics, shadows, real-time factor 99.77%.
+The 30-second run exited 124 (killed by `timeout`), meaning it survived rather
+than crashed.
+
+Image size 1023 MB pulled, 4.89 GB on disk, against 920 MB / 4.24 GB for the
+Humble image. The ~100 MB difference is `gz_ros2_control` and the
+`ros2_control` stack.
+
+### 11.5 What moved and what deliberately did not
+
+`docker/Dockerfile.gazebo-harmonic` moved to `docker/deprecated/` with a README
+stating what replaced it. Its compose service is retained as
+`igvc_gazebo_humble` under a `deprecated` profile, so it is hidden from
+`docker compose up` and from bare `build`, but still reachable by explicit name
+(Compose v5.5.1 auto-enables a profile when a service is named directly —
+checked). Its colcon volumes are separate from the Jazzy service, the same
+reasoning as the two ZED variants in §4.5.4.
+
+`Dockerfile.humble-fused-drive` and `Dockerfile.igvc-zed-humble` have **not**
+moved. They have no verified Jazzy replacement yet and they are the everyday
+path; deprecating them now would leave the team with nothing. Marked "pending
+port" in the README instead.
+
+### 11.6 A correction, and what is still Humble
+
+A first draft of the README change for this section claimed the org's
+robot-side images were already Jazzy, citing the "ROS 2 Jazzy + ZED SDK 5"
+comment on `igvc_jetson_zed`. That is wrong, and §5.4 of this document already
+says so: the comment is **stale**, the image is Humble, and the service's own
+commented-out command sources `/opt/ros/humble/setup.bash`. Compounding it,
+`jetson-ros-base` is tagged `jazzy-36.4.7-2` while its Dockerfile builds Humble.
+Both traps were documented before this change and both were fallen into anyway.
+
+The accurate split:
+
+- **Jazzy:** the 2026 competition branch, the competition robot's `jazzy_ws`,
+  `dev_env`, the private `dev-zed`, and the 2027 team's DevEnv.
+- **Humble:** `jetson-zed`, `jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros`,
+  and this repo's two remaining x86 images.
+
+So the robot side is a genuine migration and **nothing here has started it**.
+The EOL date forces it regardless of what the simulator does.

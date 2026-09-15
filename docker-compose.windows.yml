@@ -141,7 +141,12 @@ services:
     command: ["bash"]
 
   # ---------------------------------------------------------------------
-  # Gazebo Harmonic (gz-sim 8) + ROS 2 Humble.
+  # Gazebo Harmonic (gz-sim 8) + ROS 2 Jazzy. THE supported simulator service.
+  #
+  # Jazzy, not Humble: Humble reaches end of life May 2027 and the competition
+  # is June 2027. Harmonic is unchanged and is now REP 2000's Tier 1 pairing
+  # for Jazzy rather than an off-label choice. The Humble version of this
+  # service is igvc_gazebo_humble at the bottom of this file, deprecated.
   #
   # RUN THIS FROM WSL2, NOT POWERSHELL. From a WSL2 Ubuntu shell:
   #
@@ -189,8 +194,8 @@ services:
   igvc_gazebo:
     build:
       context: .
-      dockerfile: docker/Dockerfile.gazebo-harmonic
-    image: igvc-gazebo-harmonic:latest
+      dockerfile: docker/Dockerfile.gazebo-jazzy
+    image: igvc-gazebo-jazzy:latest
     container_name: igvc_gazebo
     stdin_open: true
     tty: true
@@ -214,9 +219,63 @@ services:
     environment:
       - GALLIUM_DRIVER=d3d12
       - MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
-      - LD_LIBRARY_PATH=/usr/lib/wsl/lib:/opt/ros/humble/lib
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib:/opt/ros/jazzy/lib
       # Inherited from the WSL2 shell. Unset if run from PowerShell, in which
       # case the GUI is unavailable and headless still works.
+      - DISPLAY=${DISPLAY:-}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - GZ_VERSION=harmonic
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DISTRO=jazzy
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+    command: ["bash"]
+
+
+  # ---------------------------------------------------------------------
+  # DEPRECATED. Gazebo Harmonic + ROS 2 Humble, the previous simulator.
+  #
+  # Kept only so old results can be reproduced. Humble reaches end of life in
+  # May 2027 and the competition is June 2027. Use igvc_gazebo above.
+  #
+  # Deliberately NOT named igvc_gazebo_*, so `up`, `run` and tab completion on
+  # the obvious name give you the supported Jazzy service instead of this one.
+  # Its colcon volumes are separate from the Jazzy service on purpose: the two
+  # images contain different distros and sharing build output would mix them,
+  # the same reasoning as the two ZED variants above.
+  #
+  # See docker/deprecated/README.md.
+  # ---------------------------------------------------------------------
+  igvc_gazebo_humble:
+    profiles: ["deprecated"]
+    build:
+      context: .
+      dockerfile: docker/deprecated/Dockerfile.gazebo-harmonic
+    image: igvc-gazebo-harmonic:latest
+    container_name: igvc_gazebo_humble
+    stdin_open: true
+    tty: true
+    gpus: all
+    devices:
+      - /dev/dxg
+    working_dir: /root/ros2_ws
+    shm_size: "2gb"
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+      - igvc_gazebo_humble_build:/root/ros2_ws/build
+      - igvc_gazebo_humble_install:/root/ros2_ws/install
+      - igvc_gazebo_humble_log:/root/ros2_ws/log
+    environment:
+      - GALLIUM_DRIVER=d3d12
+      - MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib:/opt/ros/humble/lib
       - DISPLAY=${DISPLAY:-}
       - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
       - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
@@ -243,3 +302,6 @@ volumes:
   igvc_gazebo_build:
   igvc_gazebo_install:
   igvc_gazebo_log:
+  igvc_gazebo_humble_build:
+  igvc_gazebo_humble_install:
+  igvc_gazebo_humble_log:

@@ -12,7 +12,7 @@
 # Exit status: 0 hardware rendering, 1 software fallback, 2 could not tell.
 # ---------------------------------------------------------------------------
 
-# Note: deliberately no `set -u`. Sourcing /opt/ros/humble/setup.bash reads
+# Note: deliberately no `set -u`. Sourcing /opt/ros/$ROS_DISTRO/setup.bash reads
 # AMENT_TRACE_SETUP_FILES unguarded and dies under nounset.
 set -o pipefail
 
