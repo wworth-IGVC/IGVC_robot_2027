@@ -923,6 +923,16 @@ pass.
     them under `osrf/ros:jazzy-desktop`; all 22 have not been tried.
 14. **The robot-side Jetson images are still Humble** (section 11.6) and face
     the same May 2027 EOL. Not started, not in this repo, needs the team lead.
+15. **RQ-03, the ZED namespace shim** (section 12.6). P0 and now the critical
+    path: no downstream node runs against Gazebo until the topic names match
+    the section 3.7 interface contract.
+16. **Repair the four zero-normal collision meshes** (section 12.4), or decide
+    the primitive colliders are the permanent answer for simulation. The
+    meshes are still broken for Isaac and MoveIt either way.
+17. **Confirm the `/cmd_vel` timeout divergence** (section 12.5) and either
+    configure Gazebo to match `diff_drive_controller` or document it loudly.
+18. **Decide RQ-11**, whether barrels should be solid. Gazebo says yes today,
+    Isaac's generated field says no. The two simulators disagree right now.
 
 ---
 
@@ -1329,3 +1339,111 @@ The accurate split:
 
 So the robot side is a genuine migration and **nothing here has started it**.
 The EOL date forces it regardless of what the simulator does.
+
+---
+
+## 12. The Gazebo world, the bringup launch file, and a robot that drives
+
+**Date:** 2026-09-15. Full detail is in `docs/GAZEBO_SETUP.md` section 8; this
+section records only what changed in the Docker environment and why.
+
+### 12.1 One package added to the image
+
+`ros-jazzy-teleop-twist-keyboard`, in `docker/Dockerfile.gazebo-jazzy`.
+
+The repo's existing `teleop.launch.py` cannot drive the simulated robot. It
+wants a physical joystick at `/dev/input/js0`, it pulls in
+`motor_controllers.launch.py` with the `CanInterface` ros2_control stack that
+Stage 1 deliberately does not use, and it remaps to
+`/diff_drive_controller/cmd_vel` rather than the `/cmd_vel` that Gazebo's
+built-in DiffDrive listens on. Keyboard teleop needs no hardware, no
+ros2_control, and talks straight to `/cmd_vel`.
+
+Image size is unchanged to the nearest 0.1 GB.
+
+### 12.2 The workspace build is now a prerequisite, and that is new
+
+Running the simulator used to need nothing built. The bringup launch file does:
+
+```bash
+colcon build --symlink-install \
+    --base-paths src/IGVC_robot_2026/src \
+    --packages-select zed_description igvc_test_description igvc_test_bringup
+```
+
+All three are install-only, so this is seconds rather than a real build, but it
+is **not optional**. `test_robot.urdf.xacro` resolves its includes with
+`$(find igvc_test_description)`, which needs the ament index.
+`zed_description` is in the list because `igvc_test_description` depends on it,
+and leaving it out fails the build outright.
+
+An earlier draft of the launch file claimed it could run straight off the bind
+mount with no build. That was wrong and is corrected in the file's own usage
+block.
+
+### 12.3 Mesh resolution needs the install tree, not the source tree
+
+This one is worth knowing before it costs somebody an afternoon.
+
+sdformat's URDF parser rewrites `package://` into `model://`, so Gazebo looks
+for `model://zed_description/meshes/zedx.stl` and needs a resource root that
+contains a directory named literally `zed_description`.
+
+**The source tree cannot provide one.** The checkout is `src/zed-description`
+with a **hyphen**; the package is `zed_description` with an **underscore**. So
+`model://` never resolves against `src/`, no matter what is on the path. Only
+the install tree has the directory under its real package name.
+
+`gazebo_sim.launch.py` therefore builds `GZ_SIM_RESOURCE_PATH` from
+`AMENT_PREFIX_PATH`, taking `<prefix>/share` for every built package.
+
+The failure mode is nasty: an unresolved mesh URI degrades to a **directory**
+path, which then segfaults the same ODE mesh loader described in 12.4. A
+missing mesh and a broken mesh produce an identical crash, so fix the paths
+before suspecting the geometry.
+
+### 12.4 A defect in the robot description, not in Docker
+
+Recorded here because it blocks the container from being useful and because it
+is not a Gazebo bug.
+
+Four collision meshes have **zero vertex normals**: `left_wheel` (528 verts),
+`right_wheel` (528), `caster_wheel` (500) and `caster_raceway` (209). dartsim
+discards each submesh and then segfaults in `OdeMesh::fillArrays` on the empty
+result; `gz sim` dies on the first physics step with exit 139. Those four are
+exactly the parts that must collide for the robot to move.
+
+Worked around in `test_robot_body.urdf.xacro` with primitive colliders guarded
+by `xacro:if value="$(arg sim)"` - cylinders for the drive wheels, a sphere for
+the caster, nothing for the raceway bracket. **The real robot's description is
+unchanged**, verified by expanding the xacro both ways. The meshes themselves
+are still broken, and Isaac and MoveIt load them too.
+
+### 12.5 Verified
+
+`scripts/gazebo/bringup_smoke_test.sh`, through the compose service, on the
+RTX 5070 Ti Laptop:
+
+```text
+/clock /odom /scan /imu /joint_states /tf /front_zed/image   7 of 7 PASS
+DRIVE TEST: PASS   robot moved 5.466 m on /cmd_vel
+```
+
+The test commands a velocity and checks the odometry moves, rather than
+checking that topics exist. A world with no robot in it still publishes
+`/clock`; a robot with a wrong wheel radius still publishes `/odom`.
+
+**Read that distance twice.** 8 s at 0.6 m/s is 4.8 m, but the robot travelled
+5.466 m, which is 9.1 s of motion. It kept driving after the commands stopped.
+Gazebo's DiffDrive appears to apply no `/cmd_vel` timeout where
+`diff_drive_controller` does. Confirm it, then configure or document it
+loudly - that divergence runs in the unsafe direction.
+
+### 12.6 Not done
+
+The bridge publishes raw Gazebo names: `/scan`, `/odom`, `/front_zed/image`.
+Section 3.7 of `RESEARCH_QUESTIONS_AND_UNRESOLVED.md` specifies
+`/{cam}/zed_node/rgb/color/rect/image`, `/front_zed_camera_x/zed_node/odom`
+and `/isaac_joint_state`. **No downstream node runs until those line up**: not
+lane detection, not Nav2, not the navigator. That is RQ-03, it is P0, and it is
+the next piece of work.

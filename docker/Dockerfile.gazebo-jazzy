@@ -69,6 +69,14 @@ ENV NVIDIA_DRIVER_CAPABILITIES=all
 # ros-jazzy-simulation-interfaces is message definitions only, installed so
 # igvc_simulation_interface still compiles. Per RQ-05 there is no Gazebo server
 # on Harmonic that answers those services; that landed in Jetty.
+#
+# ros-jazzy-teleop-twist-keyboard is how you actually drive the thing. The
+# repo's existing teleop.launch.py does NOT work here: it wants a physical
+# joystick at /dev/input/js0, pulls in motor_controllers.launch.py with the
+# CanInterface ros2_control stack that Stage 1 deliberately does not use, and
+# remaps to /diff_drive_controller/cmd_vel rather than the /cmd_vel the
+# built-in DiffDrive plugin listens on. Keyboard teleop needs no hardware and
+# talks straight to /cmd_vel.
 # ---------------------------------------------------------------------------
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -78,6 +86,7 @@ RUN apt-get update \
         ros-jazzy-xacro \
         ros-jazzy-robot-state-publisher \
         ros-jazzy-rviz2 \
+        ros-jazzy-teleop-twist-keyboard \
         mesa-utils \
         vulkan-tools \
         python3-colcon-common-extensions \

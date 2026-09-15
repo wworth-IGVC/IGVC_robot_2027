@@ -27,6 +27,8 @@ GPU, with nothing ROS-version-specific in them.
 | GPU rendering | **Yes**, `D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`, but only with four specific settings |
 | Three cameras at 30 Hz | **No.** At 1280x720/30 Hz you get ~7 Hz each |
 | Three cameras, workable | **Yes at 640x360/15 Hz**: ~11 Hz each, physics at real time |
+| A robot that drives | **Yes.** IGVC course world plus a spawn/bridge launch file; 7 of 7 topics and the drive test pass. See section 8 |
+| Downstream nodes | **No.** Topic names are raw Gazebo, not the section 3.7 contract. That is RQ-03 and it is the next job |
 
 Run it **from a WSL2 shell, not PowerShell** (see section 3A):
 
@@ -483,6 +485,8 @@ never shrinks and Windows 11 Home has no Hyper-V to compact it.
 | `scripts/gazebo/sensor_bench.sh` | Message rates and time-to-crash. `BENCH_TOPICS` and `WORLD` are env vars |
 | `scripts/gazebo/three_camera_load.sdf` | Three ZED-placed rgbd cameras plus the RPLiDAR, at the URDF poses from section 3.3 |
 | `scripts/gazebo/bridge_smoke_test.sh` | Proves `ros_gz` carries Image, LaserScan and Clock into ROS 2. Exit 0 on all pass |
+| `scripts/gazebo/generate_igvc_world.py` | Builds `worlds/igvc_course.sdf` from `track_points.json`. See section 8.2 |
+| `scripts/gazebo/bringup_smoke_test.sh` | **The one that matters.** Launches the full stack, then commands a velocity and checks the odometry actually moves. Exit 0 only if the robot drives |
 
 The scripts run inside the container, against the repo bind mount at
 `/root/ros2_ws/src/IGVC_robot_2026`. `.gitattributes` already forces `eol=lf`
@@ -518,3 +522,216 @@ rather than adding `tr -d '\r'` calls.
   machine have not been tested. The Intel-adapter crash in particular depends
   on the iGPU, so it will differ per machine. `render_check.sh` exists so each
   member can settle it in one command.
+## 8. The world and the launch file: a robot that drives
+
+Added 2026-09-15. Before this, the image could render a test cube. These are
+the two files `SIM_WORK_RESUMPTION.md` section 5 calls for, and with them the
+robot spawns in the IGVC course and drives.
+
+### 8.1 Run it
+
+```bash
+# from a WSL2 shell, NOT PowerShell - see section 3A
+cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
+docker compose -f docker-compose.windows.yml run --rm igvc_gazebo
+
+# inside the container, once per container
+cd /root/ros2_ws
+colcon build --symlink-install \
+    --base-paths src/IGVC_robot_2026/src \
+    --packages-select zed_description igvc_test_description igvc_test_bringup
+source install/setup.bash
+
+ros2 launch igvc_test_bringup gazebo_sim.launch.py
+```
+
+The colcon build is **required**, and is seconds rather than a real build: all
+three packages are install-only. `test_robot.urdf.xacro` resolves its includes
+with `$(find igvc_test_description)`, which needs the ament index.
+`zed_description` is in the list because `igvc_test_description` depends on it.
+
+Then drive it, from a second shell into the same container:
+
+```bash
+docker exec -it igvc_gazebo bash          # or another compose run
+source /root/ros2_ws/install/setup.bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+Or without teleop:
+
+```bash
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+    "{linear: {x: 0.5}, angular: {z: 0.2}}"
+```
+
+### 8.2 The world is generated, not converted
+
+`scripts/gazebo/generate_igvc_world.py` reads
+`IGVC_track_generator/track_points.json` and writes
+`src/igvc_test_description/worlds/igvc_course.sdf`.
+
+This follows the recommendation in section 3.2 of
+`RESEARCH_QUESTIONS_AND_UNRESOLVED.md`: the generator already emits SVG,
+OpenSCAD, STL and a JSON centreline, so the world never has to be recovered
+from USD, which sidesteps the immature USD-to-SDF tooling problem entirely.
+
+It also buys frame agreement for free. `centerline_m`, `obstacles_m` and
+`robot_start_pose` are already in the `odom` frame that
+`igvc_lane_detection`'s `navigator.py` and `gt_nav_bridge_node.py` consume, and
+the launch file reads the spawn pose from the same file. So the course, the
+robot's starting position and the ground-truth navigator share one coordinate
+frame with **no alignment step and no scale factor to get wrong**.
+
+`track.png` was deliberately not used as a ground texture. The JSON's own frame
+notes say "x left (negated pixel x), y down, origin at image center", so a
+texture needs two flips and an origin shift that are easy to get subtly wrong
+and hard to notice. The metre arrays need none.
+
+What it produces, at the defaults:
+
+| | |
+| --- | --- |
+| Centreline | 78.8 m closed loop (259 ft), 1000 points resampled to 0.6 m |
+| Lane lines | 123 left + 123 right segments, 3 in wide, offset for a 12 ft lane |
+| Barrels | 8, cylinders at the `obstacles_m` radii |
+| Ground | 39.5 x 33.6 m, deliberately dark for lane contrast |
+| Total | 255 models, 135 KB |
+
+### 8.3 Two decisions the research document had already flagged
+
+**RQ-08, emissive lane paint. This was got wrong first, then fixed.** The Isaac
+floor binds `track.png` to **both** `diffuseColor` and `emissiveColor`,
+deliberately, so painted lines stay visible regardless of scene lighting. RQ-08
+calls it "an easy thing to lose in conversion", and the first version of the
+generator lost exactly that. Lane segments now carry an emissive term, default
+0.55 via `--lane-emissive`. Not 1.0: full emissive blows out the camera and
+makes the lines useless for thresholding. RQ-08 also asks for a *measurable*
+check that a simulated camera sees lines the way a real one does. **That still
+does not exist** and eyeballing it is not the same thing.
+
+**RQ-11, obstacle collision, still OPEN and this is a decision.** Isaac's
+generated `field.usd` gives obstacles no `CollisionAPI`, no `RigidBodyAPI` and
+no mass, so **in Isaac the robot drives straight through them**. Whether that
+was deliberate or an oversight is unknown. This world defaults to solid,
+because an obstacle course the robot cannot hit does not test obstacle
+avoidance. Pass `--no-barrel-collision` to match Isaac instead. Cylinders
+rather than the STL meshes, because RQ-11 notes Gazebo mesh collision is
+expensive and costs real-time factor directly. **Somebody should decide this
+properly, and ideally fix whichever simulator is wrong.**
+
+### 8.4 The collision meshes crash the physics engine
+
+This is the one to remember, and it is not a Gazebo problem.
+
+Four of the robot's collision meshes have **zero vertex normals**:
+
+```text
+caster_raceway_link_Part_2_Part_2.obj    209 vertices,  0 normals
+caster_wheel_link__in_Caster...obj       500 vertices,  0 normals
+left_wheel_link__in_Wheel_Stand_In...obj 528 vertices,  0 normals
+right_wheel_link__in_Wheel_Stand_In..obj 528 vertices,  0 normals
+```
+
+dartsim reports `does not have a normal count [0] that matches its vertex count
+[3168]. This submesh will be ignored!` and then segfaults in
+`OdeMesh::fillArrays` on the empty result. `gz sim` dies on the first physics
+step with exit 139. Note 528 x 6 = 3168 and 500 x 6 = 3000, exactly the counts
+in the error.
+
+Those four are precisely the parts that must collide for the robot to move: two
+drive wheels, the caster wheel and its raceway. The chassis mesh is fine, 73324
+vertices with 73324 normals.
+
+The fix is in `test_robot_body.urdf.xacro` and is **simulation-only**, guarded
+by `xacro:if value="$(arg sim)"`. The real robot still loads all four meshes,
+verified by expanding the xacro both ways:
+
+| Link | `sim:=true` | `sim:=false` |
+| --- | --- | --- |
+| `left_wheel_link` | cylinder r 0.1016, l 0.0640 | mesh |
+| `right_wheel_link` | cylinder r 0.1016, l 0.0640 | mesh |
+| `caster_wheel_link` | sphere r 0.0801 | mesh |
+| `caster_raceway_link` | none | mesh |
+
+Primitives are the better answer even ignoring the crash. A faceted mesh wheel
+rolls on its flats and catches on its edges; a cylinder does not. A sphere is
+the natural caster collider. The raceway is a bracket that never touches the
+ground. The radii are not invented: 0.1016 and 0.0640 are the wheel mesh's own
+measured bounding box, and 0.0801 comes from the joint-chain arithmetic in
+`urdf/gazebo/gazebo_sim.urdf.xacro`.
+
+**Worth raising with the team independently of Gazebo.** Those meshes are what
+Isaac and any MoveIt planning would also load.
+
+### 8.5 What the launch file does
+
+`igvc_test_bringup/launch/gazebo_sim.launch.py` starts `gz sim` on the world,
+publishes `robot_description` from the xacro with `sim:=true`, spawns the robot
+at the JSON pose, and runs one `ros_gz_bridge` with 11 topics.
+
+Bridge direction is the thing to get right: `[` is Gazebo to ROS, `]` is ROS to
+Gazebo, `@` is both. `/cmd_vel` is the only one flowing **into** the simulator.
+
+Three traps met while writing it, all of which fail confusingly:
+
+1. **`robot_description` needs `ParameterValue(..., value_type=str)`.**
+   Without it, launch tries to parse the URDF as YAML and dies.
+2. **`package://` becomes `model://`** in sdformat's URDF conversion, so Gazebo
+   needs a resource root containing a directory named literally
+   `zed_description`. The checkout is `src/zed-description` with a **hyphen**
+   while the package is `zed_description` with an **underscore**, so
+   `model://` can never resolve against the source tree. `GZ_SIM_RESOURCE_PATH`
+   is therefore built from `AMENT_PREFIX_PATH`, the install tree, where every
+   package sits under its real name.
+3. **An unresolved mesh URI degrades to a directory path**, which then
+   segfaults the same ODE mesh loader as 8.4. A missing mesh and a normal-less
+   mesh produce the same crash, so fix the paths before blaming the geometry.
+
+### 8.6 Verified
+
+Through the compose service on the RTX 5070 Ti Laptop, 2026-09-15, by
+`scripts/gazebo/bringup_smoke_test.sh`:
+
+```text
+/clock  /odom  /scan  /imu  /joint_states  /tf  /front_zed/image
+                                            7 of 7 PASS
+
+odom x before : -3.8e-12
+odom x after  :  5.4663
+DRIVE TEST: PASS   robot moved 5.466 m on /cmd_vel
+```
+
+The test commands a velocity and checks the odometry moves, because "gz sim
+started" and "the topics exist" both pass on a badly broken setup: a world with
+no robot still publishes `/clock`, and a robot with a wrong wheel radius still
+publishes `/odom`.
+
+**One number in that result is worth reading twice.** 8 s at 0.6 m/s is 4.8 m,
+but the robot moved 5.466 m, which is 9.1 s of motion. **It kept driving after
+the commands stopped.** Gazebo's built-in DiffDrive appears to apply no command
+timeout, where `diff_drive_controller` on the real robot does. That is a
+sim-versus-hardware divergence in a safety-relevant direction and it should be
+confirmed and then either configured or documented loudly. Do not discover it
+at competition.
+
+### 8.7 What this still does not give you
+
+**The topic names are raw Gazebo, not the interface contract.** Section 3.7 of
+`RESEARCH_QUESTIONS_AND_UNRESOLVED.md` specifies
+`/{cam}/zed_node/rgb/color/rect/image`,
+`/front_zed_camera_x/zed_node/odom` and `/isaac_joint_state`. This launch file
+publishes `/front_zed/image`, `/odom` and `/joint_states`.
+
+**So nothing downstream runs yet.** Not lane detection, not Nav2, not the
+navigator. Closing that gap is **RQ-03**, it is P0, and it is the next piece of
+work. `isaac_nav_test.launch.py` is the template for what the Gazebo equivalent
+should look like once the names line up.
+
+Also still open: `sim_cameras:=all` has not been run against this world, so the
+three-camera budget from section 4 is measured on a bare test scene rather than
+the real course; and whether YOLOPv2 tolerates 640x360 remains unanswered,
+which matters because the camera budget forces that resolution.
+
+---
+

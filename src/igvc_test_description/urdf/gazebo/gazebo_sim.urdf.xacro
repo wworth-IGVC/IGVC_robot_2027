@@ -6,11 +6,16 @@
   only when sim:=true, so the hardware description is unchanged.
 
   Stage 1 drives the robot with Gazebo's built-in DiffDrive system, which needs
-  no extra packages. That is deliberate: ros-humble-gz-ros2-control depends on
-  libignition-gazebo6 (Fortress) and we run libgz-sim8 (Harmonic), and no
-  Harmonic build of it is packaged, so gz_ros2_control has to be compiled from
-  source with GZ_VERSION=harmonic. Stage 2 does that and swaps DiffDrive for
-  the ros2_control path so sim and hardware share controllers.yaml.
+  no extra packages. It does not exercise ros2_control, but it proves the
+  description, physics, sensors, odometry and TF in one go.
+
+  Stage 2 swaps DiffDrive for the ros2_control path so sim and hardware share
+  controllers.yaml. On ROS 2 Humble that needed a source build, because
+  ros-humble-gz-ros2-control depended on libignition-gazebo6 (Fortress) while
+  this image runs libgz-sim8 (Harmonic). Since the move to Jazzy that is no
+  longer true: ros-jazzy-gz-ros2-control ships as a binary and is installed in
+  the image. Decide RQ-06 before using it - a GazeboDriveHardware topic bridge
+  would avoid the package entirely and keep Gazebo and Isaac symmetrical.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
