@@ -44,7 +44,11 @@ Commits on `gazebo-phase1`, oldest first:
 | `6902e2f` | Measure lane clearance from the rotated footprint, and sample fast enough to see it |
 | `605a795` | Bring the to-do list and the Docker record up to date |
 | `7eb3339` | Prove the camera point cloud is rotated 90 degrees, and ship the check |
-| plus | the final three from this handoff, see the last section |
+| `e67a106` | Add the sim-side lane evaluator, and the first non-zero lane numbers |
+| `79e4415` | Keep the scripts that produced the numbers in the report |
+| `2343dad` | Record the three P0 results, and write a handoff a fresh session can boot from |
+
+`git log --oneline main..HEAD` is authoritative if this table has drifted.
 
 - **`main` is unchanged.** Nothing has been merged into it.
 - **`docs-trim` is untouched.** It carries five unpushed commits of unknown
