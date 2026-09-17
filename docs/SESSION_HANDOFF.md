@@ -59,10 +59,25 @@ Commits on `gazebo-phase1`, oldest first:
 
 Push, in order:
 
+PowerShell, which is where Liam actually runs these:
+
+```powershell
+cd "C:\IGVC 2027\IGVC_robot_2027"
+git push -u origin gazebo-phase1
+```
+
+Git Bash, if that is the shell in hand:
+
 ```bash
 cd "/c/IGVC 2027/IGVC_robot_2027"
 git push -u origin gazebo-phase1
 ```
+
+**Do not hand a `/c/...` path to PowerShell.** It resolves it as a relative
+path and tries `C:\c\IGVC 2027\...`, which does not exist, and the `git push`
+on the next line then runs in whatever directory you were already in and fails
+with "not a git repository". This has already cost time once. PowerShell 5.1
+also has no `&&`, so these stay two lines.
 
 ---
 
