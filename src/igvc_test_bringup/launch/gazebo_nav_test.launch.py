@@ -143,6 +143,15 @@ def _setup(context, *args, **kwargs):
             "world": cfg("world"),
             "track_file": cfg("track_file"),
             "sim_cameras": cfg("sim_cameras"),
+            # Forwarded so the camera budget can be varied on the AUTONOMY
+            # path, not only on gazebo_sim.launch.py. Until 2026-09-17 these
+            # three were neither declared here nor passed through, which locked
+            # every autonomy and perception run to 640x360 at 15 Hz and made
+            # "does YOLOPv2 tolerate 640x360" unmeasurable on the one launch
+            # file that runs the full stack.
+            "sim_camera_width": cfg("sim_camera_width"),
+            "sim_camera_height": cfg("sim_camera_height"),
+            "sim_camera_hz": cfg("sim_camera_hz"),
             "headless": cfg("headless"),
             "rviz": cfg("rviz"),
             "use_sim_time": cfg("use_sim_time"),
@@ -336,6 +345,14 @@ def generate_launch_description():
         DeclareLaunchArgument("debug_png_path",
                               default_value="/tmp/igvc_nav_ground_truth.png"),
         DeclareLaunchArgument("sim_cameras", default_value="front"),
+        # Same defaults as gazebo_sim.launch.py, restated here only so they can
+        # be overridden on the autonomy path. Raising these costs real time:
+        # three RGBD cameras at 1280x720/30 delivered 7 Hz each on the RTX 5070
+        # Ti Laptop, against 11 Hz each at 640x360/15. Count messages, never
+        # real_time_factor, which sits near 1.0 while the cameras starve.
+        DeclareLaunchArgument("sim_camera_width", default_value="640"),
+        DeclareLaunchArgument("sim_camera_height", default_value="360"),
+        DeclareLaunchArgument("sim_camera_hz", default_value="15"),
         DeclareLaunchArgument(
             "nav2", default_value="true",
             description="Start Nav2 and the IGVC navigator, so the robot "
