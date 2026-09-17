@@ -38,9 +38,17 @@
 set -o pipefail   # NOT set -u: it breaks /opt/ros/*/setup.bash, which reads
                   # AMENT_TRACE_SETUP_FILES unguarded.
 
-COMPOSE_FILE=docker-compose.windows.yml
-SERVICE=igvc_gazebo
-CONTAINER=igvc_gazebo
+# These three default to the Windows values, so the Windows path is byte for
+# byte what it was. They are overridable only so the macOS path can reuse this
+# script instead of duplicating it; see docs/MAC_SETUP.md. Nothing that does
+# not set them can behave differently.
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.windows.yml}"
+SERVICE="${SERVICE:-igvc_gazebo}"
+CONTAINER="${CONTAINER:-igvc_gazebo}"
+# Empty on Windows, so `docker pull` is invoked exactly as before. macOS sets
+# this to linux/amd64 because the published image has no arm64 manifest and an
+# explicit platform is more predictable than a mismatch warning.
+PULL_PLATFORM="${PULL_PLATFORM:-}"
 LOCAL_IMAGE=igvc-gazebo-jazzy:latest
 REGISTRY_IMAGE="${IMAGE_REF:-ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest}"
 REPO_IN_CONTAINER=/root/ros2_ws/src/IGVC_robot_2026
@@ -161,7 +169,13 @@ else
     info "pulling $REGISTRY_IMAGE"
     info "about 1.2 GB over the wire, unpacking to about 5.6 GB on disk."
     info "The package is public, so no docker login is needed."
-    if ! docker pull "$REGISTRY_IMAGE"; then
+    if [ -n "$PULL_PLATFORM" ]; then
+        info "pulling with --platform $PULL_PLATFORM"
+        PULL_CMD="docker pull --platform $PULL_PLATFORM $REGISTRY_IMAGE"
+    else
+        PULL_CMD="docker pull $REGISTRY_IMAGE"
+    fi
+    if ! $PULL_CMD; then
         FAILED="If GHCR is unreachable, build instead:  BUILD_IMAGE=1 bash scripts/gazebo/bootstrap.sh"
         fail "docker pull failed for $REGISTRY_IMAGE"
     fi
