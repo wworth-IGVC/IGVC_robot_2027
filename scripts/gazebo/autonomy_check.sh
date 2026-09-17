@@ -105,8 +105,8 @@ pkill -f 'gz sim' 2>/dev/null
 pkill -f parameter_bridge 2>/dev/null
 
 echo
-python3 - "$TRACK" /tmp/track_log.txt "$TOL" "$FINAL_Z" <<'PY'
-import json, math, sys
+python3 - "$TRACK" /tmp/track_log.txt "$TOL" "$FINAL_Z" "$(dirname "$0")" <<'PY'
+import json, math, os, sys
 
 track_file, log_file = sys.argv[1], sys.argv[2]
 tol, final_z = float(sys.argv[3]), float(sys.argv[4])
@@ -128,7 +128,15 @@ if len(pts) < 5:
 
 
 def dist_to_centreline(x, y):
-    best = float('inf')
+    """Perpendicular distance to the centreline, and the index it came from.
+
+    The index matters because the course width is NOT constant: IGVC rules
+    II.2 vary it from ten to twenty feet, and the track generator paints that
+    sinusoid into track.png. A deviation of 1.5 m is comfortable in a 20 ft
+    section and over the line in a 10 ft one, so a single centreline distance
+    cannot say whether the robot stayed inside the lane.
+    """
+    best, best_i = float('inf'), 0
     for i in range(len(centre)):
         ax, ay = centre[i]
         bx, by = centre[(i + 1) % len(centre)]
@@ -139,13 +147,52 @@ def dist_to_centreline(x, y):
         else:
             t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / L2))
             d = math.hypot(x - (ax + t * dx), y - (ay + t * dy))
-        best = min(best, d)
-    return best
+        if d < best:
+            best, best_i = d, i
+    return best, best_i
+
+
+# One definition of the width profile, shared with the world generator, so the
+# world the camera sees and the limit this test scores against cannot drift.
+#
+# The directory comes in as argv[5], NOT from __file__: this block is fed to
+# python3 on stdin, where __file__ is the literal string "<stdin>" and
+# dirname(abspath(...)) silently resolves to the working directory instead.
+# That produced "NOT MEASURED (No module named 'generate_igvc_world')" on the
+# first run, which is the right failure but for the wrong reason.
+sys.path.insert(0, sys.argv[5])
+try:
+    from generate_igvc_world import track_inner_edge_m
+    HAVE_WIDTH = True
+except Exception as exc:      # noqa: BLE001 - reported, never fatal
+    HAVE_WIDTH = False
+    WIDTH_ERR = str(exc)
+
+# Two half-widths, because the repo disagrees with itself about how wide the
+# robot is. 0.405 m is the chassis collision mesh (the widest part of the
+# robot, wider than the wheels); 0.350 m is what Nav2's footprint parameter
+# says. Reporting both makes the disagreement visible instead of picking one.
+ROBOT_HALF_TRUE = 0.405
+ROBOT_HALF_NAV2 = 0.350
 
 
 path_len = sum(math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
                for i in range(1, len(pts)))
-devs = [dist_to_centreline(p[0], p[1]) for p in pts]
+dev_idx = [dist_to_centreline(p[0], p[1]) for p in pts]
+devs = [d for d, _ in dev_idx]
+
+# Lane-boundary compliance. REPORTED ONLY - it is deliberately not a pass
+# criterion yet, because the footprint width is still an open question and
+# tightening the gate before that is settled would fail runs for the wrong
+# reason. clearance = local painted half-width minus (deviation + robot
+# half-width). Negative means the chassis edge crossed the inner edge of the
+# paint.
+clear_true = clear_nav2 = None
+if HAVE_WIDTH:
+    n_c = len(centre)
+    halves = [track_inner_edge_m(i / float(n_c)) for _, i in dev_idx]
+    clear_true = [h - (d + ROBOT_HALF_TRUE) for h, (d, _) in zip(halves, dev_idx)]
+    clear_nav2 = [h - (d + ROBOT_HALF_NAV2) for h, (d, _) in zip(halves, dev_idx)]
 # Odometry cannot see the robot fall off the slab - free-spinning wheels read
 # the same as driving - so the height comes from one gz ground-truth reading.
 worst_z = abs(final_z - 0.2311)
@@ -162,6 +209,17 @@ print('  centreline deviation : mean %.2f m, max %.2f m' %
 print('  final height         : %.3f m, %.3f off the spawn height'
       % (final_z, worst_z))
 print('  sim time covered     : %.1f s' % elapsed)
+if clear_true is not None:
+    worst_t, worst_n = min(clear_true), min(clear_nav2)
+    over_t = 100.0 * sum(1 for c in clear_true if c < 0) / len(clear_true)
+    print('  lane clearance       : worst %+.3f m at the 0.405 m chassis '
+          'half-width, %+.3f m at Nav2\'s 0.350 m' % (worst_t, worst_n))
+    print('                         (negative = chassis edge past the paint; '
+          '%.0f%% of samples over the line)' % over_t)
+    print('                         REPORTED, not a pass criterion. '
+          'Measured against the local painted half-width, not a constant.')
+else:
+    print('  lane clearance       : NOT MEASURED (%s)' % WIDTH_ERR)
 print()
 
 ok = True
