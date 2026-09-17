@@ -59,13 +59,24 @@ Verified means a command was run and a number came back. Nothing below is
 
 ### Tests that can actually fail
 
-- [x] `render_check.sh` — GPU or silent software fallback.
+- [x] `render_check.sh` — GPU or silent software fallback. **Was listed here
+      while broken on a clean container; see the retractions below.** Fixed
+      2026-09-17 and re-verified from a shell with nothing sourced: exit 0,
+      `D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`.
 - [x] `bringup_smoke_test.sh` — **18 of 18, 0 failures.** Contract topics carry
       messages, camera frame ids resolve through TF, and odometry is compared
       against Gazebo's own ground truth in heading *and* distance. That last
       check catches a wrong odom frame and a wrong wheel radius at once.
 - [x] `autonomy_check.sh` — does the robot drive the course, never touching
-      `/cmd_vel`.
+      `/cmd_vel`. **Now also reports lane-boundary clearance** *(2026-09-17)*:
+      the gap between the rotated footprint and the inner edge of the painted
+      line, at the **local** lane half-width, for both the 0.810 x 0.970 m
+      chassis and Nav2's 0.700 x 1.000 m footprint. Reported, deliberately not
+      a pass criterion, because which footprint is right is still a team
+      question. Yaw matters and is not a refinement: a rectangle reaches
+      0.405 m sideways when aligned with the lane and up to 0.632 m when
+      skewed. Pose sampling was raised from 2 Hz to 10 Hz so a short overshoot
+      cannot fall between samples.
 - [x] `sim_preflight.sh` — refuses to start a second simulator on top of a
       first, because two on one ROS domain produce results that look real and
       are worthless.
@@ -78,13 +89,54 @@ Verified means a command was run and a number came back. Nothing below is
 - [x] `GAZEBO_SETUP.md` sections 9 and 10; `DOCKER_CHANGES.md` section 13.
 - [x] `igvc_gazebo_linux` service so native Linux has something to run.
 
-### Two measurements retracted, on purpose
+### The world is the course the planner plans in  *(2026-09-17)*
+
+- [x] **The painted lane is variable, 10 to 20 ft, not a constant 12 ft.**
+      `IGVC_track_generator/constants.py` sets the range and `main.py:503`
+      paints it as a sinusoid, two cycles per lap, straight out of IGVC rules
+      II.2. `track_ground_truth_node` reads that from `track.png`, so it is the
+      corridor Nav2 plans in, while the world generator painted a constant
+      3.658 m. **Measured against `track.png` at 200 points: median corridor
+      error went from -0.813 m to -0.043 m, and agreement within 0.15 m from
+      7.0% of samples to 90.0%.** The constant is still available as
+      `--lane-width-ft` for a debug course.
+- [x] **The width profile is imported from the track generator, not copied.**
+      `generate_igvc_world.py` reads `constants.py` directly and fails loudly
+      if the submodule is missing. Verified: the imported values regenerate a
+      byte-identical world.
+
+### Retracted, on purpose
 
 - [x] **"No `/cmd_vel` timeout"** — withdrawn. The robot had driven off the
       ground slab and was falling with its wheels spinning, odometry counting
       up as though it were driving.
 - [x] **"It circles at barrels"** — withdrawn. Six `gz sim` processes were
       running at once.
+- [x] **`render_check.sh` was listed as done and verified, and failed on a
+      clean container** — withdrawn 2026-09-17. It never sourced ROS, and `gz`
+      is not on PATH until you do, because on this image Gazebo comes from the
+      ROS vendor packages. The documented first command on a new machine
+      printed `gz: No such file or directory` and `RESULT: UNKNOWN`, which
+      reads as a broken GPU rather than a missing PATH entry. Fixed.
+- [x] **"Four FollowPath aborts in 143 s"** — withdrawn 2026-09-17. That number
+      is `/navigator/status`'s `aborts=` field, which is
+      `min(consecutive + 1, 4)` at `navigator.py:1595`, `:1644` and `:1684`,
+      **reset to zero on success** at `:1675`, and incremented on goal
+      *rejection* as well. It saturates at 4 and cannot distinguish 4 from 40.
+      `autonomy_check.sh` samples it once at the end and never counted aborts.
+      The true total is unknown; instrument it before tuning anything.
+- [x] **"`lane_detection_node` cannot start without torch"** — withdrawn.
+      `lane_detection.py` imports no torch; it is CLAHE, Canny and
+      `HoughLinesP`. The node that needs torch is `lane_segmentation_node`.
+- [x] **"The synchroniser never fires and logs nothing"** — withdrawn.
+      `lane_detection.py:81-91` builds one synchroniser **per camera**, and
+      `:119` plus `:924-929` install a 2 s watchdog that warns. Measured: with
+      the front camera alone, the RGB and depth streams are aligned to a median
+      stamp gap of **0.0000 s** and max 0.066 s, and the synchroniser as built
+      at `:88-89` fired **396 times in 396 message pairs**.
+- [x] **"The robot is 0.70 m wide"** — withdrawn. That is the Nav2 footprint
+      parameter. The chassis collision mesh is **0.810 x 0.970 m**, and the
+      chassis is the widest part, wider than the wheels.
 
 ---
 
@@ -92,15 +144,27 @@ Verified means a command was run and a number came back. Nothing below is
 
 ### P0 — blocking real perception work
 
-- [ ] **Get perception running at all.** The image has **no `torch`, no
-      `ultralytics`, no YOLOPv2 weights**, so `lane_detection_node` cannot
-      start. Decide where perception runs: add torch to the Gazebo image
-      (roughly triples it), or run perception in `igvc-humble-fused-drive`
-      against the Gazebo topics over DDS. **The second is probably right and
-      nobody has tried it.**
-- [ ] **`num_cameras` defaults to 3** in `lane_detection_config.yaml` while the
-      sim runs one. The synchroniser then never fires *and logs nothing*.
-      Needs a sim override before anyone debugs a "silent" lane detector.
+- [x] **Hough lane detection already runs, in the Gazebo image, today.**
+      *(2026-09-17)* `lane_detection.py` imports no torch, and the Gazebo image
+      already carries `cv_bridge`, `message_filters`, `image_geometry`, numpy
+      and OpenCV. Measured with the stock config and the robot driving itself
+      for 90 s on the front camera alone: **`/lane_map` 253 occupied cells of
+      102400, `/lane_costmap` 800 of 160000**, one startup watchdog warning,
+      no errors. This is the cheap half of perception and it needed nothing.
+- [ ] **Get YOLOPv2 running.** Only `lane_segmentation_node` needs torch, and
+      the Gazebo image has none. `igvc-humble-fused-drive` has torch 2.14.0+cu130
+      with `sm_120` in its arch list, and a real convolution runs on the
+      Blackwell GPU (verified 2026-09-17), so the remaining question is whether
+      a Humble container and a Jazzy container share a ROS graph. That is now
+      the *only* thing the cross-container DDS gate has to prove. `models/`
+      does not exist locally and `fetch_yolopv2_weights.sh` verifies no
+      checksum.
+- [x] **`num_cameras: 3` against one camera is a startup warning, not a
+      failure.** *(2026-09-17)* Two separate claims were wrong: the node builds
+      one synchroniser **per camera**, so camera 0 is unaffected, and it does
+      log. Evidence above: 253 occupied cells with `sim_cameras:=front` and the
+      stock `num_cameras: 3`. **No sim override is needed for function**; the
+      target stays `sim_cameras:=all` for a three-camera budget measurement.
 - [ ] **Verify the camera point cloud's orientation.** All four `rgbd_camera`
       outputs are tagged with the optical frame, which is right for the image
       and depth rasters and may rotate the cloud 90 degrees. Bridged but
@@ -115,11 +179,20 @@ Verified means a command was run and a number came back. Nothing below is
       rate and its interaction with the physics step are untested. Choice is
       `gz_ros2_control` in-process versus a `GazeboDriveHardware` mirroring
       `IsaacDriveHardware` over topics. Real control-loop-timing consequences.
-- [ ] **Four FollowPath aborts in 143 s.** The navigator recovers by
-      replanning, but `controller_server` logs `Failed to make progress` and
-      the robot pauses. Tune before this is filmed for the design report. Start
-      with the corridor arithmetic in `GAZEBO_SETUP.md` 10.4 - the gap past a
-      barrel is 0.87 m for a 0.70 m robot, before Nav2's own 0.75 m inflation.
+- [ ] **Count the FollowPath aborts before tuning anything.** The "four in
+      143 s" figure is retracted above: it is a saturating gauge, not a count.
+      Nothing currently counts aborts. Instrument `STATUS_ABORTED` results from
+      the log, with the pose and the nearest obstacle at each, then compare
+      across at least 3 runs per condition, because single runs have misled
+      this project twice.
+      The corridor hypothesis is still worth testing but the arithmetic behind
+      it was wrong twice over. `GAZEBO_SETUP.md` 10.4 already retracts its own
+      0.87 m gap, and the "0.70 m robot" is the Nav2 footprint, not the robot.
+      Corrected: at the tightest barrel there is about 1.367 m of free cells,
+      so a 0.810 m chassis **fits**, with roughly 0.557 m to spare. What does
+      hold is that Nav2's `inflation_radius: 0.75` leaves **no zero-cost cell
+      anywhere in that gap**, which is a cost-shape problem rather than a
+      geometry one. Treat it as a hypothesis, not a diagnosis.
 - [ ] **Run `render_check.sh` on the other machines.** The RTX 5080 Laptop and
       the Windows 10 machine are still untested, and the Intel-adapter crash
       depends on which GPUs a laptop has.

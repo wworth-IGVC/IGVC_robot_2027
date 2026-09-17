@@ -1600,3 +1600,105 @@ native Linux, AMD and Intel GPUs, no usable GPU at all, macOS, and Docker
 Desktop's resource limits. The simulator does **not** need an NVIDIA GPU to
 run - only to run fast and to make camera results mean anything - and saying so
 plainly is what stops someone concluding it is broken.
+
+---
+
+## 14. What the images actually contain, measured rather than read
+
+**2026-09-17.** Everything in this section was measured by running the built
+images, not by reading a Dockerfile. That distinction is the whole point of
+section 9's correction, where a grep of an apt list was four-fifths wrong about
+what was installed.
+
+### 14.1 `gz` is not on PATH, and that broke the first command we tell people to run
+
+Gazebo does not come from `packages.osrfoundation.org` in the Jazzy image. It
+comes from the ROS **vendor** packages, so the binary lives at
+`/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz` and appears on PATH only once
+`/opt/ros/jazzy/setup.bash` is sourced. `/root/.bashrc` does not source it.
+
+```text
+$ docker exec igvc_gazebo bash -c 'which gz'
+                                              <- nothing
+$ docker exec igvc_gazebo bash -c 'source /opt/ros/jazzy/setup.bash; gz sim --versions'
+8.15.0
+```
+
+`render_check.sh` never sourced ROS, so the command the quickstart gives a
+teammate on a new machine printed `gz: No such file or directory` and
+`RESULT: UNKNOWN - no ogre2 log`. That reads as a broken GPU, which is the
+opposite of what the script exists to distinguish. Fixed by sourcing ROS in the
+script. Recorded as a retraction in `GAZEBO_TODO.md`, because the item was
+listed as done and verified.
+
+### 14.2 torch works on Blackwell in `igvc-humble-fused-drive`
+
+This was the single biggest risk to running perception at all, and it passes.
+An arch-list mismatch can satisfy `torch.cuda.is_available()` and then fail on
+the first kernel, so the check runs a real convolution:
+
+```text
+torch              2.14.0+cu130      torch.version.cuda  13.0
+cudnn              9.24              is_available        True
+device             NVIDIA GeForce RTX 5070 Ti Laptop GPU
+capability         (12, 0)
+arch_list          sm_75 sm_80 sm_86 sm_90 sm_100 sm_120     <- sm_120 present
+CONV_FORWARD_OK    (1, 16, 224, 224)
+ultralytics        8.4.146    cv2 4.5.4    numpy 1.26.4
+onnxruntime        ABSENT
+```
+
+`onnxruntime` being absent matters for the obstacle-detection path: the 2026
+custom detector is a 15-class YOLOv12n ONNX, and running it outside the ZED SDK
+would need a runtime this image does not have. The matching `best.pt` is already
+on disk at `src/yolo_ros/best.pt`, because `main` pins that submodule.
+
+### 14.3 Only one node actually needed the ML image
+
+The reason to run perception in the Humble container was that the Gazebo image
+has no torch. That turns out to apply to one node, not two.
+`lane_detection.py` imports no torch; it is CLAHE, Canny and `HoughLinesP`, and
+the Gazebo image already carries `cv_bridge`, `message_filters`,
+`image_geometry`, numpy and OpenCV. Measured in the Gazebo container, stock
+config, front camera only, robot driving itself for 90 s:
+
+```text
+/lane_map      253 occupied cells of 102400
+/lane_costmap  800 occupied cells of 160000
+watchdog       1 warning, at startup
+```
+
+So the cross-container question now applies only to `lane_segmentation_node`
+(YOLOPv2). That is a much smaller gate.
+
+### 14.4 The two containers can see each other; the DDS profile is applied unevenly
+
+Both sit on `igvc_robot_2027_default`, resolve each other by name, and disable
+shared memory, which pre-empts the classic silent failure where discovery works
+and large messages never arrive:
+
+```text
+igvc_gazebo              172.19.0.2   ipc=private  shm=2GB
+igvc_humble_fused_drive  172.19.0.3   ipc=private  shm=2GB
+both: RMW_IMPLEMENTATION=rmw_fastrtps_cpp, ROS_DOMAIN_ID=0,
+      FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+```
+
+**One asymmetry, not previously written down:** only
+`igvc_humble_fused_drive` sets `FASTDDS_DEFAULT_PROFILES_FILE`. Neither Gazebo
+service does, on either compose file. On the Linux file four services set it and
+`igvc_gazebo_linux` does not. Whether that matters is untested; it is recorded
+here so the next person does not rediscover it mid-debug.
+
+Still unmeasured, and the remaining gate: whether a **Humble** container and a
+**Jazzy** container actually interoperate over the wire for the specific message
+types YOLOPv2 consumes. Do not assume it; test it.
+
+### 14.5 Outstanding, amended
+
+Item 21, the camera point cloud orientation, is unchanged and still the next
+thing blocking `obstacle_layer`.
+
+Item 7, `render_check.sh` on the other two machines, is unchanged, but note that
+until 14.1 was fixed the script would have failed on those machines for a reason
+that has nothing to do with their GPUs. Any earlier result from them is void.
