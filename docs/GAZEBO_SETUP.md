@@ -20,9 +20,9 @@ GPU, with nothing ROS-version-specific in them.
 | Question | Answer |
 | --- | --- |
 | Which distro | **Jazzy**, supported to May 2029. Humble ends May 2027, one month before the competition |
-| Which Gazebo | **Harmonic**, `gz-sim` 8 — and on Jazzy this is REP 2000's Tier 1 pairing, not an off-label choice |
+| Which Gazebo | **Harmonic**, `gz-sim` 8, and on Jazzy this is REP 2000's Tier 1 pairing, not an off-label choice |
 | How | Docker image `igvc-gazebo-jazzy:latest`, built from `docker/Dockerfile.gazebo-jazzy` |
-| Source build needed | **No — and now not even for `gz_ros2_control`**, which was the one exception on Humble |
+| Source build needed | **No, and now not even for `gz_ros2_control`**, which was the one exception on Humble |
 | Third-party apt repo | **None.** Everything comes from packages.ros.org |
 | GPU rendering | **Yes**, `D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`, but only with four specific settings |
 | Three cameras at 30 Hz | **No.** At 1280x720/30 Hz you get ~7 Hz each |
@@ -95,11 +95,11 @@ Humble's pairing and **Harmonic as Jazzy's**, so the combination goes from
 deliberate-but-off-label to the supported one. Every measurement already taken
 stays valid and stops swimming upstream.
 
-### 2.2 Jazzy is where the code already was — but not the robot images
+### 2.2 Jazzy is where the code already was, but not the robot images
 
 This split matters, and getting it wrong in either direction is easy.
 
-**Already Jazzy — the code and the development environment:**
+**Already Jazzy, the code and the development environment:**
 
 - The 2026 competition branch `more_diverging_changes` is **Jazzy code**,
   proven by it failing to compile on Humble (`rclcpp::Clock::now()` is const in
@@ -114,7 +114,7 @@ This split matters, and getting it wrong in either direction is easy.
   `jazzy_ws` in DevEnv, and built `igvc_test_bringup`, `igvc_test_description`,
   `igvc_simulation_interface` and `ping_location` under it.
 
-**Still Humble — the robot-side images.** Per the audit in section 5.4 of
+**Still Humble, the robot-side images.** Per the audit in section 5.4 of
 `DOCKER_CHANGES.md`, done by reading the Dockerfiles rather than the labels:
 `jetson-zed`, `jetson-ros-base`, `jetson-isaac-ros` and `isaac-ros` are all
 Humble.
@@ -156,7 +156,7 @@ the same index. Consequences:
 - **No osrfoundation apt repo.** The Dockerfile no longer fetches a
   third-party GPG key or writes a source list. That is roughly 15 lines gone.
 - **No flavour split and therefore no conflict.** `ros-jazzy-ros-gzharmonic`
-  and `ros-jazzy-ros-gzfortress` **do not exist** — confirmed absent from the
+  and `ros-jazzy-ros-gzfortress` **do not exist**, confirmed absent from the
   index. There is one `ros-jazzy-ros-gz` because there is nothing to
   disambiguate. The Debian `Conflicts:` problem documented for Humble in
   section 2.5 simply does not arise.
@@ -178,9 +178,9 @@ the team and Stage 2.
 On Jazzy it depends on the same `ros-jazzy-gz-*-vendor` packages as `ros_gz`,
 so it installs cleanly alongside. It **is** installed in the image.
 
-**Installing it is not the same as adopting it.** RQ-06 — `gz_ros2_control`
+**Installing it is not the same as adopting it.** RQ-06, `gz_ros2_control`
 versus a `grr_hardware/GazeboDriveHardware` topic bridge mirroring
-`IsaacDriveHardware` — is still open and still a team decision. It is present
+`IsaacDriveHardware`, is still open and still a team decision. It is present
 only so that trying the `ros2_control` path costs nothing. Do not treat its
 presence as the decision having been made.
 
@@ -192,7 +192,7 @@ simply asking the question one layer too high up.
 
 It recorded that the research artifact recommended Fortress because Humble plus
 Harmonic supposedly required building `ros_gz` from source, and that this
-premise was **false** — `ros-humble-ros-gzharmonic` 0.244.12-3jammy and its
+premise was **false**, `ros-humble-ros-gzharmonic` 0.244.12-3jammy and its
 five siblings shipped as prebuilt jammy debs from packages.osrfoundation.org,
 checked against the live index on 2026-09-10. That removed the maintainability
 argument for Fortress and left its May 2027 EOL unanswered.
@@ -402,7 +402,7 @@ anything.
 Everything below was run through the compose service, with the scripts executed
 straight off the bind mount, never from hand-built `docker run` commands.
 
-### Jazzy, 2026-09-15 — current
+### Jazzy, 2026-09-15, current
 
 ```text
 docker compose -f docker-compose.windows.yml run --rm igvc_gazebo \
@@ -438,10 +438,10 @@ section 4 performance numbers carry over exactly rather than by analogy.
 launched from a WSL2 shell opened as an ordinary Windows window: the
 `render_check` world with its full entity tree (`ground_plane`, `target_box`,
 `sensor_rig`, `sun`), dartsim physics, shadows being cast, and a real-time
-factor of **99.77%**. Note the section 4 caveat — physics at real time says
+factor of **99.77%**. Note the section 4 caveat, physics at real time says
 nothing about sensor rates, which must be measured by counting messages.
 
-### Humble, 2026-09-10 — superseded baseline
+### Humble, 2026-09-10, superseded baseline
 
 ```text
   GL_RENDERER = D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
@@ -465,7 +465,7 @@ code.
 
 Not covered: the ZED namespace, the joint-state pair and TF, which depend on
 RQ-03 and RQ-06. Also untested on any machine other than the one named at the
-top — the RTX 5080 Laptop and the Windows 10 machine remain unverified, and the
+top, the RTX 5080 Laptop and the Windows 10 machine remain unverified, and the
 Intel-adapter crash in section 3 depends on which GPUs a laptop has.
 
 ---
@@ -473,12 +473,12 @@ Intel-adapter crash in section 3 depends on which GPUs a laptop has.
 ## 5. What is in the image
 
 Base `ros:jazzy-ros-base` (Ubuntu 24.04 noble), plus, **all from
-packages.ros.org** — no third-party apt repo and no GPG key to fetch:
+packages.ros.org**, no third-party apt repo and no GPG key to fetch:
 
-- `ros-jazzy-ros-gz` 1.0.24 — the metapackage: `ros_gz_sim`, `ros_gz_bridge`,
+- `ros-jazzy-ros-gz` 1.0.24, the metapackage: `ros_gz_sim`, `ros_gz_bridge`,
   `ros_gz_image`, `ros_gz_interfaces`. Gazebo Harmonic itself arrives through
   its `ros-jazzy-gz-*-vendor` dependency chain.
-- `ros-jazzy-gz-ros2-control` 1.2.20 — installs
+- `ros-jazzy-gz-ros2-control` 1.2.20, installs
   `/opt/ros/jazzy/lib/libgz_ros2_control-system.so`, verified present. This had
   no Harmonic binary at all on Humble. **Available, not adopted:** RQ-06 is
   still open, so do not read its presence as the decision having been made.
@@ -516,7 +516,7 @@ has a home already in `igvc-humble-fused-drive`.
 Base image note: this is `ros:jazzy-ros-base`, not the `osrf/ros:jazzy-desktop`
 that the team standardised on for DevEnv. Desktop is roughly 3.5 GB against 800
 MB, and `rviz2` and `xacro` are installed explicitly above, so nothing it would
-have provided is missing. Disk is a live constraint here — `docker_data.vhdx`
+have provided is missing. Disk is a live constraint here, `docker_data.vhdx`
 never shrinks and Windows 11 Home has no Hyper-V to compact it.
 
 ---
