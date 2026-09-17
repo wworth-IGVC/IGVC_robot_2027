@@ -1604,11 +1604,19 @@ output or from `docker manifest inspect`.
 **DONE and verified 2026-09-17, after this section was first written.** The
 push happened and the package is **public**, confirmed the way that actually
 proves it: `docker logout ghcr.io` followed by an anonymous
-`docker manifest inspect`, which returned the manifest with no credentials and
-touched no local layers. Digest
-`sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31`, and
-the published index carries **amd64 only** plus a buildx attestation entry, so
-macOS and arm64 stay unsupported exactly as documented.
+`docker manifest inspect`, which returned the OCI image index with no
+credentials and touched no local layers.
+
+**Two digests, recorded separately because they differ and the difference
+misleads:** the **index** digest is `sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31`, which is what Docker
+reports as the repo digest and what `@sha256:` pins; the **amd64 manifest**
+nested inside it is `sha256:d93b95a4021b898e52bf4f8c0ea1b2560ca3ea5c6a9efca1505246811ffdf0a3`, which is what `manifest inspect` prints.
+Earlier text here gave only the first, unlabelled.
+
+The index carries **amd64 only**, plus a second entry whose platform reads
+`unknown/unknown`. **That is the buildx attestation, not a missing
+architecture.** There is no arm64 entry, so macOS and Apple Silicon stay
+unsupported exactly as documented.
 
 **Three corrections to what this section originally said**, each of which cost
 time on the day:

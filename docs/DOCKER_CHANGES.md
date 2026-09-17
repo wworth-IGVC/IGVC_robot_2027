@@ -1905,9 +1905,10 @@ it is no longer the way anyone gets the image.
 | --- | --- |
 | Registry | **GitHub Container Registry**, `ghcr.io` |
 | Tags | `ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest` and `:2026-09-17` |
-| Digest | `sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31` |
+| Index digest | `sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31` , what Docker reports as the repo digest and what you pin with `@sha256:` |
+| amd64 manifest digest | `sha256:d93b95a4021b898e52bf4f8c0ea1b2560ca3ea5c6a9efca1505246811ffdf0a3` , nested inside that index, and what `docker manifest inspect` prints |
 | Visibility | **Public**, verified anonymously |
-| Architectures | **amd64 only**, plus a buildx attestation entry |
+| Architectures | **amd64 only**, plus a second index entry whose platform reads `unknown/unknown`. That is the **buildx attestation**, not a missing architecture |
 | Size | about 1.2 GB over the wire, 5.57 GB unpacked |
 
 **amd64 only is deliberate and it is why macOS and arm64 remain unsupported**,
@@ -1945,9 +1946,10 @@ docker logout ghcr.io
 docker manifest inspect ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
 ```
 
-That must return the manifest with **no credentials**. It did. If it returns
-`denied`, the package is still private and every attendee's `docker pull` will
-fail the same way, whatever the web page shows.
+That must return the manifest with **no credentials**. It did, verified
+2026-09-17 after `docker logout`. If it returns `denied`, the package is still
+private and every attendee's `docker pull` will fail the same way, whatever the
+web page shows.
 
 ### 16.3 Pushing it again, when the image changes
 

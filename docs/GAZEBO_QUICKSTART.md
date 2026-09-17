@@ -450,8 +450,16 @@ The image comes from **GitHub Container Registry**. It is a public package, so
 ```text
 ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
 ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
-digest sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31
+
+index digest     sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31
+amd64 manifest   sha256:d93b95a4021b898e52bf4f8c0ea1b2560ca3ea5c6a9efca1505246811ffdf0a3
 ```
+
+**Two digests, and they do not match each other, which is confusing the first
+time you see it.** The first is the **index**, which is what Docker reports as
+the repo digest and what you pin with `@sha256:`. The second is the **amd64
+manifest nested inside that index**, which is what `docker manifest inspect`
+prints. Both are correct.
 
 **Which of the two image paths is verified:** the **pull is the primary path
 and it is verified**, confirmed anonymously with `docker manifest inspect`
@@ -460,9 +468,11 @@ after `docker logout`, so it needs no credentials. The
 to end in this configuration**; treat it as a fallback rather than an equal
 option.
 
-The published index carries **amd64 only**, plus a buildx attestation entry.
-That is why macOS and arm64 remain unsupported, exactly as section 5
-describes.
+The published index carries **amd64 only**, plus a second entry whose platform
+reads `unknown/unknown`. **That entry is the buildx attestation, not a broken
+or missing architecture**, so do not read it as a partial publish. There is no
+arm64 entry, which is why macOS and Apple Silicon remain unsupported, exactly
+as section 5 describes.
 
 The public package page, if you want to look at it in a browser, is
 
