@@ -14,22 +14,26 @@
 #
 #   1. sanity: are we in the right repo, is docker reachable, is there disk
 #   2. git submodule update --init --recursive
-#   3. the image: load it from a tar if one is given, otherwise build it
+#   3. the image: pull it from GHCR (no login needed, the package is public)
 #   4. start the container
 #   5. colcon build the four packages the bringup needs
-#   6. render_check.sh      is it on the GPU, or silently on the CPU
+#   6. render_check.sh      which GPU tier is this machine, if any
 #   7. bringup_smoke_test.sh  does the topic contract hold, does it drive
 #
 # Options, as environment variables:
 #
-#   IMAGE_TAR=/mnt/d/igvc-gazebo-jazzy.tar
-#                 load the image from this file instead of building it. This
-#                 is the offline path: no pull, no build, no campus wifi.
-#   SKIP_SMOKE=1  stop after render_check.sh. Saves about 4 minutes.
-#   FORCE_BUILD=1 rebuild the image even if it is already present.
+#   BUILD_IMAGE=1   build the image from the Dockerfile instead of pulling it.
+#                   The documented fallback for when GHCR is unreachable.
+#                   Ten to twenty minutes instead of a few.
+#   IMAGE_REF=...   pull a different tag, e.g. a dated one instead of latest.
+#   SKIP_SMOKE=1    stop after render_check.sh. Saves about 4 minutes.
+#   ALLOW_TIER_C=1  continue past a software-rendering machine rather than
+#                   stopping to explain it. The tier C path still works; this
+#                   only silences the pause.
 #
-# It is deliberately noisy on failure and silent-free on success: every step
-# prints a line, and a step that cannot run says so rather than being skipped.
+# It is deliberately noisy on failure: every step prints a line, and a step
+# that cannot run says so rather than being skipped. It will never tell you
+# the GPU is working when it is not.
 # ---------------------------------------------------------------------------
 set -o pipefail   # NOT set -u: it breaks /opt/ros/*/setup.bash, which reads
                   # AMENT_TRACE_SETUP_FILES unguarded.
@@ -37,17 +41,20 @@ set -o pipefail   # NOT set -u: it breaks /opt/ros/*/setup.bash, which reads
 COMPOSE_FILE=docker-compose.windows.yml
 SERVICE=igvc_gazebo
 CONTAINER=igvc_gazebo
-IMAGE=igvc-gazebo-jazzy:latest
+LOCAL_IMAGE=igvc-gazebo-jazzy:latest
+REGISTRY_IMAGE="${IMAGE_REF:-ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest}"
 REPO_IN_CONTAINER=/root/ros2_ws/src/IGVC_robot_2026
 
-# The Gazebo-only path needs this much free disk. Derived in
-# docs/GAZEBO_QUICKSTART.md section 1: 5.6 GB for the unpacked image, 1.2 GB
-# for the tar if you are loading one, about 0.6 GB for the clone and its
-# submodules, and the rest is headroom for the WSL2 VM and a second image
-# version. Building from source instead of loading a tar leaves build cache
-# behind, which is why that number is higher.
-NEED_GB_LOAD=12
-NEED_GB_BUILD=25
+# Free disk the Gazebo path needs, measured on this project. See
+# docs/GAZEBO_QUICKSTART.md section 1 for the derivation:
+#   5.57 GB  the image, unpacked on disk
+#   0.60 GB  the clone and its nine submodules, including .git
+#   ~4 GB    Docker Desktop itself plus the WSL2 Ubuntu distro, on a blank
+#            Windows install
+# plus headroom, because docker_data.vhdx grows and never shrinks and
+# Windows 11 Home has no Hyper-V to compact it.
+NEED_GB_PULL=20
+NEED_GB_BUILD=30
 
 STEP=0
 FAILED=""
@@ -55,6 +62,7 @@ FAILED=""
 say()  { printf '\n%s\n' "$*"; }
 pass() { printf '  PASS  %s\n' "$*"; }
 info() { printf '        %s\n' "$*"; }
+warn() { printf '  WARN  %s\n' "$*"; }
 fail() {
     printf '\n  FAIL  %s\n' "$*"
     printf '\n  Stopped at step %s. Nothing after this point has run.\n' "$STEP"
@@ -79,7 +87,7 @@ pass "in the repository root"
 
 case "$(pwd)" in
     /mnt/*) pass "running from a WSL2 shell, so GUI windows will work later" ;;
-    *) info "NOTE: cwd is not under /mnt, so this may not be a WSL2 shell."
+    *) warn "cwd is not under /mnt, so this may not be a WSL2 shell."
        info "Headless checks still work. A Gazebo window will not."
        info "See docs/GAZEBO_QUICKSTART.md section 0." ;;
 esac
@@ -94,15 +102,18 @@ if ! docker info >/dev/null 2>&1; then
 fi
 pass "docker is reachable  ($(docker --version 2>/dev/null))"
 
-if [ -n "$IMAGE_TAR" ]; then NEED_GB=$NEED_GB_LOAD; else NEED_GB=$NEED_GB_BUILD; fi
+if [ "$BUILD_IMAGE" = "1" ]; then NEED_GB=$NEED_GB_BUILD; else NEED_GB=$NEED_GB_PULL; fi
 FREE_GB=$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -dc '0-9')
 if [ -z "$FREE_GB" ]; then
-    info "could not read free disk; wanted at least ${NEED_GB} GB. Continuing."
+    FREE_GB=$(df -k . 2>/dev/null | tail -1 | awk '{print int($4/1048576)}')
+fi
+if [ -z "$FREE_GB" ]; then
+    warn "could not read free disk. WANTS ${NEED_GB} GB. Continuing anyway."
 elif [ "$FREE_GB" -lt "$NEED_GB" ]; then
-    FAILED="Reclaim space, or free it in Docker Desktop with: docker builder prune"
-    fail "not enough free disk. Wanted ${NEED_GB} GB, found ${FREE_GB} GB"
+    FAILED="Reclaim space with 'docker builder prune' then 'docker image prune -a'."
+    fail "not enough free disk.  WANTS ${NEED_GB} GB   FOUND ${FREE_GB} GB"
 else
-    pass "free disk: wanted ${NEED_GB} GB, found ${FREE_GB} GB"
+    pass "free disk:  WANTS ${NEED_GB} GB   FOUND ${FREE_GB} GB"
 fi
 
 # ---------------------------------------------------------------------------
@@ -134,33 +145,37 @@ pass "track data and zed_description are on disk"
 # ---------------------------------------------------------------------------
 step "the image"
 # ---------------------------------------------------------------------------
-HAVE_IMAGE=$(docker image ls -q "$IMAGE" 2>/dev/null)
+HAVE_IMAGE=$(docker image ls -q "$LOCAL_IMAGE" 2>/dev/null)
 
-if [ -n "$IMAGE_TAR" ]; then
-    if [ ! -f "$IMAGE_TAR" ]; then
-        FAILED="Check the path. From WSL2 a USB drive at D: is /mnt/d, so: IMAGE_TAR=/mnt/d/igvc-gazebo-jazzy.tar"
-        fail "IMAGE_TAR=$IMAGE_TAR does not exist"
-    fi
-    info "loading $IMAGE_TAR  ($(du -h "$IMAGE_TAR" | cut -f1)). No pull, no build."
-    if ! docker load -i "$IMAGE_TAR"; then
-        FAILED="If the tar is truncated, copy it from the USB drive again."
-        fail "docker load failed"
-    fi
-    pass "image loaded from the tar"
-elif [ -n "$HAVE_IMAGE" ] && [ "$FORCE_BUILD" != "1" ]; then
-    pass "$IMAGE is already present, skipping the build  (FORCE_BUILD=1 to rebuild)"
-else
-    info "building $IMAGE. Ten to twenty minutes the first time."
+if [ "$BUILD_IMAGE" = "1" ]; then
+    info "BUILD_IMAGE=1, building from the Dockerfile. Ten to twenty minutes."
     if ! docker compose -f "$COMPOSE_FILE" build "$SERVICE"; then
         FAILED="Re-run it first: partial layers are cached and a network hiccup mid-download is the usual cause."
         fail "the image build failed"
     fi
     pass "image built"
+elif [ -n "$HAVE_IMAGE" ]; then
+    pass "$LOCAL_IMAGE is already present, skipping the pull"
+    info "to force a fresh pull: docker rmi $LOCAL_IMAGE   (see the VHDX warning in the quickstart first)"
+else
+    info "pulling $REGISTRY_IMAGE"
+    info "about 1.2 GB over the wire, unpacking to about 5.6 GB on disk."
+    info "The package is public, so no docker login is needed."
+    if ! docker pull "$REGISTRY_IMAGE"; then
+        FAILED="If GHCR is unreachable, build instead:  BUILD_IMAGE=1 bash scripts/gazebo/bootstrap.sh"
+        fail "docker pull failed for $REGISTRY_IMAGE"
+    fi
+    # The compose file refers to the short local name, so give it that name.
+    docker tag "$REGISTRY_IMAGE" "$LOCAL_IMAGE" || {
+        FAILED="Unexpected: the pull succeeded but tagging did not."
+        fail "could not tag $REGISTRY_IMAGE as $LOCAL_IMAGE"
+    }
+    pass "image pulled and tagged as $LOCAL_IMAGE"
 fi
 
-if [ -z "$(docker image ls -q "$IMAGE" 2>/dev/null)" ]; then
-    FAILED="Neither the load nor the build produced it. Check 'docker image ls'."
-    fail "$IMAGE is still not present after the image step"
+if [ -z "$(docker image ls -q "$LOCAL_IMAGE" 2>/dev/null)" ]; then
+    FAILED="Neither the pull nor the build produced it. Check 'docker image ls'."
+    fail "$LOCAL_IMAGE is still not present after the image step"
 fi
 
 # ---------------------------------------------------------------------------
@@ -208,40 +223,69 @@ fi
 pass "four packages built"
 
 # ---------------------------------------------------------------------------
-step "render_check.sh: is it on the GPU, or silently on the CPU"
+step "render_check.sh: which GPU tier is this machine"
 # ---------------------------------------------------------------------------
 # This goes before the smoke test on purpose. Gazebo falls back to software
 # rendering without erroring, and every camera number from such a run is
-# meaningless. The script sources ROS itself, so a bare docker exec is enough.
+# meaningless. render_check.sh writes the tier to /tmp/render_tier so this
+# script reads its verdict rather than re-deriving it and possibly disagreeing.
 RENDER_OUT=$(docker exec "$CONTAINER" bash -c \
     "cd /root/ros2_ws && bash $REPO_IN_CONTAINER/scripts/gazebo/render_check.sh" 2>&1)
 RENDER_RC=$?
-echo "$RENDER_OUT" | grep -E "GL_RENDERER|RESULT:|camera topic|gpu_lidar" | sed 's/^/        /'
-if [ $RENDER_RC -ne 0 ]; then
-    FAILED="Full output: docker exec $CONTAINER bash -c 'cd /root/ros2_ws && bash $REPO_IN_CONTAINER/scripts/gazebo/render_check.sh'"
-    fail "render_check.sh exited $RENDER_RC"
-fi
-if echo "$RENDER_OUT" | grep -q "SOFTWARE FALLBACK"; then
-    printf '\n  WARN  Gazebo is rendering on the CPU (llvmpipe), not the GPU.\n'
-    info "The simulator still runs and navigation, lidar and control work are"
-    info "all still valid. Cameras are not: do not take camera or timing"
-    info "measurements, and run with CAMERAS=none."
-    info "Causes, in order: WSL Integration off for your distro; no NVIDIA"
-    info "driver on WINDOWS; MESA_D3D12_DEFAULT_ADAPTER_NAME pinned to an"
-    info "adapter you do not have. See GAZEBO_QUICKSTART.md section 1A."
-    info "This is a warning, not a failure. Continuing."
-else
-    pass "hardware rendering, and both sensors are publishing"
+echo "$RENDER_OUT" | grep -E "ADAPTER:|RESULT:|YOUR TIER:|camera topic|gpu_lidar" | sed 's/^/        /'
+
+TIER=$(docker exec "$CONTAINER" cat /tmp/render_tier 2>/dev/null | tr -d '[:space:]')
+[ -z "$TIER" ] && TIER="unreported"
+
+case "$TIER" in
+  A)
+    pass "TIER A, hardware rendering on a discrete NVIDIA adapter"
+    info "This is the measured baseline. The quickstart applies as written."
+    ;;
+  B)
+    pass "TIER B, hardware rendering on an integrated Intel or AMD adapter"
+    warn "Tier B is NOT measured by this project on any machine."
+    info "Your GPU is genuinely rendering, so this is a real pass. But treat"
+    info "performance as unknown rather than assuming it matches tier A, and"
+    info "please report your numbers back."
+    ;;
+  C)
+    warn "TIER C, SOFTWARE RENDERING. The GPU is not reaching the container."
+    info "Nothing is broken. Navigation, lidar, odometry and control work are"
+    info "all still valid, because gpu_lidar falls back too and the physics"
+    info "runs on the CPU either way. Cameras are the part that suffers."
+    info ""
+    info "This script will NOT claim your GPU works. Follow the TIER C path in"
+    info "docs/GAZEBO_QUICKSTART.md: headless plus RViz, front camera only,"
+    info "and do not take camera or timing measurements."
+    if [ "$ALLOW_TIER_C" != "1" ]; then
+        info ""
+        info "Continuing to the smoke test anyway, because it is the gate that"
+        info "decides whether this machine is usable. Expect it to be slow."
+    fi
+    ;;
+  *)
+    warn "TIER UNKNOWN. render_check.sh exited $RENDER_RC and reported '$TIER'."
+    info "The render log named an adapter the script does not recognise, which"
+    info "usually means a GPU vendor nobody here has tried. Report the ADAPTER"
+    info "line above. Treat yourself as tier C until someone confirms otherwise."
+    ;;
+esac
+
+# A hard guard: never let a software-rendering machine be recorded as tier A.
+if [ "$TIER" = "A" ] && echo "$RENDER_OUT" | grep -q "SOFTWARE RENDERING"; then
+    FAILED="This is a bug in render_check.sh, not in your machine. Report it."
+    fail "internal inconsistency: tier reported A while the log says software rendering"
 fi
 
 # ---------------------------------------------------------------------------
 step "bringup_smoke_test.sh: the topic contract, and does it drive"
 # ---------------------------------------------------------------------------
 if [ "$SKIP_SMOKE" = "1" ]; then
-    info "SKIP_SMOKE=1, so this was not run. The simulator is NOT verified."
+    warn "SKIP_SMOKE=1, so this was not run. The simulator is NOT verified."
 else
-    info "about four minutes. It commands a velocity and compares the"
-    info "odometry against Gazebo's own ground truth."
+    info "about four minutes on tier A, longer on tier C. It commands a"
+    info "velocity and compares the odometry against Gazebo's ground truth."
     SMOKE_OUT=$(docker exec "$CONTAINER" bash -c \
         "cd /root/ros2_ws && bash $REPO_IN_CONTAINER/scripts/gazebo/bringup_smoke_test.sh" 2>&1)
     SMOKE_RC=$?
@@ -250,7 +294,11 @@ else
     if [ $SMOKE_RC -ne 0 ]; then
         printf '\n'
         echo "$SMOKE_OUT" | grep -E "FAIL" | head -20 | sed 's/^/        /'
-        FAILED="Re-run it by hand for the full output, which names the failing topic."
+        if [ "$TIER" = "C" ]; then
+            FAILED="On tier C, try the smaller camera configuration in the quickstart's tier C path before concluding anything is broken."
+        else
+            FAILED="Re-run it by hand for the full output, which names the failing topic."
+        fi
         fail "bringup_smoke_test.sh exited $SMOKE_RC"
     fi
     pass "the topic contract holds and the robot drives on /cmd_vel"
@@ -260,11 +308,18 @@ fi
 printf '\n'
 printf '  ---------------------------------------------------------------\n'
 printf '  Bootstrap complete. The simulator is verified on this machine.\n'
+printf '  Your GPU tier: %s\n' "$TIER"
 printf '\n'
-printf '  See the robot drive the course by itself:\n'
-printf '\n'
-printf '    docker exec -it %s bash -c "NAV=1 bash %s/scripts/gazebo/start_sim.sh"\n' \
-    "$CONTAINER" "src/IGVC_robot_2026"
+if [ "$TIER" = "C" ]; then
+    printf '  TIER C, so run it headless with RViz rather than with the Gazebo\n'
+    printf '  window, which is unusable on a software rasteriser:\n'
+    printf '\n'
+    printf '    docker exec -it %s bash -c "CAMERAS=front NAV=1 HEADLESS=1 RVIZ=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"\n' "$CONTAINER"
+else
+    printf '  See the robot drive the course by itself:\n'
+    printf '\n'
+    printf '    docker exec -it %s bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"\n' "$CONTAINER"
+fi
 printf '\n'
 printf '  Drive it yourself, from a SECOND WSL2 shell:\n'
 printf '\n'
