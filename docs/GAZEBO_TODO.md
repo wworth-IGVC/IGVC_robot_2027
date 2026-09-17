@@ -393,10 +393,24 @@ left is narrower and harder than the original list implied.
       centreline, worst clearance +0.040 m, 0.0% over the paint.
 - [x] **One command from a fresh clone to a verified simulator.**
       `scripts/gazebo/bootstrap.sh`, run from a WSL2 shell. Prints PASS or
-      FAIL per step and stops at the first failure. `IMAGE_TAR=` loads the
-      image from a USB drive instead of building it.
-- [x] **The offline path is measured, not assumed.** `docker save` produces
-      1.20 GB in 14.6 s from a 5.57 GB image.
+      FAIL per step and stops at the first failure. It pulls the image from
+      GHCR and it reports the machine's GPU tier rather than assuming one.
+      `BUILD_IMAGE=1` is the fallback when GHCR is unreachable.
+- [x] **The image is published to GHCR**, `ghcr.io/wworth-igvc/igvc-gazebo-jazzy`,
+      with a dated tag and `latest`, replacing the USB drive. Audited before
+      publishing: no credentials, no SSH keys, no ZED SDK, no private registry,
+      and **no project source baked in at all**, since the repo is
+      bind-mounted at runtime. The LAN tarball path is kept as a documented
+      fallback only, in the session runbook.
+- [x] **Three GPU tiers, and `render_check.sh` now names yours.** It used to
+      grep only for `nvidia|geforce|rtx`, so a machine doing genuine hardware
+      rendering on an Intel or AMD adapter was reported `UNKNOWN` and read as
+      broken. Measured with the GPU disabled, tier C passes
+      `bringup_smoke_test.sh` at **18 of 18**, ratio 0.9982, at **0.854 real
+      time** with cameras at **4.27 Hz** on 320x180 at 5 Hz. At the tier A
+      default of 640x360 at 15 Hz it manages only 1.63 Hz and 0.608 real time,
+      so the small configuration is the tier C recommendation. Cameras off
+      returns real time to 0.996, which locates the whole cost in the camera.
 - [x] **`setup-windows.ps1` no longer builds a 14 GB image the simulator does
       not use**, no longer recommends `compose run`, and prints both the disk
       it wants and the disk it found.

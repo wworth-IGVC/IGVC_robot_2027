@@ -33,9 +33,10 @@ cd IGVC_robot_2027
 bash scripts/gazebo/bootstrap.sh
 ```
 
-That gets the image, builds the workspace and runs the GPU check and the smoke
-test, printing PASS or FAIL for each step. About 10 minutes if someone hands
-you the image on a USB drive, about 30 if you build it. Then:
+That pulls the image from GitHub Container Registry, builds the workspace, and
+runs the GPU check and the smoke test, printing PASS or FAIL for each step and
+naming your GPU tier. The package is public, so no `docker login` is needed.
+About 10 minutes. Then:
 
 ```bash
 docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
@@ -95,8 +96,13 @@ Verified means a command was run and a number came back. Measured on Windows
   engine.** Worked around for simulation with primitive colliders under
   `sim:=true`; the real robot's description is unchanged, and the meshes are
   still broken for Isaac and MoveIt.
-- **Nothing here has been run on any machine except one laptop.** Not the RTX
-  5080 laptop, not the Windows 10 machine, not native Linux.
+- **Only tier A, a discrete NVIDIA GPU, is measured.** An Intel or AMD machine
+  (tier B) is unverified anywhere. Software rendering (tier C) is measured only
+  on one laptop with its GPU switched off, where it still passed the smoke test
+  at 18 of 18 with the simulation at 0.85x real time and cameras at 4.27 Hz.
+  **macOS cannot show the Gazebo window at all**: XQuartz's OpenGL is too old
+  for gz-sim's renderer. Nothing has run on the RTX 5080 laptop, the Windows 10
+  machine or native Linux.
 
 [docs/GAZEBO_TODO.md](docs/GAZEBO_TODO.md) is the maintained list, with the
 evidence for each line and the retractions kept visible on purpose.
