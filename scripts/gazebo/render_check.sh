@@ -66,8 +66,24 @@ echo "--- GL / device lines from $OGRE_LOG ---"
 grep -iE "vendor|renderer|version|gl_version|driver" "$OGRE_LOG" | head -20
 echo
 
+# ---------------------------------------------------------------------------
+# Work out WHICH adapter is rendering, and therefore which support tier this
+# machine is in. This used to grep only for nvidia|geforce|rtx, which meant a
+# machine doing genuine hardware rendering on an Intel or AMD adapter was
+# reported as UNKNOWN and read as broken. That is tier B, it is a supported
+# configuration, and the script now says so. Fixed 2026-09-17.
+# ---------------------------------------------------------------------------
+GL_RENDERER_LINE=$(grep -m1 "GL_RENDERER" "$OGRE_LOG" 2>/dev/null)
+ADAPTER=$(printf '%s' "$GL_RENDERER_LINE" | sed -e 's/.*GL_RENDERER[[:space:]]*=[[:space:]]*//' -e 's/[[:space:]]*$//')
+[ -z "$ADAPTER" ] && ADAPTER="unknown"
+
 SOFTWARE_HIT=$(grep -ciE "llvmpipe|softpipe|swrast|kms_swrast|software rasteri" "$OGRE_LOG")
-HARDWARE_HIT=$(grep -ciE "nvidia|geforce|rtx" "$OGRE_LOG")
+NVIDIA_HIT=$(printf '%s' "$ADAPTER" | grep -ciE "nvidia|geforce|rtx|quadro|tesla")
+INTEL_AMD_HIT=$(printf '%s' "$ADAPTER" | grep -ciE "intel|amd|radeon|arc\(tm\)|iris|uhd graphics|vega")
+
+# TIER is written to a file so bootstrap.sh can read the verdict rather than
+# re-deriving it, and cannot mistake a software machine for tier A.
+TIER_FILE="${TIER_FILE:-/tmp/render_tier}"
 
 echo "--- sensor data actually produced? ---"
 # A render engine can initialise and still publish nothing. Check the topics.
@@ -84,19 +100,69 @@ if [ -n "$SCAN_MSG" ]; then echo "gpu_lidar topic: PUBLISHING"; else echo "gpu_l
 echo
 
 echo "=============================================================="
+echo " ADAPTER: $ADAPTER"
+echo "=============================================================="
 if [ "$SOFTWARE_HIT" -gt 0 ]; then
     echo " RESULT: SOFTWARE RENDERING (llvmpipe / swrast)"
-    echo " Three simulated cameras at 30 Hz will not run. Do not do"
-    echo " camera-based perception work on this configuration."
+    echo " YOUR TIER: C"
+    echo
+    echo " Nothing is wrong with your machine. The GPU is not reaching the"
+    echo " container, so Mesa fell back to the CPU. This is a supported"
+    echo " configuration and you can still do navigation, lidar, odometry"
+    echo " and control work, because gpu_lidar falls back too and the"
+    echo " physics runs on the CPU either way."
+    echo
+    echo " WHAT TO DO NEXT: follow the TIER C path in GAZEBO_QUICKSTART.md."
+    echo " Run headless with RViz, keep the front camera only and keep it"
+    echo " small. Do NOT take camera or timing measurements on this"
+    echo " configuration and do not compare them with anyone else's."
     echo "=============================================================="
+    echo "C" > "$TIER_FILE" 2>/dev/null
     exit 1
-elif [ "$HARDWARE_HIT" -gt 0 ]; then
+elif [ "$NVIDIA_HIT" -gt 0 ]; then
     echo " RESULT: HARDWARE RENDERING (NVIDIA)"
+    echo " YOUR TIER: A"
+    echo
+    echo " This is the measured baseline configuration. Everything in the"
+    echo " quickstart applies to you as written."
+    echo
+    echo " WHAT TO DO NEXT: follow the TIER A path. Nothing special needed."
     echo "=============================================================="
+    echo "A" > "$TIER_FILE" 2>/dev/null
+    exit 0
+elif [ "$INTEL_AMD_HIT" -gt 0 ]; then
+    echo " RESULT: HARDWARE RENDERING (integrated Intel or AMD)"
+    echo " YOUR TIER: B"
+    echo
+    echo " Your GPU IS reaching the container and rendering in hardware."
+    echo " That is a real pass, not a partial one. Tier B is NOT measured"
+    echo " by this project on any machine, so treat performance as unknown"
+    echo " rather than assuming it matches tier A."
+    echo
+    echo " WHAT TO DO NEXT: follow the TIER A path, which should work. If"
+    echo " gz sim crashes rather than running slowly, you are hitting the"
+    echo " known Intel-adapter crash on machines that have BOTH an Intel"
+    echo " iGPU and a discrete card: see MESA_D3D12_DEFAULT_ADAPTER_NAME in"
+    echo " docker-compose.windows.yml, and GAZEBO_QUICKSTART.md tier B."
+    echo " Please report your numbers back so this tier stops being"
+    echo " unmeasured."
+    echo "=============================================================="
+    echo "B" > "$TIER_FILE" 2>/dev/null
     exit 0
 else
-    echo " RESULT: UNKNOWN - log named neither an NVIDIA device nor a"
-    echo " software rasteriser. Inspect $OGRE_LOG by hand."
+    echo " RESULT: UNKNOWN"
+    echo " YOUR TIER: unknown"
+    echo
+    echo " The render log named an adapter this script does not recognise:"
+    echo "     $ADAPTER"
+    echo " It is neither a known software rasteriser nor a vendor string"
+    echo " this script knows. That most likely means a GPU vendor nobody on"
+    echo " this team has tried, not a broken machine."
+    echo
+    echo " WHAT TO DO NEXT: inspect $OGRE_LOG by hand, and report the"
+    echo " adapter string so it can be added here. Treat yourself as tier C"
+    echo " until someone confirms otherwise."
     echo "=============================================================="
+    echo "unknown" > "$TIER_FILE" 2>/dev/null
     exit 2
 fi
