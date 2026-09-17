@@ -248,7 +248,17 @@ RENDER_OUT=$(docker exec "$CONTAINER" bash -c \
 RENDER_RC=$?
 echo "$RENDER_OUT" | grep -E "ADAPTER:|RESULT:|YOUR TIER:|camera topic|gpu_lidar" | sed 's/^/        /'
 
-TIER=$(docker exec "$CONTAINER" cat /tmp/render_tier 2>/dev/null | tr -d '[:space:]')
+# Read the tier from render_check.sh's own output first. The tier file is a
+# secondary source, because reading it needs a container path and Git Bash
+# rewrites /tmp/render_tier into a Windows path (MSYS path conversion). That
+# made this report TIER UNKNOWN on the line directly after render_check.sh
+# had printed YOUR TIER: A. It only bit the undocumented Git Bash
+# invocation, not the documented WSL2 one, which is why it survived the
+# clean-clone run. Parsing the captured output works in either shell.
+TIER=$(printf '%s' "$RENDER_OUT" | sed -n 's/.*YOUR TIER:[[:space:]]*\([A-Za-z]*\).*/\1/p' | head -1)
+if [ -z "$TIER" ]; then
+    TIER=$(MSYS_NO_PATHCONV=1 docker exec "$CONTAINER" cat /tmp/render_tier 2>/dev/null | tr -d '[:space:]')
+fi
 [ -z "$TIER" ] && TIER="unreported"
 
 case "$TIER" in
@@ -321,7 +331,12 @@ fi
 # ---------------------------------------------------------------------------
 printf '\n'
 printf '  ---------------------------------------------------------------\n'
-printf '  Bootstrap complete. The simulator is verified on this machine.\n'
+if [ "$SKIP_SMOKE" = "1" ]; then
+    printf '  Bootstrap finished, but SKIP_SMOKE=1 was set, so the simulator\n'
+    printf '  is NOT verified. Re-run without SKIP_SMOKE before trusting it.\n'
+else
+    printf '  Bootstrap complete. The simulator is verified on this machine.\n'
+fi
 printf '  Your GPU tier: %s\n' "$TIER"
 printf '\n'
 if [ "$TIER" = "C" ]; then
