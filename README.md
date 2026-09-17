@@ -1,6 +1,105 @@
 # IGVC_robot_2027
 
-ROS 2 workspace for Gold Rush Robotics' 2027 IGVC robot, forked from [Gold-Rush-Robotics/IGVC_Robot_2026](https://github.com/Gold-Rush-Robotics/IGVC_Robot_2026). The repo contains robot description files, ros2_control hardware interfaces, bringup launch files, ZED/LiDAR/GPS integration, lane perception and navigation nodes, Isaac/Genesis simulation support, Docker runtime environments, and model training assets.
+**This is the software team's repository for IGVC 2027, current as of
+September 2026.** Competition is 4 to 8 June 2027. If you are new to the team,
+this file is the right place to start, and "Where to start, in one command"
+below is the next thing to read.
+
+It is a ROS 2 workspace forked from
+[Gold-Rush-Robotics/IGVC_Robot_2026](https://github.com/Gold-Rush-Robotics/IGVC_Robot_2026),
+containing the robot description, ros2_control hardware interfaces, bringup
+launch files, ZED/LiDAR/GPS integration, lane perception and navigation nodes,
+Isaac and Gazebo simulation support, Docker runtime environments and model
+training assets.
+
+**What this project is trying to do.** The 2026 team ran Isaac Sim for
+everything, driven by one member with an RTX 5090 who has since left, and
+nobody remaining can run that setup. The current objective is to make
+**Gazebo** the everyday simulator for the whole team, keeping Isaac Sim for
+photorealistic rendering and the mandatory design-report figures. It is a
+**parity and portability project, not a feature project**: get the 2026 system
+runnable, editable and buildable first. Features come afterwards.
+
+That goal sets the standard for changes here. With roughly four hours a week
+each and annual turnover, **a better answer that only one member can reproduce
+is the wrong answer.** That is the lesson the 2026 Isaac setup taught.
+
+## Where to start, in one command
+
+```bash
+# from a WSL2 Ubuntu shell, never PowerShell, or there is no GUI window
+git clone --recurse-submodules https://github.com/wworth-IGVC/IGVC_robot_2027.git
+cd IGVC_robot_2027
+bash scripts/gazebo/bootstrap.sh
+```
+
+That gets the image, builds the workspace and runs the GPU check and the smoke
+test, printing PASS or FAIL for each step. About 10 minutes if someone hands
+you the image on a USB drive, about 30 if you build it. Then:
+
+```bash
+docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
+```
+
+and the robot drives the course by itself.
+
+**`--recurse-submodules` is not optional.** There are nine submodules, and two
+of them are load-bearing: `zed_description` is built by name so the workspace
+build fails outright without it, and `IGVC_track_generator` holds the track
+data that every navigation node reads.
+
+[docs/GAZEBO_QUICKSTART.md](docs/GAZEBO_QUICKSTART.md) is the full version,
+including what to do when your machine is not the one this was built on.
+
+## What works today, and what does not
+
+Verified means a command was run and a number came back. Measured on Windows
+11, RTX 5070 Ti Laptop; **none of these are statements about the robot's Jetson.**
+
+**Works, verified 2026-09-17:**
+
+- **The simulator runs on the GPU.** Gazebo Harmonic on ROS 2 Jazzy, gz-sim
+  8.15.0, `D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`. The default failure
+  is a *silent* fall back to CPU rendering, so `render_check.sh` exists and is
+  the first thing anyone runs.
+- **The GUI works from WSL2** via WSLg, which settled the dual-boot question.
+  Nobody installs a second OS.
+- **The topic contract holds.** 18 of 18 checks, camera frame ids resolving
+  through TF, and odometry agreeing with Gazebo's own ground truth to
+  **0.13 degrees of heading and a 0.9988 distance ratio**.
+- **The robot drives the IGVC course by itself**, running the real 2026
+  navigation stack, ground-truth lane grid, IGVC navigator, Nav2, velocity
+  smoother and collision monitor, with **none of those nodes modified**. Last
+  run: 83.0 m under its own control, 0.0% of samples with a footprint corner
+  over the painted line. The test publishes no velocity command at any point.
+- **Both Docker images build** and the everyday image compiles all 22 packages.
+
+**Does not work, or is not what it looks like:**
+
+- **Nothing perceives anything.** The lane lines and barrel positions come out
+  of `track_points.json`, not out of the camera or the lidar. Nav2's
+  `obstacle_layer` is never even instantiated in the sim launch. Both the
+  camera and the lidar publish and **nothing plans on either**. This is
+  deliberate, so that when perception is added a failure can be blamed on
+  perception rather than navigation, but it must not be reported as obstacle
+  detection.
+- **The camera point cloud is rotated 90 degrees.** Measured, and deliberately
+  not fixed, because fixing it connects a Nav2 consumer that has never been
+  connected.
+- **YOLOPv2 does not run** in the Gazebo image: it needs torch. The classical
+  Hough lane detector does run and needs nothing extra.
+- **`autonomy_check.sh`'s `IN LANE` gate is a coin flip** and that is a defect
+  in the test, not the robot. Do not raise its tolerance to make it green.
+- **`/fix` is not published** and ros2_control is not in the loop.
+- **Four collision meshes have zero vertex normals and segfault the physics
+  engine.** Worked around for simulation with primitive colliders under
+  `sim:=true`; the real robot's description is unchanged, and the meshes are
+  still broken for Isaac and MoveIt.
+- **Nothing here has been run on any machine except one laptop.** Not the RTX
+  5080 laptop, not the Windows 10 machine, not native Linux.
+
+[docs/GAZEBO_TODO.md](docs/GAZEBO_TODO.md) is the maintained list, with the
+evidence for each line and the retractions kept visible on purpose.
 
 ## What changed in this fork
 
@@ -25,7 +124,7 @@ ROS 2 workspace for Gold Rush Robotics' 2027 IGVC robot, forked from [Gold-Rush-
 Every change, its root cause, and how it was verified is recorded in
 [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md).
 
-## Start here
+## Which document answers what
 
 | You want to | Read |
 | --- | --- |
@@ -68,7 +167,7 @@ unsupported before the team ever competes on it. Jazzy runs to May 2029.
 | --- | --- | --- |
 | ROS 2 Jazzy in Docker | **The simulator.** Gazebo Harmonic, `ros_gz`, `gz_ros2_control`. | **Supported, and the robot drives the course autonomously.** `docker/Dockerfile.gazebo-jazzy`. ~5.6 GB on disk, now including Nav2. |
 | ROS 2 Humble in Docker | Fused-drive runtime, still the default for everyday work. | **Pending port to Jazzy.** `docker/Dockerfile.humble-fused-drive`. |
-| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | **Pending port to Jazzy.** `docker/Dockerfile.igvc-zed-humble` — CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
+| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | **Pending port to Jazzy.** `docker/Dockerfile.igvc-zed-humble`, CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
 | ROS 2 Jazzy on host | Local debug GUI and host-side tools. | Host tools can see Docker topics when the shared DDS helper is sourced. |
 
 The two Humble images still work and have not been moved; they are the everyday
@@ -79,18 +178,18 @@ replaced them.
 Jazzy is where the **code** already was, though not the robot images. The 2026
 competition branch is Jazzy code, the competition robot ran out of a
 `jazzy_ws`, the org's `dev_env` image is Jazzy, and the 2027 team standardised
-on `osrf/ros:jazzy-desktop`. The org's **robot-side** images — `jetson-zed`,
-`jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros` — are genuinely Humble; see
+on `osrf/ros:jazzy-desktop`. The org's **robot-side** images, `jetson-zed`,
+`jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros`, are genuinely Humble; see
 §5.4 of [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md), and beware two
 documented traps there: `docker-compose.jetson.yml`'s "ROS 2 Jazzy" comments
 are stale, and `jetson-ros-base` is tagged `jazzy-36.4.7-2` while its
 Dockerfile builds Humble.
 
 So the robot side is a real migration, not a formality, and nothing here has
-started it. The EOL date decides it anyway — Humble is unsupported before the
+started it. The EOL date decides it anyway, Humble is unsupported before the
 team competes on it.
 
-`docker/Dockerfile.igvc-zed-humble` still does the job it was written for — it
+`docker/Dockerfile.igvc-zed-humble` still does the job it was written for, it
 replaces a **private** ZED image that most team accounts cannot pull and that
 has no published build recipe. The image it replaces, `dev-zed`, is itself
 Jazzy, so porting this one to Jazzy moves it closer to what it stands in for.
@@ -283,7 +382,7 @@ docker compose -f docker-compose.windows.yml run --rm igvc_humble_fused_drive
 ```
 
 Name the service. A bare `docker compose build` builds **every** service in the
-file, which now includes both ZED variants — roughly 40 minutes and 70 GB when
+file, which now includes both ZED variants, roughly 40 minutes and 70 GB when
 all you wanted was the everyday image.
 
 This drops the host-Linux-only settings (`/dev`, `/tmp/.X11-unix`,
@@ -347,9 +446,9 @@ rather than naming volumes by hand.
 | Service | Image | Purpose |
 | --- | --- | --- |
 | `igvc_dev_zed` | `ghcr.io/gold-rush-robotics/dev-zed:5.1.0-13.0.0` | Jazzy/ZED development container. Builds `igvc_test_bringup` and launches `simulation_launch.launch.yaml`. |
-| `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default** — 3.98 GB. |
+| `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default**, 3.98 GB. |
 | `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus the ZED SDK and ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 28.6 GB on disk. |
-| `igvc_zed_humble_upstream` | Same Dockerfile, different build args | Same as above but built against **upstream** `zed-ros2-wrapper` v5.4.1 with SDK 5.3.0 — the same wrapper and SDK as the Jetson image. See below. |
+| `igvc_zed_humble_upstream` | Same Dockerfile, different build args | Same as above but built against **upstream** `zed-ros2-wrapper` v5.4.1 with SDK 5.3.0, the same wrapper and SDK as the Jetson image. See below. |
 | `igvc_gazebo` | Built from `docker/Dockerfile.gazebo-jazzy` | **Gazebo Harmonic** (`gz-sim` 8.15.0) + **Jazzy** + `ros_gz` + `gz_ros2_control`. The simulator for everyday development, plus Nav2. ~5.6 GB on disk. Run it from WSL2; `igvc_gazebo_linux` in `docker-compose.yml` is the native-Linux twin. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md). |
 
 All three services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
@@ -373,7 +472,7 @@ On Windows, note that Docker Desktop cannot pass USB devices through, so a ZED
 camera is not usable from a Windows container regardless of image. See
 [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) for the full rationale.
 
-### Two ZED variants — pick one
+### Two ZED variants, pick one
 
 The ZED wrapper only accepts a **specific range** of ZED SDK versions, and it
 enforces this **when the node starts**, not when the image builds. An image can
@@ -402,7 +501,7 @@ docker compose build igvc_zed_humble_upstream   # matches the Jetson
 ```
 
 They use separate colcon volumes, so both can coexist. Which one the team
-standardises on is still an open decision — see
+standardises on is still an open decision, see
 [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) §4.5 for the evidence behind
 each.
 
@@ -420,7 +519,7 @@ Docker reports two different sizes and they differ by about 3.3×:
 | `igvc_zed_humble` | 9.70 GB | 28.6 GB |
 
 `docker image inspect` reports the compressed download size. `docker image ls`
-reports the unpacked footprint — but layers are unpacked **lazily, on the first
+reports the unpacked footprint, but layers are unpacked **lazily, on the first
 container run**, so a freshly built image looks smaller than it will be:
 
 ```text
@@ -428,7 +527,7 @@ igvc-zed-humble  upstream  9.7GB     # right after building it
 igvc-zed-humble  upstream  28.6GB    # after running it once
 ```
 
-**Plan around the on-disk column**, and leave room for build cache — it reached
+**Plan around the on-disk column**, and leave room for build cache, it reached
 55.9 GB while these images were being developed.
 
 ```bash
