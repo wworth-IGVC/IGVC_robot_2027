@@ -16,6 +16,17 @@
 # AMENT_TRACE_SETUP_FILES unguarded and dies under nounset.
 set -o pipefail
 
+# `gz` is NOT on PATH in a fresh container. On this image Gazebo comes from the
+# ROS vendor packages, so the binary lives at
+# /opt/ros/jazzy/opt/gz_tools_vendor/bin/gz and only appears on PATH once the
+# ROS environment is sourced. /root/.bashrc does not source it, so the command
+# this file's own header tells you to run
+#     bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh
+# used to die with "gz: No such file or directory" and report RESULT: UNKNOWN,
+# which reads as a broken GPU rather than a missing PATH entry. The other
+# scripts here source it at the top; this one did not. Verified 2026-09-17.
+source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+
 WORLD="${1:-$(dirname "$0")/render_check.sdf}"
 ITERATIONS="${ITERATIONS:-400}"
 OGRE_LOG="$HOME/.gz/rendering/ogre2.log"
