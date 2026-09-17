@@ -1071,15 +1071,30 @@ MOVED       PASS      PROGRESS    PASS
 IN LANE     PASS      ON THE SLAB PASS
 ```
 
-The lane is about 3 m wide, so a mean deviation of 0.72 m and a worst case of
-1.79 m is inside the lines but not hugging the centre - which is expected,
-because the robot is steering around barrels rather than tracking the centre.
+**Two things in that block are now retracted. Read 10.2a before quoting it.**
 
-**Four FollowPath aborts in 143 s is the rough edge.** The navigator recovers
-each time by replanning, so the run completes, but `controller_server` logs
-`Failed to make progress` and the robot pauses before carrying on. That is
-worth tuning before anyone films this for the design report, and it is the
-first thing to look at alongside the corridor arithmetic in 10.3.
+**10.2a Retractions to the block above, 2026-09-17.**
+
+*"The lane is about 3 m wide" is wrong, and it was the load-bearing
+assumption.* The lane is **variable**, 10 to 20 ft, and the corridor
+`track_ground_truth_node` actually plans in measures **2.766 m to 6.068 m**,
+median 4.431 m. There is no constant lane width anywhere in the track
+generator. See 10.8.
+
+*"Four FollowPath aborts in 143 s" is withdrawn.* That figure is the `aborts=`
+field of `/navigator/status`, which is `min(consecutive + 1, 4)`
+(`navigator.py:1595`, `:1644`, `:1684`), is **reset to zero on success**
+(`:1675`), and is also incremented on goal *rejection*. It saturates at 4 and
+cannot tell 4 apart from 40. `autonomy_check.sh` samples it once at the end and
+has never counted aborts. **Nothing in this repository counts aborts.** A later
+run printed `aborts=1` with the same behaviour. The true total is unknown;
+instrument `STATUS_ABORTED` results from the log before tuning anything.
+
+*The deviation figures were sampled at about 2 Hz, which overstated the
+margin.* `pose_logger.py` now samples at 10 Hz (about 15 Hz achieved). Three
+runs at honest sampling reached max centreline deviations of **2.04, 1.95 and
+1.98 m**. The behaviour did not regress; the measurement got honest. See 10.9
+for what that does to the `IN LANE` gate.
 
 ### 10.3 It is NOT detecting the barrels, and that distinction matters
 
@@ -1098,15 +1113,57 @@ would mean the first real perception bug looks like a regression in navigation.
 The same applies to lane following. The robot stays between the lines because
 the lines came out of `track_points.json`, not because anything looked at them.
 
-### 10.4 The corridor is tight, and here is the arithmetic
+### 10.4 The corridor, and the arithmetic corrected twice
 
-Worth knowing before tuning anything. Obstacle 0 sits **0.245 m** from the lane
-centreline with radius 0.344 m. `gt_nav_bridge_node` inflates it by a further
-0.30 m, so it blocks lateral -0.40 m to +0.89 m. With a 10 ft lane the painted
-lines' inner edges are at +/-1.27 m, so the passable gap is **0.87 m** for a
-robot **0.70 m** wide, before Nav2's own `inflation_radius: 0.75` is applied on
-top. It works, but there is very little margin, and it is the first thing to
-look at if the robot starts refusing to pass a barrel.
+**The earlier version of this section is withdrawn. It said the passable gap
+was 0.87 m for a robot 0.70 m wide. Both numbers were wrong, and an earlier
+edition of `GAZEBO_TODO.md` claimed this section had already retracted them
+when it had not.** What follows is the corrected arithmetic.
+
+**Neither width was a measurement.** 0.70 m is the **Nav2 footprint
+parameter** (`nav2_lane_follow_config.yaml:250`, `:354`). The robot's collision
+geometry is the chassis mesh, and under its `rpy` yaw of +90 degrees its
+bounding box is **0.810 x 0.970 m** (`test_robot_body.urdf.xacro:203-208`). The
+chassis is the widest part, not the wheels: the wheels sit 0.081 m (left) and
+0.089 m (right) inside the chassis envelope. So Nav2 plans and inflates for a
+robot **11 cm narrower than its own collision model**. Four different widths
+are in circulation:
+
+| Source | Width |
+| --- | --- |
+| URDF chassis collision bounding box | **0.810 m** |
+| Nav2 footprint, both costmaps | 0.700 m |
+| collision_monitor StopZone | 0.800 m |
+| Design report | 0.762 m (2.5 ft) |
+
+**The gap arithmetic, at the tightest barrel in the geometry Nav2 actually
+plans in** (`track.png`, not the world file): 1.767 m clear, minus
+`obstacle_inflate_radius_m` 0.30 = 1.467 m, minus the one-cell lethal
+lane-boundary rim `gt_nav_bridge_node` stamps = **1.367 m of free cells**.
+
+Nav2 then removes its inscribed radius from both sides:
+`1.367 - 2 x 0.35 = 0.667 m`.
+
+**Do not compare the robot's width against that 0.667 m. That was the second
+error.** The inscribed radius has already been removed from both sides, so
+0.667 m is the room available to the robot's **centre**, not to its body.
+Comparing a full width against it counts the width twice. Taking the true
+0.405 m half-width, the room is `1.367 - 0.81 = 0.557 m`, which is **positive:
+the robot fits.**
+
+What does still hold, and is the part worth acting on, is the weaker statement:
+`1.367 - 2 x 0.75` (the `inflation_radius`) is **negative**, so **there is no
+zero-cost cell anywhere in that gap.** Every path through it is a
+non-zero-cost path. That is a cost-shape problem, not a geometry one.
+
+**Treat this as a hypothesis for the abort behaviour, not a diagnosis.** The
+abort count it was meant to explain is a saturating gauge (10.2a), so the thing
+it predicts has never actually been measured.
+
+Widening the footprint to the true 0.810 m raises the inscribed radius to
+0.405 m and **makes the cost shape worse before it makes it correct.** That is
+still probably the right trade, but it is a deliberate decision and it is not a
+drive-by fix.
 
 ### 10.5 Three things that cost an hour, all worth knowing
 
@@ -1193,7 +1250,181 @@ second. Both the TF check and the RViz check now do.
   `<spherical_coordinates>` first, and every sim config runs `gps_enabled:
   false`, as the Isaac path did.
 - **Nothing perceives anything.** See 10.2.
-- **The point cloud's orientation is unverified.** All four rgbd outputs are
-  tagged with the optical frame, which is right for the 2D rasters and may be
-  wrong for the cloud. It is bridged but unused, and `obstacle_layer` is off,
-  so it cannot currently cause harm. Check it before enabling that layer.
+- **The camera point cloud is rotated, and this is no longer a maybe.**
+  Measured 2026-09-17: the cloud is emitted in the **body** convention, x
+  forward, and stamped with the **optical** frame. `gz_frame_id` sets a header
+  string; it does not rotate data. Through its own stamped frame the entire
+  cloud collapses into a 12 cm slab with its fitted floor normal on **X**,
+  89.78 degrees from +Z. Forced through the body frame it is a proper ground
+  plane, normal on Z, 0.39 degrees from +Z, 100% inliers either way. Both
+  offsets were predicted from the URDF beforehand (-0.096 and -0.229 m) and
+  measured at -0.0994 and -0.2311 m, agreeing to 3.4 mm and 2.1 mm.
+  `scripts/gazebo/cloud_frame_check.py` is the check, and it names which of
+  four mistakes was made rather than just failing. **Not fixed**: the fix is
+  not on `main` and is deliberately not in this release. See 10.10.
+
+---
+
+### 10.7 `render_check.sh` failed on a clean container
+
+**Fixed 2026-09-17 (`d005781`). Retracted from the done list, not just
+patched.** `GAZEBO_TODO.md` listed this script under "Done, and verified" and
+the quickstart made it the first thing anyone runs on a new machine.
+
+On this image `gz` comes from the ROS **vendor** packages
+(`/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz`, gz-sim 8.15.0) and
+`/root/.bashrc` does **not** source `setup.bash`. So the documented command
+failed with `gz: No such file or directory` and printed `RESULT: UNKNOWN`,
+which reads as a broken GPU rather than a missing PATH entry. Anyone following
+the written setup on a new machine would have seen it.
+
+The script now sources ROS itself. **The test that can fail:** run it from a
+shell with nothing sourced. `which gz` prints `NOT ON PATH` and the script
+still reports `HARDWARE RENDERING (NVIDIA)`, exit 0.
+
+You therefore no longer need to source ROS by hand before calling it. Earlier
+editions of the quickstart told you to; that instruction is harmless but
+redundant.
+
+### 10.8 The world now paints the course the planner actually plans in
+
+**Before this change the robot's camera and its planner were looking at two
+different courses.** `generate_igvc_world.py` painted a **constant 12 ft
+(3.658 m)** lane into `igvc_course.sdf`. Nav2's corridor does not come from
+that file at all: `track_ground_truth_node.py:339-374` derives it from contours
+in `IGVC_track_generator/track.png`. Median disagreement **0.864 m**, maximum
+**2.410 m**, and in **34.9%** of samples the planner's corridor was *narrower*
+than the lane painted in Gazebo. **No ROS node ever reads `igvc_course.sdf`.**
+
+**`track.png` is the designed course and the 12 ft constant was the outlier.**
+`IGVC_track_generator/constants.py:116-117` sets `TRACK_WIDTH_MIN_FT = 10` and
+`TRACK_WIDTH_MAX_FT = 20`, and `main.py:503` paints
+`width = MIN + (MAX - MIN) * (0.5 + 0.5 sin(4 pi i/N))`: a sinusoid, two full
+cycles per lap. That is a direct transcription of IGVC 2026 rules II.2, "track
+width will vary from ten to twenty feet wide". **12 ft appears in neither the
+rules nor the generator.**
+
+`generate_igvc_world.py` now paints the variable profile by default, and it
+**imports** the width constants from the track generator rather than copying
+them, so there is one definition and a missing submodule is a hard error
+instead of a guessed fallback. The imported values regenerate a byte-identical
+world, which confirms the hand-mirrored numbers had been right.
+
+**The test that can fail:** ray-cast the generated world's corridor from 200
+centreline points and compare against `track.png`.
+
+| World | corridor (m) | error vs `track.png` | within 0.15 m |
+| --- | --- | --- | --- |
+| **variable (new default)** | 2.734 to 5.778, median 4.210 | median **-0.043** | **90.0%** |
+| constant 12 ft (old) | 3.541 to 3.639, median 3.592 | median **-0.813**, max 2.202 | 7.0% |
+| `track.png` reference | 2.752 to 5.814, median 4.399 | | |
+
+Median error improved by a factor of about 19. The residual 0.538 m maximum is
+at curves, where an averaged-vertex-normal offset and a disc-stamped raster
+necessarily differ.
+
+`--lane-width-ft` is kept as an explicit override for a constant-width debug
+course.
+
+**The regenerated `igvc_course.sdf` is committed in the same change**, because
+`start_sim.sh` only regenerates the world when `track_points.json` is newer
+than it, and would otherwise leave every checkout on the old course.
+
+**One fragility worth knowing.** `_get_lane_polygon_from_image` relies on
+`track.png` having exactly the four-contour nesting its area-rank assumption
+needs. Any extra white mark breaks the ranking silently, and fewer than four
+contours falls through to a constant-width fallback with `lane_half_width_m`
+defaulting to 0.25, which is a silent 0.5 m corridor.
+
+### 10.9 Lane-boundary clearance, reported and not enforced
+
+`autonomy_check.sh` measured distance to the **centreline** only, which cannot
+say whether the robot stayed inside a lane whose width varies by a factor of
+two. It now also reports the clearance between the chassis edge and the **inner
+edge of the painted line**, evaluated at the **local** half-width, for both
+candidate robot half-widths. The width profile is imported from
+`generate_igvc_world.py` so there is one definition. **Pass criteria are
+unchanged.** The premise was confirmed first: both painted lines are offset by
+the same distance either side of `centerline_m`, so the centreline used for
+"deviation" is the centre of the painted lane by construction.
+
+**Yaw is not a refinement, it eats two thirds of the margin.** A fixed
+half-width is the robot's lateral extent only when it is aligned with the lane.
+Skewed, a corner leads, and the reach perpendicular to the lane is
+`(W/2)|cos t| + (L/2)|sin t|`. For the 0.810 x 0.970 m chassis that runs from
+0.405 m aligned to **0.632 m** at the worst angle, 50.1 degrees. Measured over
+a full run the robot sits at a **mean 20.7 degrees** to the lane and peaks at
+**65.3 degrees**, because the navigator is continuously re-aiming.
+
+Pose sampling was also raised from about 2 Hz to 10 Hz (about 15 Hz achieved).
+Re-scoring one 831-sample run at decreasing rates isolates the effect:
+
+| Effective rate | Worst clearance | Max centreline deviation |
+| --- | --- | --- |
+| 15.8 Hz | **+0.093 m** | 2.04 m |
+| 7.9 Hz | +0.116 m | 2.04 m |
+| 4.0 Hz | +0.153 m | 2.04 m |
+| 2.0 Hz | **+0.227 m** | 2.04 m |
+
+The two quantities behave differently, and that is the finding: **the worst
+clearance is a brief event and the worst deviation is not.** The old rate
+overstated the clearance margin by 2.4x while leaving the deviation untouched.
+
+Three runs with the rotated footprint at honest sampling:
+
+| Run | Max centreline deviation | Worst clearance, chassis | Nav2 footprint | Over the line |
+| --- | --- | --- | --- | --- |
+| 4 | 2.04 m | **+0.093 m** | +0.135 m | 0.0% |
+| 5 | 1.95 m | **+0.087 m** | +0.127 m | 0.0% |
+| 6 | 1.98 m | **+0.078 m** | +0.119 m | 0.0% |
+
+**The robot never put a corner over the paint in any run.** But the margin is
+**8 to 9 cm**, not the 25 cm an earlier unrotated, under-sampled version of
+this metric reported.
+
+**The `IN LANE` gate is now visibly a coin flip, and it has deliberately not
+been touched.** At honest sampling it produced 2.04 (FAIL), 1.95 (PASS) and
+1.98 (PASS) against a flat 2.00 m tolerance. The behaviour did not regress: 47
+to 51 m driven under its own control every time, on the slab throughout, and
+0.0% of samples over the paint in all three. What changed is that the
+measurement got honest. **The gate measures the wrong quantity**, a constant
+tolerance against a lane whose width varies by a factor of two, and it sits
+right on its own threshold. Raising `TOL` to make it green would be the wrong
+fix twice over. **This needs a team decision.** Until it is made, read a
+failing `IN LANE` alongside the clearance figures rather than as a regression.
+
+### 10.10 Two guards and one forwarding fix
+
+**`sim_cameras` used to validate nothing.** `gazebo_sim.urdf.xacro:209,212`
+were two `xacro:if`s with no else, so any typo (`fron`, `front,left`, `true`)
+silently produced a robot with **zero cameras** that launched cleanly. There
+are now two guards, because there are two ways in: `gazebo_sim.launch.py`
+raises a readable `RuntimeError` before xacro runs, and the xacro validates via
+`['none','front','all'].index(cams)` for anyone invoking xacro by hand.
+
+A wrong first attempt is worth recording: the xacro guard initially did
+nothing, because **xacro evaluates properties lazily** and a validation
+property that nothing reads is never evaluated. The fix was to make the
+validated index the thing the dispatch switches on, so it cannot be skipped.
+
+| `sim_cameras` | exit | rgbd cameras |
+| --- | --- | --- |
+| `front` | 0 | 1 |
+| `all` | 0 | 3 |
+| `none` | 0 | 0 |
+| `fron`, `front,left`, `true` | **2** | rejected by the guard |
+
+**Camera resolution now reaches the autonomy path.**
+`gazebo_nav_test.launch.py` forwarded only six arguments, so
+`sim_camera_width`, `sim_camera_height` and `sim_camera_hz` were unreachable on
+the one launch file that runs the full stack. They are now declared and
+forwarded, with defaults 640, 360 and 15, so nothing changes unless asked.
+
+**What is NOT in this release.** The point-cloud frame fix (10.6) is
+diagnosed, predicted and measured, and is **not** applied. Applying it means
+re-enabling `obstacle_layer`, which connects a Nav2 consumer that has **never**
+been connected in this simulator: `gazebo_nav_test_nav2_overrides.yaml:36-44`
+replaces `plugins` with `["lane_layer", "inflation_layer"]` in both costmaps,
+so the clouds have never reached `obstacle_layer` at all. That is a new system
+under test, not a bug fix. Expect autonomy behaviour to change and re-baseline
+all three gates afterwards.
