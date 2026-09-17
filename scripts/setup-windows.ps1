@@ -5,31 +5,51 @@
 
 .DESCRIPTION
     Written for teammates who have not used Docker before. It checks each
-    prerequisite, explains what is wrong in plain language when something is
-    missing, and only then builds the container image.
+    prerequisite and explains what is wrong in plain language when something
+    is missing.
 
-    Run it from the repository root:
+    THIS SCRIPT ONLY CHECKS PREREQUISITES. It does not build anything and it
+    does not start anything. When it passes, the next and only step is the
+    bootstrap, which must be run from a WSL2 Ubuntu shell and not from
+    PowerShell:
+
+        bash scripts/gazebo/bootstrap.sh
+
+    That is deliberate. Docker Desktop's own Linux VM has no display, so a
+    container started from PowerShell can never open a Gazebo or RViz window,
+    and the failure is silent. See docs/GAZEBO_QUICKSTART.md section 0.
+
+    Run this from the repository root:
 
         .\scripts\setup-windows.ps1
 
     Useful switches:
 
-        -CheckOnly     Run the checks and stop. Changes nothing.
-        -SkipWeights   Do not download the YOLOPv2 model weights (about 150 MB).
-        -WithZed       Also build the large ZED SDK image (15-20 GB).
-                       Only needed if you are working on ZED camera code.
-                       A ZED camera cannot be used from Docker on Windows.
+        -WithPerception  Also check for the extra disk the 14 GB Humble
+                         perception image needs. Not needed for the simulator.
+        -WithZed         Also check for the disk the 28.6 GB ZED SDK image
+                         needs. Only for ZED camera code, and a ZED camera
+                         cannot be used from Docker on Windows anyway.
+        -Weights         Download the YOLOPv2 model weights (about 150 MB).
+                         The Gazebo simulator does not use them.
 
 .NOTES
     Compatible with Windows PowerShell 5.1 (the version that ships with
     Windows 10), so it avoids newer syntax like ternary and null-coalescing.
+
+    Changed 2026-09-17: this used to end by building igvc_humble_fused_drive,
+    a 14 GB image the simulator does not need, and then told you to open it
+    with 'docker compose run', which creates a new container every time. Both
+    are gone. The disk threshold used to be a flat 30 GB, which was neither
+    measured nor right for either path.
 #>
 
 [CmdletBinding()]
 param(
     [switch]$CheckOnly,
-    [switch]$SkipWeights,
-    [switch]$WithZed
+    [switch]$WithPerception,
+    [switch]$WithZed,
+    [switch]$Weights
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,18 +77,40 @@ $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
 $osName  = (Get-CimInstance Win32_OperatingSystem).Caption
 Write-Info "$osName (build $osBuild)"
 
+# Three different thresholds matter and they are easy to conflate:
+#   19041  WSL2 itself
+#   19044  WSLg, i.e. whether a Linux GUI window can ever appear (21H2)
+#   19045  what current Docker Desktop requires (22H2)
+# One teammate is on Windows 10, so say plainly what to do at each level.
+Write-Info "Thresholds: WSL2 needs 19041, WSLg needs 19044, Docker Desktop needs 19045"
+
 if ($osBuild -ge 22000) {
-    Write-Ok "Windows 11 - supported"
+    Write-Ok "Windows 11 - the verified path"
 } elseif ($osBuild -ge 19045) {
-    Write-Ok "Windows 10 22H2 - supported"
+    Write-Ok "Windows 10 22H2 (build $osBuild) - supported, above all three thresholds"
+    Write-Info "On Windows 10 you must install WSL from the MICROSOFT STORE, not"
+    Write-Info "the older 'Windows Subsystem for Linux' Windows feature. The"
+    Write-Info "feature version has no WSLg and gives you no windows at all."
+    Write-Info "    wsl --update"
+    Write-Info "Then confirm there is a 'WSLg version' line in:"
+    Write-Info "    wsl --version"
+} elseif ($osBuild -ge 19044) {
+    Write-Warn2 "Windows 10 build $osBuild has WSLg but is below Docker Desktop's 19045."
+    Write-Info "WHAT TO DO: update to 22H2 via Settings > Windows Update. That is"
+    Write-Info "one optional update away and it is the fix. Until you do, current"
+    Write-Info "Docker Desktop will refuse to install."
 } elseif ($osBuild -ge 19041) {
-    Write-Warn2 "Windows 10 build $osBuild is older than 22H2 (19045)."
-    Write-Info "WSL2 works, but current Docker Desktop requires 22H2 or newer."
-    Write-Info "Update via Settings > Windows Update, or install an older"
-    Write-Info "Docker Desktop release. Try the build and see if it works."
+    Write-Bad "Windows 10 build $osBuild is too old for WSLg (needs 19044)."
+    Write-Info "WHAT TO DO: update to 22H2 via Settings > Windows Update."
+    Write-Info "Until then this machine can NEVER show a Gazebo or RViz window,"
+    Write-Info "no matter what else is installed. There is no workaround short"
+    Write-Info "of updating Windows."
+    Write-Info "It can still do useful work headless: render_check.sh, the"
+    Write-Info "smoke test and autonomy_check.sh all run with no display. Pair"
+    Write-Info "with someone whose machine shows windows for anything visual."
 } else {
-    Write-Bad "Windows build $osBuild is too old for WSL2 (needs 19041+)."
-    Write-Info "Update Windows before continuing."
+    Write-Bad "Windows build $osBuild is too old for WSL2 at all (needs 19041+)."
+    Write-Info "WHAT TO DO: update Windows before continuing. Nothing here works."
 }
 
 # -----------------------------------------------------------------------------
@@ -170,16 +212,47 @@ if ($dockerOk) {
 # 5. Disk space
 # -----------------------------------------------------------------------------
 Write-Step "Checking disk space"
+
+# Measured on this project 2026-09-17, not guessed. For the Gazebo-only path,
+# which is what the simulator needs and all tonight's work needs:
+#
+#   igvc-gazebo-jazzy unpacked on disk   5.57 GB   (docker image ls)
+#   the same image as a saved tar        1.20 GB   (docker save, 14.6 s)
+#   the clone plus its nine submodules   0.60 GB   (du, including .git)
+#   the colcon workspace in-container    0.003 GB  (build + install)
+#   ------------------------------------------------------------------
+#   offline path, load the tar           7.4 GB measured
+#
+# The threshold is set above that, not at it, because the WSL2 VM's own
+# docker_data.vhdx grows and never shrinks, and one image version usually
+# lingers. Building from source instead of loading a tar also leaves build
+# cache behind: this machine is carrying 29.06 GB of it across four images,
+# 21.86 GB of which is shared, so the share belonging to any one image is NOT
+# cleanly attributable and the build figure below is a margin, not a
+# measurement. That is stated rather than dressed up as precision.
+$needed = 12                                  # offline load, or an image already present
+if ($WithPerception) { $needed = $needed + 20 }   # igvc-humble-fused-drive is 14.1 GB
+if ($WithZed)        { $needed = $needed + 40 }   # igvc-zed-humble is 28.6 GB
+
 $drive = (Get-Location).Drive.Name
-$free  = (Get-PSDrive $drive).Free / 1GB
-$needed = 30
-if ($WithZed) { $needed = 60 }
-Write-Info ("Free on {0}: {1:N1} GB (need about {2} GB)" -f $drive, $free, $needed)
+$free  = [math]::Round((Get-PSDrive $drive).Free / 1GB, 1)
+
+Write-Info ("WANTS : {0} GB free on {1}:" -f $needed, $drive)
+Write-Info ("FOUND : {0} GB free on {1}:" -f $free, $drive)
+Write-Info "Building the image rather than loading a saved one wants about 25 GB,"
+Write-Info "because of the build cache it leaves behind."
+
 if ($free -lt $needed) {
-    Write-Bad ("Not enough free space. Need roughly {0} GB." -f $needed)
-    Write-Info "Reclaim Docker space with: docker system prune -a"
+    Write-Bad ("Not enough free space: wants {0} GB, found {1} GB." -f $needed, $free)
+    Write-Info "Reclaim the cheapest space first, which is Docker's build cache:"
+    Write-Info "    docker builder prune"
+    Write-Info "Then unused images:"
+    Write-Info "    docker image prune -a"
+    Write-Info "Note: docker_data.vhdx never shrinks on its own, and Windows 11"
+    Write-Info "Home has no Hyper-V, so Optimize-VHD is unavailable. Pruning"
+    Write-Info "frees space inside the VM but the file on C: stays the same size."
 } else {
-    Write-Ok "Sufficient free space"
+    Write-Ok ("Sufficient free space: wants {0} GB, found {1} GB" -f $needed, $free)
 }
 
 # -----------------------------------------------------------------------------
@@ -209,22 +282,26 @@ if (-not (Test-Path ".git")) {
 # 7. Model weights
 # -----------------------------------------------------------------------------
 Write-Step "Checking YOLOPv2 model weights"
-$weights = "models\yolopv2.pt"
-if (Test-Path $weights) {
-    $mb = (Get-Item $weights).Length / 1MB
-    Write-Ok ("{0} present ({1:N1} MB)" -f $weights, $mb)
-} elseif ($SkipWeights) {
-    Write-Warn2 "Missing, and -SkipWeights was given. Lane detection will not run."
+$weightsPath = "models\yolopv2.pt"
+if (Test-Path $weightsPath) {
+    $mb = (Get-Item $weightsPath).Length / 1MB
+    Write-Ok ("{0} present ({1:N1} MB)" -f $weightsPath, $mb)
+} elseif (-not $Weights) {
+    Write-Info "Not present, and not downloaded. That is correct for the simulator."
+    Write-Info "These weights are for lane_segmentation_node (YOLOPv2), which needs"
+    Write-Info "torch and does not run in the Gazebo image. The Hough lane detector"
+    Write-Info "(lane_detection_node) needs no weights and no torch, and does run."
+    Write-Info "Pass -Weights if you are working on YOLOPv2."
 } elseif ($CheckOnly) {
-    Write-Warn2 "Missing. Run without -CheckOnly to download."
+    Write-Warn2 "Missing, and -CheckOnly was given. Run without it to download."
 } else {
     Write-Info "Downloading (about 150 MB, once per machine)..."
     try {
         New-Item -ItemType Directory -Force -Path "models" | Out-Null
         $url = "https://github.com/CAIC-AD/YOLOPv2/releases/download/V0.0.1/yolopv2.pt"
         $ProgressPreference = "SilentlyContinue"
-        Invoke-WebRequest -Uri $url -OutFile $weights -UseBasicParsing
-        Write-Ok "Downloaded $weights"
+        Invoke-WebRequest -Uri $url -OutFile $weightsPath -UseBasicParsing
+        Write-Ok "Downloaded $weightsPath"
     } catch {
         Write-Warn2 "Download failed: $($_.Exception.Message)"
         Write-Info "You can retry later, or on Git Bash run:"
@@ -250,48 +327,46 @@ if ($script:Warnings.Count -gt 0) {
 }
 Write-Host "  All required checks passed." -ForegroundColor Green
 
-if ($CheckOnly) {
-    Write-Host ""
-    Write-Host "  -CheckOnly was given, so nothing was built." -ForegroundColor DarkGray
-    exit 0
-}
-
 # -----------------------------------------------------------------------------
-# Build
+# Hand over. This script builds nothing, on purpose.
+#
+# It used to end by building igvc_humble_fused_drive, a 14.1 GB image the
+# simulator does not use, and then told you to open it with
+# 'docker compose run --rm', which creates a NEW container with a random name
+# every time. That is how six gz sim processes once ran at once, and how a
+# 14 GB download once happened over campus wifi for no reason.
+#
+# Everything from here runs from a WSL2 Ubuntu shell, because Docker
+# Desktop's Linux VM has no display and a container started from PowerShell
+# can never open a window. The failure is silent: the command appears to work
+# and no window ever arrives.
 # -----------------------------------------------------------------------------
-Write-Step "Building the development image"
-Write-Info "First build downloads about 4 GB and takes 10-20 minutes."
-Write-Info "Later builds reuse the cache and are much faster."
-Write-Host ""
-
-docker compose -f docker-compose.windows.yml build igvc_humble_fused_drive
-if (-not $?) {
-    Write-Host ""
-    Write-Bad "Image build failed. Scroll up for the first error."
-    exit 1
-}
-Write-Ok "igvc-humble-fused-drive:latest built"
-
-if ($WithZed) {
-    Write-Step "Building the ZED SDK image (large)"
-    Write-Info "This downloads a 1.6 GB SDK installer on top of a CUDA base."
-    Write-Info "Expect 30+ minutes and 15-20 GB of disk."
-    docker compose -f docker-compose.windows.yml build igvc_zed_humble
-    if ($?) { Write-Ok "igvc-zed-humble:latest built" }
-    else    { Write-Warn2 "ZED image build failed. The main image above still works." }
-}
-
 Write-Host ""
 Write-Host "  ---------------------------------------------------------------"
-Write-Host "  Setup complete." -ForegroundColor Green
+Write-Host "  Prerequisites are in place. Nothing was built." -ForegroundColor Green
 Write-Host ""
-Write-Host "  Open a shell inside the container:" -ForegroundColor White
-Write-Host "    docker compose -f docker-compose.windows.yml run --rm igvc_humble_fused_drive"
+Write-Host "  NEXT STEP, and it is not in PowerShell:" -ForegroundColor White
 Write-Host ""
-Write-Host "  Then, inside the container, compile the workspace:" -ForegroundColor White
-Write-Host "    source /opt/ros/humble/setup.bash"
-Write-Host "    colcon build --symlink-install --base-paths /root/ros2_ws/src/IGVC_robot_2026/src"
-Write-Host "    source /root/ros2_ws/install/setup.bash"
+Write-Host "    1. Open a WSL2 Ubuntu shell   (type 'wsl', or launch Ubuntu)"
+Write-Host "    2. cd to this repo under /mnt/c/..."
+Write-Host "    3. bash scripts/gazebo/bootstrap.sh"
 Write-Host ""
-Write-Host "  Expect: Summary: 22 packages finished" -ForegroundColor DarkGray
+Write-Host "  That one command updates the submodules, gets the image, builds" -ForegroundColor DarkGray
+Write-Host "  the workspace, and runs the GPU check and the smoke test," -ForegroundColor DarkGray
+Write-Host "  printing PASS or FAIL for each step." -ForegroundColor DarkGray
 Write-Host ""
+Write-Host "  If someone handed you the image on a USB drive, use it and skip" -ForegroundColor White
+Write-Host "  the download entirely (D: is /mnt/d from WSL2):" -ForegroundColor White
+Write-Host ""
+Write-Host "    IMAGE_TAR=/mnt/d/igvc-gazebo-jazzy.tar bash scripts/gazebo/bootstrap.sh"
+Write-Host ""
+Write-Host "  Full instructions: docs/GAZEBO_QUICKSTART.md" -ForegroundColor DarkGray
+Write-Host ""
+
+if ($CheckOnly) {
+    Write-Host "  -CheckOnly was given. It makes no difference: this script" -ForegroundColor DarkGray
+    Write-Host "  never changes anything except downloading weights with" -ForegroundColor DarkGray
+    Write-Host "  -Weights." -ForegroundColor DarkGray
+    Write-Host ""
+}
+exit 0
