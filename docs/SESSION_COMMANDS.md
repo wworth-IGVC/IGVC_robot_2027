@@ -393,7 +393,8 @@ The image, public package page:
 https://github.com/users/wworth-IGVC/packages/container/package/igvc-gazebo-jazzy
 ```
 
-The image, visibility settings, owner only:
+The image, visibility settings, owner only. If this one does not load, open
+the package page above and click Package settings:
 
 ```text
 https://github.com/users/wworth-IGVC/packages/container/igvc-gazebo-jazzy/settings
