@@ -1,352 +1,428 @@
-# Gazebo simulator: set it up and drive the course
+# Gazebo simulator: from a blank Windows install to driving the course
 
-**For a team member who has never opened this repository.** Follow it top to
-bottom and you will end with a robot navigating the IGVC course on your own
-machine.
+**Assumes nothing is installed.** No Git, no Docker, no WSL2, no Python. If you
+have a fresh Windows laptop and about 60 GB free on C:, this file is everything
+you need.
 
-**Verified 2026-09-17** on Windows 11 Home (build 26200), RTX 5070 Ti Laptop
+**Verified 2026-09-17** on Windows 11 Home build 26200, RTX 5070 Ti Laptop
 12 GB, driver 610.88, Docker Desktop 29.7.2 with the WSL2 backend, WSL2
-Ubuntu-26.04. Every number in this file was measured on that machine. It is an
-x86 laptop, not the robot's Jetson, so do not quote the timings as robot
+Ubuntu-26.04. Every number below was measured on that one machine. It is an
+x86 laptop, **not** the robot's Jetson, so do not quote the timings as robot
 performance.
 
-`GAZEBO_SETUP.md` is the reference and explains *why* for everything here. This
-file is the *how* and does not assume you have read that one.
+`GAZEBO_SETUP.md` is the reference and explains *why* for everything here.
+This file is the *how*.
 
-**How long it takes:**
+---
 
-| Path | Time |
+## Start here: the decision tree
+
+You do not need to read three paths to find yours. Read this, then jump.
+
+```text
+  1. Do you have a Mac?
+        yes -> section 5. Short answer: tonight you pair with a Windows
+               laptop. A Mac can run the headless checks under emulation,
+               but it CANNOT show the Gazebo window at all: XQuartz's GL
+               is too old for gz-sim's renderer. Do not spend tonight on it.
+        no  -> continue
+
+  2. Do you have Administrator rights on this laptop?
+        no  -> you cannot install Docker Desktop. Pair with someone.
+               See section 1, check 1.
+        yes -> continue
+
+  3. Work through section 1 (triage), then section 2 (installs),
+     then section 3 (the repo), then section 4 (one command).
+
+  4. Section 4 runs render_check.sh, which PRINTS YOUR TIER.
+     Read it off the screen. Then:
+
+        YOUR TIER: A   discrete NVIDIA        -> section 6. Everything works.
+        YOUR TIER: B   integrated Intel/AMD   -> section 6, same as A, but
+                                                 your performance is unmeasured.
+        YOUR TIER: C   software rendering     -> section 7. Still useful.
+                                                 Headless plus RViz.
+        YOUR TIER: unknown                    -> treat as C, report the adapter.
+```
+
+**Nobody is excluded.** Tier C is a supported configuration, not a failure. The
+physics runs on the CPU either way and the lidar falls back too, so navigation,
+odometry and control work are all still valid on a laptop with no usable GPU.
+Cameras are the only part that really suffers.
+
+---
+
+## 1. Triage, before you install anything
+
+Three checks. Each has a consequence, so do them first rather than discovering
+the problem at minute seventy.
+
+### Check 1: do you have Administrator rights?
+
+Open **PowerShell** and run:
+
+```powershell
+([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+```
+
+`True` means this shell is elevated. If you get `False`, right-click PowerShell
+and choose **Run as administrator**, then run it again.
+
+**If you cannot get `True` at all, stop here.** Docker Desktop needs
+administrator rights to install, and a university-managed laptop may simply
+refuse. **Consequence: you pair with someone else for this session.** That is
+a normal outcome and not worth fighting during a two-hour meeting; raise it
+with IT afterwards.
+
+### Check 2: is your Windows new enough?
+
+```powershell
+[System.Environment]::OSVersion.Version
+```
+
+Or just run `winver`. You want the **build** number.
+
+| Build | What it means |
 | --- | --- |
-| Image handed to you on a USB drive | about 10 minutes |
-| Image built from source over good wifi | about 30 minutes |
+| 22000 or higher | **Windows 11. You are fine.** Skip the rest of this check |
+| 19045 or higher | Windows 10 22H2. Supported, but see the note below |
+| 19044 | Windows 10 21H2. You have WSLg, but current Docker Desktop will refuse to install |
+| 19041 to 19043 | Too old for WSLg. **No Linux window can ever appear on this machine** |
+| below 19041 | Too old for WSL2 at all |
+
+**On Windows 10 you must install WSL from the Microsoft Store**, not the older
+"Windows Subsystem for Linux" Windows feature. The feature version has no WSLg
+and gives you no windows at all. `wsl --update` does this for you. Confirm
+afterwards that `wsl --version` prints a **`WSLg version`** line. No line, no
+windows.
+
+**The exact message to show if your build is too old**, so nobody argues with
+it:
+
+```text
+  Windows build <yours> is below 19044.
+  WSLg does not exist on this build, so no Gazebo or RViz window can
+  appear on this machine, no matter what else is installed. There is no
+  workaround short of updating Windows.
+
+  What to do: Settings > Windows Update, update to 22H2. That is one
+  optional update away.
+
+  Until then this machine can still run everything headless:
+  render_check.sh, bringup_smoke_test.sh and autonomy_check.sh all work
+  with no display. Pair with someone whose machine shows windows for
+  anything visual.
+```
+
+### Check 3: which GPU do you have?
+
+This decides your tier in the table above. In **PowerShell**:
+
+```powershell
+Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion
+```
+
+Or run `dxdiag`, wait for it to finish, and read the **Display** tabs.
+
+| What you see | Likely tier |
+| --- | --- |
+| An NVIDIA GeForce, RTX, Quadro or Tesla adapter | **A** |
+| Only Intel (UHD, Iris, Arc) or only AMD (Radeon, Vega) | **B** |
+| Both an Intel iGPU **and** an NVIDIA card | **A**, but see the tier B note in section 6 about the adapter crash |
+| Nothing recognisable, or a virtual adapter | **C** |
+
+This is a prediction, not the answer. `render_check.sh` in section 4 gives you
+the real one, because what matters is whether the GPU reaches the *container*,
+not whether Windows can see it.
 
 ---
 
-## 0. The one rule that breaks everything
+## 2. Installs, on a blank Windows machine
 
-**Run every `docker` command from a WSL2 Ubuntu shell, never from PowerShell
-or CMD.**
+**Every command in this section is PowerShell, running as Administrator.**
+Nothing in this section belongs in a WSL2 shell, because the WSL2 shell does
+not exist yet.
 
-Docker Desktop's own Linux VM has no display. A container started from
-PowerShell can never open a window, not Gazebo and not RViz, and the failure is
-**silent**: the command appears to work and no window ever arrives. Started
-from a WSL2 shell, that distro's WSLg sockets mount through and both windows
-open as ordinary Windows windows on the same GPU.
+`winget` ships with Windows 11 and is the fastest path, with no browser
+hunting. Check it exists:
 
-Headless runs work from anywhere. Anything you want to *see* needs WSL2.
+```powershell
+winget --version
+```
 
-Open your WSL2 shell by typing `wsl` in a terminal, or launching "Ubuntu" from
-the Start menu. The prompt ends in `$` and paths start `/mnt/c/...`.
+Verified on this machine: `v1.29.290`. If `winget` is not found, you are
+probably on Windows 10 where it arrives via an App Installer update: install
+**App Installer** from the Microsoft Store, or get the msixbundle from
+`https://github.com/microsoft/winget-cli/releases`. Every step below also has a
+manual download link, so a missing or blocked `winget` is an inconvenience and
+not a blocker.
 
-The one exception is `scripts/setup-windows.ps1` in section 2, which only reads
-your machine's configuration and is meant for PowerShell.
+Add `--accept-source-agreements` on the first `winget` command of a fresh
+machine, or it stops to ask.
 
----
+### 2.1 Git for Windows
 
-## 1. Prerequisites
+```powershell
+winget install --id Git.Git --exact --source winget --accept-source-agreements
+```
 
-| Need | How to check | If missing |
+Verified: `Git.Git`, version 2.55.0.3, source `winget`.
+Manual download: `https://gitforwindows.org/`
+
+**Do not install `Microsoft.Git`.** That Id is real but it is Microsoft's fork
+build, not the standard Git for Windows installer this project expects.
+
+**Then set the line-ending behaviour, and this one matters.** This repository's
+shell scripts must stay LF. If Git rewrites them to CRLF, every script in the
+repo fails inside the container with `bad interpreter: /usr/bin/env bash^M`,
+which reads as a broken script rather than a broken checkout:
+
+```powershell
+git config --global core.autocrlf input
+```
+
+`.gitattributes` in this repo already forces `eol=lf` for `*.sh`, so a normal
+clone is safe either way. Setting this makes it safe even if something else on
+your machine has opinions.
+
+**Verify:**
+
+```powershell
+git --version
+git config --global core.autocrlf
+```
+
+Expect `git version 2.55.0.windows.3` or similar, then `input`.
+
+### 2.2 WSL2 and Ubuntu
+
+**Use `wsl --install`, not winget.** WSL does exist in winget as
+`Microsoft.WSL`, but `wsl --install` is the documented path because it also
+enables the Windows optional features (Virtual Machine Platform, and WSL
+itself) that an app install does not.
+
+```powershell
+wsl --install
+```
+
+**>>> THIS NEEDS A REBOOT. <<<** Do it now, not later. A restart at minute
+seventy kills the session.
+
+```powershell
+Restart-Computer
+```
+
+After the reboot, WSL finishes setting up and Ubuntu launches on its own. If it
+does not, run `wsl --install -d Ubuntu`.
+
+**>>> Ubuntu will ask you to create a UNIX username and password. <<<** This is
+a new account inside Linux and has nothing to do with your Windows login.
+Type a short lowercase username. **The password does not echo as you type, not
+even dots. That is normal, keep typing.** Write the password down; you need it
+for `sudo`.
+
+Then update WSL itself, because WSLg fixes ship here:
+
+```powershell
+wsl --update
+```
+
+**Verify, from PowerShell:**
+
+```powershell
+wsl --version
+wsl -l -v
+```
+
+`wsl --version` must print a **`WSLg version`** line. No WSLg line means no
+GUI, ever. `wsl -l -v` must show your distro with **`VERSION 2`**, for example:
+
+```text
+  NAME              STATE           VERSION
+* Ubuntu-26.04      Running         2
+```
+
+If it says `VERSION 1`, convert it: `wsl --set-version Ubuntu 2`.
+
+Manual instructions if `wsl --install` fails:
+`https://learn.microsoft.com/windows/wsl/install-manual`
+
+### 2.3 Docker Desktop
+
+```powershell
+winget install --id Docker.DockerDesktop --exact --source winget
+```
+
+Verified: `Docker.DockerDesktop`, version 4.91.0, source `winget`.
+Manual download: `https://www.docker.com/products/docker-desktop`
+
+**>>> THIS NEEDS A REBOOT, OR AT LEAST A LOGOUT. <<<** Docker Desktop adds you
+to a local group and the change does not apply to an existing session. Reboot.
+
+Then **launch Docker Desktop from the Start menu** and accept the terms. It
+does not start by itself after installation. Wait for the whale icon in the
+system tray to stop animating.
+
+**>>> Now the UI step this project has already been bitten by. <<<** It is not
+a command and it cannot be scripted:
+
+1. Open **Docker Desktop**
+2. **Settings** (the gear icon)
+3. **General**: confirm **Use the WSL 2 based engine** is ticked
+4. **Resources** > **WSL Integration**
+5. Turn on the toggle for your distro, for example `Ubuntu-26.04`
+6. **Apply & Restart**
+
+Without step 5, `docker` exists in PowerShell and **does not exist in the WSL2
+shell**, which is where every later command runs.
+
+**Verify, and do it in BOTH shells, because passing in one proves nothing about
+the other:**
+
+```powershell
+# PowerShell
+docker version
+docker run hello-world
+```
+
+```bash
+# now in the WSL2 Ubuntu shell: type  wsl  in a terminal, or launch Ubuntu
+docker version
+docker run hello-world
+```
+
+Both must print `Hello from Docker!`. If the WSL2 one says
+`docker: command not found` or `cannot connect`, WSL Integration is off. Go
+back to step 5.
+
+### 2.4 Anything else?
+
+**Nothing.** You do not need Python, `make`, a compiler or an editor on
+Windows. ROS 2, Gazebo, `colcon` and `python3` all live **inside the
+container**, and `git`, `bash` and `df` come with WSL2 Ubuntu. If a document
+tells you to install Python for this path, it is out of date.
+
+### 2.5 Time and bandwidth, measured
+
+| Step | Download | Time on this machine |
 | --- | --- | --- |
-| Windows 11, or Windows 10 build 19045+ | `winver` | See "Windows 10" in 1A |
-| WSL2 with a real distro | `wsl -l -v` shows e.g. `Ubuntu-26.04`, `VERSION 2` | `wsl --install -d Ubuntu` |
-| Docker Desktop, WSL2 backend | `docker version` from the WSL2 shell | Install Docker Desktop |
-| **WSL Integration enabled for your distro** | see below | see below |
-| NVIDIA GPU + recent driver | `nvidia-smi` in PowerShell | Update the driver. Optional, see 1A |
-| Free disk | `df -h /mnt/c` in the WSL2 shell | see the table below |
+| Git for Windows | about 65 MB | 1 to 2 min |
+| `wsl --install` plus Ubuntu | about 500 MB | 3 to 5 min, plus a reboot |
+| `wsl --update` | about 130 MB | under 1 min |
+| Docker Desktop | about 600 MB installer | 5 to 8 min, plus a reboot |
+| the repo clone with 9 submodules | about 600 MB | **17.4 s** measured |
+| the Gazebo image, pulled | about 1.2 GB over the wire, 5.57 GB unpacked | see section 4 |
 
-### Disk, measured rather than guessed
+**Rough room total: about 2.4 GB per laptop, so five laptops is on the order of
+12 GB.** On shared campus wifi that is the binding constraint of the evening,
+which is why downloads start at minute zero and why pulls are staggered rather
+than all five at once.
+
+**Disk, measured rather than guessed:**
 
 | Item | Measured |
 | --- | --- |
-| `igvc-gazebo-jazzy` unpacked on disk | **5.57 GB** |
-| the same image as a saved tar | **1.20 GB** |
+| the Gazebo image, unpacked on disk | **5.57 GB** |
 | the clone plus its nine submodules, including `.git` | **0.60 GB** |
 | the colcon workspace inside the container | 0.003 GB |
-| **total for the USB / offline path** | **7.4 GB** |
+| Docker Desktop plus the WSL2 Ubuntu distro | roughly 4 GB |
 
-**Ask for 12 GB free if you are loading the image from a tar, and 25 GB if you
-are building it.** The gap above the measured 7.4 GB is deliberate: the WSL2
-VM's `docker_data.vhdx` grows and never shrinks on its own, and one old image
-version usually lingers. The 25 GB build figure includes the build cache a
-build leaves behind, and that part is **a margin, not a measurement**: this
-machine carries 29.06 GB of build cache across four images, 21.86 GB of it
-shared, so the share belonging to any single image cannot be cleanly
-attributed.
+**Ask for 20 GB free, and 30 GB if you build the image instead of pulling it.**
+You were asked to clear 60 GB, which is comfortable headroom and deliberately
+so: `docker_data.vhdx` grows and never shrinks, and Windows 11 **Home** has no
+Hyper-V, so `Optimize-VHD` is not available to compact it. Space you give
+Docker does not come back easily.
 
-If you are short, reclaim the cheapest thing first:
+If you are short:
 
 ```bash
 docker builder prune          # build cache, safe, usually the biggest win
 docker image prune -a         # images nothing is using
 ```
 
-Be aware that pruning frees space *inside* the VM but `docker_data.vhdx` on
-C: stays the same size. Windows 11 **Home** has no Hyper-V, so `Optimize-VHD`
-is not available to shrink it.
-
-### WSL Integration is the one people miss
-
-Docker Desktop, **Settings**, **Resources**, **WSL Integration**, enable the
-toggle for your distro (`Ubuntu-26.04`), then **Apply & Restart**.
-
-Check it worked, from the WSL2 shell:
-
-```bash
-docker ps
-```
-
-If that errors with "command not found" or "cannot connect", the toggle is off.
-Nothing else in this guide will work until it is on.
-
 ---
 
-## 1A. Your machine is probably not the one this was built on
+## 3. Get the repository
 
-Everything here was verified on **one** laptop. If your machine differs, find
-it below **before** you conclude something is broken. Most "it works for you
-and not for me" reports on this project have turned out to be one of these.
+**From here on, every command is in the WSL2 Ubuntu shell**, not PowerShell.
+Type `wsl` in a terminal, or launch Ubuntu from the Start menu. The prompt ends
+in `$` and paths start `/mnt/c/...`.
 
-| Part | Machine-specific? |
-| --- | --- |
-| Getting the image | No. Same everywhere |
-| Running headless, and every check except the GPU one | No |
-| **Seeing a window** | **Yes.** Depends on WSLg, or X11 on Linux |
-| **GPU rendering** | **Yes.** Depends on vendor, driver and the compose file |
-| Speed | Yes. Cameras are the expensive part |
+**Why it matters:** Docker Desktop's own Linux VM has no display. A container
+started from PowerShell can never open a window, not Gazebo and not RViz, and
+**the failure is silent**: the command appears to work and no window ever
+arrives. Started from a WSL2 shell, that distro's WSLg sockets mount through
+and both windows open as ordinary Windows windows on the same GPU.
 
-The simulator **does not require an NVIDIA GPU to run at all.** It requires one
-to run *fast* and to make camera results meaningful. With no usable GPU you can
-still do navigation, lidar and control work today.
-
-### Windows 11
-
-The verified path. Follow the guide as written.
-
-### Windows 10
-
-Works, and one teammate is on it. Three different build numbers matter and they
-are easy to conflate:
-
-| Build | What it gates |
-| --- | --- |
-| 19041 | WSL2 itself |
-| **19044** (21H2) | **WSLg, that is, whether a Linux window can ever appear** |
-| **19045** (22H2) | **what current Docker Desktop requires** |
-
-Check yours with `winver`.
-
-- **19045 or newer:** supported. But you must install WSL from the **Microsoft
-  Store**, not the older "Windows Subsystem for Linux" Windows feature, because
-  the feature version has no WSLg and gives you no windows at all. Run
-  `wsl --update`, then confirm `wsl --version` prints a **`WSLg version`** line.
-  No line, no windows.
-- **19044:** you have WSLg but current Docker Desktop will refuse to install.
-  **What to do:** update to 22H2 through Settings, Windows Update. It is one
-  optional update away and it is the whole fix.
-- **19041 to 19043:** this machine can **never** show a Gazebo or RViz window,
-  whatever else you install. There is no workaround short of updating Windows.
-  **What to do:** update to 22H2. Meanwhile the machine is still useful
-  headless: `render_check.sh`, the smoke test and `autonomy_check.sh` all run
-  with no display. Pair with someone whose machine shows windows for anything
-  visual.
-- **Below 19041:** nothing here works. Update Windows first.
-
-`scripts/setup-windows.ps1` prints your build number and which of these you are
-in.
-
-(Unrelated but worth knowing: Isaac Sim 6.0.1 dropped Windows 10 support
-entirely. That affects the Isaac track, not this one. Gazebo is fine.)
-
-### Native Linux
-
-Use the other compose file and the Linux service:
+Headless runs work from anywhere. Anything you want to *see* needs WSL2.
 
 ```bash
-xhost +local:docker                      # once per login
-docker compose up -d igvc_gazebo_linux
-docker exec -it igvc_gazebo_linux bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh
-```
-
-That service is **written but has never been run on a real Linux machine**,
-because nobody on the team runs Linux on the desktop. It is the Windows service
-with the WSL-specific machinery swapped for `runtime: nvidia`, `/dev/dri` and
-`/tmp/.X11-unix`. If it fails, the two usual causes are
-`nvidia-container-toolkit` not being installed and forgetting `xhost`. Please
-report back either way so this paragraph can be deleted.
-
-Everything after section 4 is identical, except the container is called
-`igvc_gazebo_linux`.
-
-### AMD or Intel GPU
-
-The Windows compose file pins Mesa to the NVIDIA adapter, which is wrong for
-you:
-
-```yaml
-- MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA    # change or remove
-```
-
-On Windows/WSL2, change `NVIDIA` to a string matching your adapter, or delete
-the line and let Mesa choose. On native Linux, drop `runtime: nvidia` and the
-`NVIDIA_*` variables from `igvc_gazebo_linux` and keep `/dev/dri`.
-
-Then run `render_check.sh` and see what it reports. A modern AMD or Intel GPU
-will render this scene perfectly well. The pinning exists only because **this
-one laptop has both an Intel iGPU and an NVIDIA card**, and Mesa picking the
-Intel one made `gz sim` crash inside Intel's WSL driver. That crash looks like
-a Gazebo bug and is not one.
-
-### No usable GPU, or a virtual machine
-
-You will get `SOFTWARE FALLBACK (llvmpipe)`. The simulator still runs. What
-changes:
-
-- Turn the cameras off: `CAMERAS=none`. They are what software rendering cannot
-  keep up with.
-- Expect a real-time factor well below 1.0.
-- **Do not take camera or timing measurements** and do not compare them with
-  anyone else's.
-
-Navigation, lidar, odometry and control work are all still valid, because
-`gpu_lidar` falls back too and the physics is on the CPU regardless:
-
-```bash
-docker exec -it igvc_gazebo bash -c \
-  "CAMERAS=none NAV=1 HEADLESS=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
-```
-
-### macOS
-
-Not supported. Docker Desktop on macOS gives containers no GPU and there is no
-WSLg equivalent. Use a lab machine.
-
-### Docker Desktop resource limits
-
-The default allocation is often too small once Gazebo, RViz and ten Nav2 nodes
-are running. Settings, Resources:
-
-| Setting | Minimum | Comfortable |
-| --- | --- | --- |
-| Memory | 8 GB | 12-16 GB |
-| CPUs | 4 | 8 |
-
-Symptoms of too little memory: containers dying without a message, the build
-failing partway, or Nav2's lifecycle bringup aborting with
-`Failed to bring up all requested nodes`.
-
----
-
-## 2. Get the repository
-
-**The `--recurse-submodules` is not optional.** This is the single most common
-way a fresh clone fails, and the failure is confusing when it happens.
-`zed_description` is a submodule and colcon builds it by name, so without it
-the workspace build fails outright; `IGVC_track_generator` holds the track data
-that every navigation node and the world generator read.
-
-From the WSL2 shell:
-
-```bash
-cd /mnt/c            # or wherever you keep projects
+cd /mnt/c
 git clone --recurse-submodules https://github.com/wworth-IGVC/IGVC_robot_2027.git
 cd IGVC_robot_2027
 ```
 
-Expect nine submodules. Check:
+**The `--recurse-submodules` is not optional.** There are nine submodules and
+two are load-bearing: `zed_description` is built by name, so the workspace
+build fails outright without it, and `IGVC_track_generator` holds the track
+data that every navigation node and the world generator read.
+
+**Verify:**
 
 ```bash
 git submodule status | wc -l          # want: 9
 git submodule status | grep '^-'      # want: no output. A leading - means empty
 ```
 
-**If you already cloned without it**, you do not need to start again:
+If you already cloned without it, you do not need to start again:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-`bootstrap.sh` in section 4 does this for you and refuses to continue if any
-submodule is still empty, so you cannot get far with the wrong clone.
-
-If your path contains a space, that is fine, but **quote it everywhere**:
-
-```bash
-cd "/mnt/c/IGVC 2027/IGVC_robot_2027"
-```
+Section 4 refuses to continue if any submodule is empty, so you cannot get far
+with the wrong clone.
 
 ---
 
-## 3. Check your machine, from PowerShell
-
-This one script is meant for PowerShell, because all it does is read your
-machine's configuration. It builds nothing and starts nothing.
-
-```powershell
-cd "C:\IGVC 2027\IGVC_robot_2027"
-.\scripts\setup-windows.ps1
-```
-
-It checks the Windows build against all three thresholds above, WSL2, Docker,
-GPU passthrough, free disk (printing both the number it wants and the number it
-found) and whether your submodules are populated. Every failure comes with what
-to do about it.
-
-Expect it to end with:
-
-```text
-  All required checks passed.
-  Prerequisites are in place. Nothing was built.
-```
-
-Switches: `-WithPerception` and `-WithZed` raise the disk requirement for those
-much larger images, which the simulator does not need. `-Weights` downloads the
-YOLOPv2 model weights, which the simulator does not use.
-
----
-
-## 4. One command: get the image, build, and verify
-
-Back in the **WSL2** shell, in the repo root:
+## 4. One command: get the image, build, and find your tier
 
 ```bash
 bash scripts/gazebo/bootstrap.sh
 ```
 
 That does everything: submodules, the image, the container, the workspace
-build, the GPU check and the smoke test. It prints `PASS` or `FAIL` for each
-step and **stops at the first failure** rather than half-succeeding.
+build, the GPU tier check and the smoke test. It prints `PASS` or `FAIL` for
+each step and **stops at the first failure** rather than half-succeeding.
 
-**If someone handed you the image on a USB drive, use it.** This skips the
-download and the build entirely, which matters when twelve people are on the
-same campus wifi. From WSL2, a USB drive mounted at `D:` is `/mnt/d`:
-
-```bash
-IMAGE_TAR=/mnt/d/igvc-gazebo-jazzy.tar bash scripts/gazebo/bootstrap.sh
-```
-
-Other options:
+The image comes from **GitHub Container Registry**. It is a public package, so
+**no `docker login` is needed**: about 1.2 GB over the wire, unpacking to
+5.57 GB on disk.
 
 | Variable | Effect |
 | --- | --- |
-| `IMAGE_TAR=<path>` | load the image from a tar instead of building it |
-| `SKIP_SMOKE=1` | stop after the GPU check. Saves about 4 minutes |
-| `FORCE_BUILD=1` | rebuild the image even if it is already present |
+| `BUILD_IMAGE=1` | build from the Dockerfile instead of pulling. The fallback for when GHCR is unreachable. 10 to 20 minutes instead of a few |
+| `IMAGE_REF=...` | pull a different tag, for example the dated `ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17` instead of `latest` |
+| `SKIP_SMOKE=1` | stop after the tier check. Saves about 4 minutes |
+| `ALLOW_TIER_C=1` | do not pause to explain a software-rendering machine |
 
-Expect, with timings from this machine:
+Expect, on tier A:
 
 ```text
 ==> step 1: checking where we are and what we have
   PASS  in the repository root
   PASS  running from a WSL2 shell, so GUI windows will work later
   PASS  docker is reachable  (Docker version 29.7.2, build a7dcaa6)
-  PASS  free disk: wanted 12 GB, found 112 GB
+  PASS  free disk:  WANTS 20 GB   FOUND 106 GB
 
 ==> step 2: submodules
   PASS  all 9 submodules populated
   PASS  track data and zed_description are on disk
 
 ==> step 3: the image
-  PASS  image loaded from the tar
+        pulling ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+  PASS  image pulled and tagged as igvc-gazebo-jazzy:latest
 
 ==> step 4: starting the container
   PASS  igvc_gazebo is up
@@ -354,27 +430,37 @@ Expect, with timings from this machine:
 ==> step 5: building the workspace
   PASS  four packages built
 
-==> step 6: render_check.sh: is it on the GPU, or silently on the CPU
-        GL_RENDERER = D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
+==> step 6: render_check.sh: which GPU tier is this machine
+        ADAPTER: D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
+        RESULT: HARDWARE RENDERING (NVIDIA)
+        YOUR TIER: A
         camera topic   : PUBLISHING
         gpu_lidar topic: PUBLISHING
-        RESULT: HARDWARE RENDERING (NVIDIA)
-  PASS  hardware rendering, and both sensors are publishing
+  PASS  TIER A, hardware rendering on a discrete NVIDIA adapter
 
 ==> step 7: bringup_smoke_test.sh: the topic contract, and does it drive
         topic checks passed: 18   failed: 0
-        DRIVE TEST : PASS
-        FRAME TEST : PASS
+        DRIVE TEST : PASS   robot moved 7.331 m on /cmd_vel
+        FRAME TEST : PASS   odometry agrees with the simulator
   PASS  the topic contract holds and the robot drives on /cmd_vel
 
   Bootstrap complete. The simulator is verified on this machine.
+  Your GPU tier: A
 ```
+
+**Now read your tier off that output and go to section 6 (A or B) or section 7
+(C).**
+
+`bootstrap.sh` will not tell you the GPU works when it does not. It reads the
+tier from `render_check.sh` rather than guessing, and it fails outright if the
+two ever disagree.
 
 ### If you would rather do the steps by hand
 
 ```bash
 git submodule update --init --recursive
-docker compose -f docker-compose.windows.yml build igvc_gazebo   # or: docker load -i <tar>
+docker pull ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+docker tag ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest igvc-gazebo-jazzy:latest
 docker compose -f docker-compose.windows.yml up -d igvc_gazebo
 docker exec igvc_gazebo bash -c 'source /opt/ros/jazzy/setup.bash && cd /root/ros2_ws &&
   colcon build --symlink-install \
@@ -383,59 +469,107 @@ docker exec igvc_gazebo bash -c 'source /opt/ros/jazzy/setup.bash && cd /root/ro
 ```
 
 Note the compose file: **`docker-compose.windows.yml`**, not the plain
-`docker-compose.yml`. The plain one targets native Linux and will not work
-here.
+`docker-compose.yml`, which targets native Linux and will not work here.
 
 **Four packages, not three**, and the fourth is the one people leave out:
 `zed_description` is a submodule that `igvc_test_description` depends on, and
-omitting it fails the build. (The comment at the top of `start_sim.sh` says
-"three"; the code selects four. The code is right.)
+omitting it fails the build.
 
 **Do not use `docker compose run`.** It creates a *new* container with a random
 name every time, so a second `run` gives you a second, separate simulator
 rather than a second shell into the first. Two simulators on one ROS domain
-both publish `/clock`, `/odom` and `/tf` for the same robot, and the navigation
-stack then plans against a robot whose position jumps between them. It looks
-exactly like a navigation bug. That is how six `gz sim` processes once ran at
-once. Use `up -d` plus `docker exec`.
+both publish `/clock`, `/odom` and `/tf` for the same robot, so the navigation
+stack plans against a robot whose position jumps between them. It looks exactly
+like a navigation bug, and it is how six `gz sim` processes once ran at once.
+Use `up -d` plus `docker exec`.
+
+### If GHCR is unreachable in the room
+
+Two fallbacks, in order:
+
+1. `BUILD_IMAGE=1 bash scripts/gazebo/bootstrap.sh`, which builds from the
+   Dockerfile. 10 to 20 minutes and it needs `packages.ros.org`, so it is not
+   an offline path.
+2. Ask Liam to serve the image off his laptop over the local network. See the
+   LAN fallback section of the session runbook.
 
 ---
 
-## 5. Making the USB drive, for whoever is handing the image out
+## 5. macOS
 
-Do this once, on a machine that already has the image:
+**Short answer: tonight, pair with a Windows laptop on tier A or B.**
 
-```bash
-docker save igvc-gazebo-jazzy:latest -o igvc-gazebo-jazzy.tar
-```
+A Mac is not excluded in principle, and the headless checks should run. But
+the one thing people assume will work does not, so read the third point before
+you spend the evening on it. Each finding is labelled with how well it is
+established.
 
-| Measured on this machine | |
-| --- | --- |
-| `docker save` wall time | **14.6 s** |
-| resulting file | **1,201,505,280 bytes, 1.20 GB** |
-| the image unpacked | 5.57 GB |
+**1. Docker Desktop on macOS does not expose the GPU to Linux containers.
+VERIFIED.** Docker's own GPU documentation says flatly that "GPU support in
+Docker Desktop is only available on Windows with the WSL2 backend". The cause
+is architectural, not a setting: containers run inside a Linux VM on Apple's
+Virtualization framework, which gives Linux guests no 3D-capable virtual GPU.
+There is no `--gpus` equivalent to try. **Consequence: a Mac is tier C at
+best**, on hardware that is otherwise very capable.
 
-The tar is much smaller than the image because it holds the **compressed** layer
-blobs, which the daemon unpacks on load. A complete tar is an OCI layout: a
-`blobs/sha256/` directory, `index.json`, `manifest.json` and `oci-layout`. You
-can check yours is not truncated with `tar -tf igvc-gazebo-jazzy.tar | tail -4`.
+**2. On Apple Silicon this amd64 image runs under emulation. VERIFIED, but
+"Rosetta" is wrong. REFUTED.** Our image is amd64 only, and Docker's docs
+confirm you cannot run a `linux/amd64` container on an arm64 host without
+emulation. However **Rosetta is optional and off by default**: Docker's
+settings reference lists "Use Rosetta for x86_64/amd64 emulation on Apple
+Silicon" as *Disabled* by default. The default path is QEMU via
+`binfmt_misc`, which Docker's own docs warn "can be much slower than native
+builds, especially for compute-heavy tasks", and CPU rasterisation is exactly
+compute-heavy. Also **`--platform linux/amd64` is good practice rather than a
+hard requirement**: with only an amd64 manifest there is nothing for Docker to
+choose, so it starts the container under emulation and prints a
+platform-mismatch warning. Set `platform: linux/amd64` in compose anyway so
+the behaviour is predictable instead of warning-driven.
 
-Copy that one file to the drive. On the receiving machine, either pass
-`IMAGE_TAR` to `bootstrap.sh` as in section 4, or load it by hand:
+**3. XQuartz cannot show you the Gazebo GUI. REFUTED, and this is the finding
+that decides tonight.** The usual advice is "install XQuartz, set `DISPLAY`,
+run `xhost`". For most Linux GUI apps that works. **For Gazebo it does not.**
+XQuartz's GLX caps out at roughly **OpenGL 1.4**, and gz-sim's default `ogre2`
+render engine requires **OpenGL above 3.3, preferably 4.3+**. Enabling indirect
+GLX runs the GL calls against that 1.4 stack, so `gz sim` fails with an ogre2
+OpenGL error rather than rendering slowly. There is no WSLg equivalent on macOS
+either (ASSUMED: it is an absence claim, so no single document asserts it).
 
-```bash
-docker load -i /mnt/d/igvc-gazebo-jazzy.tar
-```
+If someone does want a visual path on a Mac later, the route that works is
+**not** XQuartz but an X server plus VNC or noVNC *inside* the container,
+viewed in a browser: that rasterises client-side with llvmpipe and never
+touches XQuartz's GL at all. Nobody has done it here.
 
-Expect `Loaded image: igvc-gazebo-jazzy:latest`.
+**So what a Mac can actually do, ASSUMED because nobody on this team has
+tested it on a Mac:** the headless checks. `bringup_smoke_test.sh` and
+`autonomy_check.sh` should both run under emulation, because the autonomy path
+takes its lane lines and barrels from `track_points.json` rather than from the
+camera, so software rendering does not invalidate the result. What will not
+work is the Gazebo GUI and any camera-based perception number. Two cautions:
+an emulated run may miss timing-sensitive checks, and **the open DiffDrive
+`/cmd_vel` timeout question must not be investigated on a Mac**, because that
+measurement has already been retracted three times for less.
 
-**An exFAT drive is required if the image ever grows past 4 GB**, because FAT32
-cannot hold a single file that large. 1.20 GB is fine on either, but do not
-assume it stays that way.
+**Backlog, scoped and deliberately not started: a native arm64 image is
+feasible, and more so than expected.** Verified today by downloading the real
+apt indexes rather than reading documentation:
+
+- REP-2000 lists Ubuntu Noble 24.04 **arm64 as a Tier 1 platform for Jazzy**.
+- `packages.ros.org/ros2/ubuntu/dists/noble/Release` declares
+  `Architectures: i386 amd64 arm64 armhf`.
+- The arm64 package index carries **3667 `ros-jazzy-*` packages**, including
+  every one this image installs: `ros-jazzy-ros-gz`, `ros-jazzy-ros-gz-sim`,
+  `ros-jazzy-ros-gz-bridge` and the rest.
+- This image needs **no ZED SDK**, which is the usual arm64 blocker.
+
+A multi-arch build would give Macs a hardware-native, software-rendered path
+with no emulation layer underneath it. **Estimate: half a day**, mostly a
+`docker buildx` multi-arch pipeline plus one round of verification on an actual
+Mac. Do not start it before the meeting.
 
 ---
 
-## 6. Run it
+## 6. Tier A and tier B: run it
 
 ```bash
 docker exec -it igvc_gazebo bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh
@@ -448,47 +582,141 @@ robot, the lidar returns and the front camera.
 directory is `/root/ros2_ws`, the colcon workspace, and the repo is mounted one
 level down at `/root/ros2_ws/src/IGVC_robot_2026`. That directory keeps the
 **2026** name on purpose: the compose files, `IGVC_WORKSPACE_ROOT` and the DDS
-profile all reference it. Drop the prefix and you get
-`bash: scripts/gazebo/start_sim.sh: No such file or directory`.
+profile all reference it.
 
 Options, set before the command:
 
 | Variable | Effect |
 | --- | --- |
 | `NAV=1` | **also start Nav2 and the navigator, so the robot drives itself** |
-| `CAMERAS=none` | no cameras; the right choice with software rendering |
+| `CAMERAS=none` | no cameras |
 | `CAMERAS=all` | all three ZED cameras instead of just the front one |
 | `RVIZ=0` | no RViz window |
 | `HEADLESS=1` | no windows at all; for automated checks |
 
-So the demo, the robot driving the course by itself:
+The demo, the robot driving the course by itself:
 
 ```bash
 docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
 ```
 
-Give it about 60 seconds. Gazebo loads, then Nav2 starts 15 seconds later on
-purpose (section 9), then the navigator plans and the robot sets off.
+Give it about 60 seconds. Gazebo loads, Nav2 starts 15 seconds later on
+purpose, then the navigator plans and the robot sets off. **Ctrl-C in that
+shell stops everything.**
 
-**Ctrl-C in that shell stops everything.**
+Camera resolution defaults to 640x360 at 15 Hz. Both launch files accept
+`sim_camera_width`, `sim_camera_height` and `sim_camera_hz`.
 
-Camera resolution defaults to 640x360 at 15 Hz. Both launch files now accept
-`sim_camera_width`, `sim_camera_height` and `sim_camera_hz` if you need to
-change it, including on the autonomy path, where until 2026-09-17 they were
-silently unreachable:
+### The tier B note: the adapter crash
 
-```bash
-ros2 launch igvc_test_bringup gazebo_nav_test.launch.py \
-    sim_camera_width:=1280 sim_camera_height:=720
+Tier B means your GPU **is** reaching the container and rendering in hardware.
+That is a real pass. **Tier B is not measured by this project on any machine**,
+so treat performance as unknown rather than assuming it matches tier A, and
+please report your numbers back.
+
+One known failure mode applies if your laptop has **both** an Intel iGPU and a
+discrete card. `docker-compose.windows.yml` contains:
+
+```yaml
+- MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA    # change or remove
 ```
 
-`sim_cameras` accepts exactly `none`, `front` or `all`. Anything else is now
-rejected with a readable error. It used to silently build a robot with **zero
-cameras** that launched cleanly.
+That line exists because on the machine this was built on, Mesa picking the
+Intel adapter made `gz sim` crash inside Intel's WSL driver. The crash looks
+like a Gazebo bug and is not one. If you have no NVIDIA adapter, change
+`NVIDIA` to a string matching yours or delete the line and let Mesa choose,
+then re-run `render_check.sh`.
 
 ---
 
-## 7. Drive it yourself
+## 7. Tier C: software rendering, and still useful
+
+You got `RESULT: SOFTWARE RENDERING` and `YOUR TIER: C`. **Nothing is wrong
+with your machine.** The GPU is not reaching the container, so Mesa rasterised
+on the CPU.
+
+**What still works, and it is most of the project:** the physics runs on the
+CPU regardless, and `gpu_lidar` falls back to software too, so **navigation,
+lidar, odometry, control and the whole Nav2 stack are all valid work.**
+
+**What does not:** camera throughput, and therefore anything perception. **Do
+not take camera or timing measurements on this configuration and do not compare
+them with anyone else's.**
+
+### The tier C recipe
+
+**Run headless with RViz. Do not open the Gazebo window.** The Gazebo GUI is
+itself a rendered 3D view, so on a software rasteriser it competes with the
+simulation for the same CPU. RViz is far cheaper and shows you what matters:
+the robot, the lidar returns, the odometry trail and the camera panel.
+
+```bash
+docker exec -it igvc_gazebo bash -c \
+  "CAMERAS=front HEADLESS=1 RVIZ=1 NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
+```
+
+If that is still too slow, drop the camera resolution, which is the single
+biggest lever:
+
+```bash
+docker exec -it igvc_gazebo bash -c \
+  "source /opt/ros/jazzy/setup.bash && source /root/ros2_ws/install/setup.bash && \
+   ros2 launch igvc_test_bringup gazebo_nav_test.launch.py \
+     headless:=true rviz:=true sim_cameras:=front \
+     sim_camera_width:=320 sim_camera_height:=180 sim_camera_hz:=5"
+```
+
+**Note on `CAMERAS=none`:** it is the fastest configuration, but
+`bringup_smoke_test.sh` checks four camera topics as part of its 18 checks, so
+a camera-less run **can never reach 18 of 18**. Keep the front camera if you
+want the gate to pass.
+
+### What you will and will not see
+
+| | Tier C |
+| --- | --- |
+| The Gazebo 3D window | Technically opens, practically unusable. Do not bother |
+| RViz, robot, TF, lidar returns, odometry trail | Yes, usable |
+| RViz camera panel | Yes, but at a few frames per second |
+| The robot driving the course under Nav2 | Yes, slower than real time |
+| `render_check.sh` | Passes as tier C, exit 1 by design |
+| `bringup_smoke_test.sh` | See the measured section below |
+| Camera or timing numbers | **Do not report them** |
+
+### Measured tier C numbers
+
+Measured on this laptop with the GPU deliberately disabled through
+`LIBGL_ALWAYS_SOFTWARE=1`, which is the same code path a machine with no usable
+GPU takes. **These are laptop-with-GPU-disabled numbers, not numbers from any
+real tier C machine, and certainly not AGX numbers.**
+
+Method: 30 second windows, **counting messages** rather than asking for a
+rate, with the real time factor computed from `/clock` rather than read off
+Gazebo's own `real_time_factor`, which sits near 1.0 while cameras crawl.
+
+| Configuration | Real time factor | Camera delivered | Lidar delivered |
+| --- | --- | --- | --- |
+| **640x360 @ 15 Hz, front camera** (the tier A default) | **0.608** | **1.63 Hz**, that is 11% of the 15 Hz asked for | 6.10 Hz |
+| **320x180 @ 5 Hz, front camera** (the tier C recommendation) | **0.854** | **4.27 Hz**, that is 85% of the 5 Hz asked for | 8.53 Hz |
+| 320x180, `sim_cameras:=none` | **0.996** | none by definition | 9.95 Hz |
+
+**Read the camera column, not the resolution.** At the tier A default the
+cameras deliver about a ninth of what they are asked for, and the whole
+simulation drops to 0.61x real time carrying them. Ask for less and the
+simulator very nearly keeps its promise: at 320x180 and 5 Hz it delivers 85%
+of the requested frames at 0.85x real time. **That is the largest
+configuration worth running on tier C**, and it is the one in the recipe
+above.
+
+Turning the cameras off entirely returns real time factor to 0.996, which
+tells you plainly where the cost is: **the camera is the whole problem, and
+the physics and lidar are fine.** That is also why navigation, odometry and
+control work stay valid on tier C.
+
+
+---
+
+## 8. Drive it yourself
 
 Without `NAV=1` nothing is steering the robot, so drive it from a **second
 WSL2 shell**, into the same container:
@@ -507,41 +735,35 @@ joystick at `/dev/input/js0`, pulls in the ros2_control stack the simulator does
 not use, and publishes to a different topic. Use the command above.
 
 Gazebo's DiffDrive **holds the last command it was given**, so if you drive
-forward and let go of the key, the robot keeps going. Press `k`. Measured
-today: it travelled a further **3.672 m in the 4 s after `/cmd_vel` stopped**.
-Whether that is a true absence of timeout or a long one is still an open
-question, and `diff_drive_controller` on the real robot does time out, so the
-simulator is the less safe of the two.
+forward and let go of the key, the robot keeps going. Press `k`. Measured: it
+travelled a further **3.672 m in the 4 s after `/cmd_vel` stopped**. Whether
+that is a true absence of timeout or a long one is still an open question, and
+`diff_drive_controller` on the real robot does time out, so the simulator is
+the less safe of the two.
 
 ---
 
-## 8. Check it actually works
+## 9. Check it actually works
 
-Both run inside the container and both are built to fail when something is
-wrong rather than to look reassuring. `bootstrap.sh` runs the first two for
-you; these are the commands to re-run one on its own.
+`bootstrap.sh` runs the first two for you. These are the commands to re-run one
+on its own.
 
 ```bash
 docker exec -it igvc_gazebo bash -c \
   "bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh"
 ```
 
-Want `RESULT: HARDWARE RENDERING (NVIDIA)`.
-
-**You no longer need to source ROS before this.** Earlier versions of this
-guide told you to, and until 2026-09-17 you genuinely had to, because `gz` on
-this image comes from the ROS *vendor* packages and `/root/.bashrc` does not
-source `setup.bash`. The script failed on a clean container with `gz: No such
-file or directory` and printed `RESULT: UNKNOWN`, which reads as a broken GPU
-rather than a missing PATH entry. It sources ROS itself now.
+Prints your adapter, your tier and what to do next. You do **not** need to
+source ROS first; earlier versions of this guide said you did, and until
+2026-09-17 you genuinely had to.
 
 ```bash
-# the simulator and the topic contract: about 4 minutes
+# the simulator and the topic contract: about 4 minutes on tier A
 docker exec -it igvc_gazebo bash -c \
   "bash src/IGVC_robot_2026/scripts/gazebo/bringup_smoke_test.sh"
 ```
 
-Measured on this machine today:
+Measured on tier A:
 
 ```text
 topic checks passed: 18   failed: 0
@@ -563,126 +785,103 @@ docker exec -it igvc_gazebo bash -c \
   "bash src/IGVC_robot_2026/scripts/gazebo/autonomy_check.sh"
 ```
 
-This script **never publishes a velocity command**: every command the robot
-receives comes from Nav2. Measured today:
+This script **never publishes a velocity command**. Measured on tier A:
 
 ```text
 samples              : 893  at 9.5 Hz
 distance travelled   : 83.0 m
-furthest two points  : 29.3 m apart
 centreline deviation : mean 0.67 m, max 1.86 m
 yaw to lane          : mean 15.9 deg, max 48.0 deg
 lane clearance       : worst +0.040 m (chassis), +0.081 m (Nav2 footprint)
                        0.0% of samples over the line
-
-MOVED       : PASS      PROGRESS    : PASS
-IN LANE     : PASS      ON THE SLAB : PASS
 AUTONOMY CHECK: PASS
 ```
 
-**Read `IN LANE` with care. It is currently a coin flip and that is a known
-defect in the test, not in the robot.** It compares centreline deviation
-against a flat 2.00 m tolerance, but the lane width varies by a factor of two
-along the course, so the threshold is measuring the wrong quantity and the runs
-sit right on it: three runs at honest sampling produced 2.04 (FAIL), 1.95
-(PASS) and 1.98 (PASS). In every one of those runs the robot drove 47 to 51 m
-under its own control, stayed on the slab, and put **0.0%** of samples over the
-paint. If you get a FAIL here, look at the clearance line before believing the
-robot misbehaved. A team decision is pending and nobody should raise the
-tolerance to make it green.
-
-Add `RVIZ=1` to either to watch it happen.
+**`IN LANE` is provisional and you should read it as a number, not a verdict.**
+It compares centreline deviation against a flat 2.00 m tolerance while the lane
+width varies by a factor of two along the course, and it ignores the robot's
+yaw. Three runs at honest sampling gave 2.04 (FAIL), 1.95 (PASS), 1.98 (PASS),
+while every one of those runs drove 47 to 51 m under its own control with
+**0.0%** of samples over the paint. If you see a FAIL there, look at the
+clearance line before believing the robot misbehaved. Nobody is tuning the
+tolerance until the metric is right.
 
 ---
 
-## 9. When it goes wrong
+## 10. When it goes wrong
 
-**"There is no window."** You started it from PowerShell. See section 0.
+**"There is no window."** You started it from PowerShell. See section 3.
 
-**`RESULT: SOFTWARE FALLBACK (llvmpipe)`.** The GPU path is broken. Check WSL
-Integration is on for your distro, then that `/usr/lib/wsl` exists inside the
-container: `docker exec igvc_gazebo ls /usr/lib/wsl/lib`. On a laptop with both
-an Intel and an NVIDIA GPU, `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` in the
-compose file is what stops Mesa picking the Intel one and crashing. Do **not**
-use `nvidia-smi` to check this: it reports CUDA working fine while OpenGL is on
-a software rasteriser.
+**`docker: command not found` in the WSL2 shell, but it works in PowerShell.**
+WSL Integration is off for your distro. Section 2.3, step 5.
 
-**`colcon build` fails with a package it cannot find, usually
-`zed_description`.** Your submodules are empty. `git submodule update --init
---recursive`. See section 2.
+**`RESULT: SOFTWARE FALLBACK` or `YOUR TIER: C` when you expected A.** Check
+WSL Integration is on, then that `/usr/lib/wsl` exists inside the container:
+`docker exec igvc_gazebo ls /usr/lib/wsl/lib`. Then check your NVIDIA driver is
+current on **Windows**, not inside WSL. Do **not** install Linux NVIDIA drivers
+inside WSL. And do not use `nvidia-smi` to diagnose this: it reports CUDA
+working fine while OpenGL is on a software rasteriser.
 
-**"A simulator is ALREADY RUNNING in this container."** Exactly what it says,
-and the scripts refuse rather than add a second one. Either let the test clean
-up, which it does automatically, or reset:
+**`bad interpreter: /usr/bin/env bash^M` or `cannot execute: required file not
+found`.** Your checkout has Windows line endings. Section 2.1:
 
 ```bash
-docker compose -f docker-compose.windows.yml restart igvc_gazebo
+git config --global core.autocrlf input
+cd /mnt/c/IGVC_robot_2027
+git rm --cached -r . && git reset --hard
 ```
+
+**`colcon build` fails on a package you never touched, usually
+`zed_description`.** Your submodules are empty:
+`git submodule update --init --recursive`.
+
+**`docker pull` fails with `unauthorized` or `denied`.** The GHCR package is
+not public yet. Tell Liam; it is a one-click fix on his side. Meanwhile:
+`BUILD_IMAGE=1 bash scripts/gazebo/bootstrap.sh`.
+
+**`docker pull` fails with a rate limit.** That is Docker Hub, not GHCR, and it
+means something is pulling from Hub. The Gazebo image comes from GHCR, which
+does not rate-limit anonymous pulls the way Hub does. Hub's limit is counted
+per source IP, so everyone behind the room's NAT shares one allowance.
+
+**"A simulator is ALREADY RUNNING in this container."** Exactly what it says.
+Reset: `docker compose -f docker-compose.windows.yml restart igvc_gazebo`.
 
 **The robot does not move with `NAV=1`.** Give it 60 seconds; Nav2 brings up
 ten lifecycle nodes in sequence. If it still does not, look for `Failed to
-bring up all requested nodes` in the output. That is Nav2's lifecycle bringup
-losing a race against Gazebo's startup on a loaded machine. Raise the delay:
+bring up all requested nodes`, which is Nav2 losing a race against Gazebo's
+startup on a loaded machine. Raise the delay:
 
 ```bash
 ros2 launch igvc_test_bringup gazebo_nav_test.launch.py nav2_delay:=25.0
 ```
 
 **Everything is slow.** Check nothing else is running
-(`docker exec igvc_gazebo ps -ef | grep gz`), and use `CAMERAS=front`, the
-default. Three 720p cameras drop the simulator to about 7 Hz each. Note that
-`real_time_factor` will read near 1.0 anyway, because gz-sim runs physics and
-rendering on separate threads. Count messages, never trust RTF.
-
-**The build fails partway.** Re-run it first: partial layers are cached and a
-network hiccup mid-download is the common cause. If it fails in the same place
-twice, check free disk (`df -h` in the WSL2 shell) and Docker Desktop's disk
-limit. Behind a corporate proxy or VPN, Docker needs the proxy configured in
-Settings, Resources, Proxies, or `apt-get` inside the build cannot reach
-packages.ros.org.
-
-**`bash: scripts/gazebo/start_sim.sh: cannot execute: required file not
-found`.** The repo was checked out with Windows line endings, so the script's
-`#!/usr/bin/env bash` ends in a carriage return. `.gitattributes` forces
-`eol=lf` for `*.sh`, so a normal clone is fine; this means Git was configured
-to override it. Fix the checkout rather than adding workarounds:
-
-```bash
-git config core.autocrlf false
-git rm --cached -r . && git reset --hard
-```
-
-**`docker: command not found` in the WSL2 shell.** WSL Integration is off. See
-section 1.
-
-**`permission denied while trying to connect to the Docker daemon`.** On native
-Linux, add yourself to the `docker` group and log out and back in:
-`sudo usermod -aG docker $USER`.
-
-**`no matching manifest` or the image will not pull.** You are on an ARM
-machine (Snapdragon laptop, Apple silicon). This image is x86-64 only.
+(`docker exec igvc_gazebo ps -ef | grep gz`), use `CAMERAS=front`, and check
+your tier. Note that `real_time_factor` reads near 1.0 even when cameras crawl,
+because gz-sim runs physics and rendering on separate threads. Count messages,
+never trust RTF.
 
 **The container exits immediately after `up -d`.** Check
 `docker logs igvc_gazebo`. Usually Docker Desktop is out of memory or the WSL2
 VM is out of disk.
 
-**Gazebo opens but the world is empty, or the robot is missing.** The workspace
-was not built. `bootstrap.sh` and `start_sim.sh` both build it for you; if you
-launched `ros2 launch` by hand, run the colcon build in section 4 first.
+**`no matching manifest`.** You are on an ARM machine (Snapdragon laptop, Apple
+silicon). This image is x86-64 only. See section 5.
 
 **Everything is correct and it still does not work.** Capture these four and
-post them; they identify almost every cause:
+post them:
 
 ```bash
 wsl -l -v                                        # from PowerShell
 docker version | head -20
-docker exec igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh" | tail -5
+docker exec igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh" | tail -20
 docker exec igvc_gazebo ps -ef | grep -cE "gz sim|rviz2"
 ```
 
 ---
 
-## 10. What this does and does not do
+## 11. What this does and does not do
 
 **It does:** run the real 2026 navigation stack, that is the ground-truth lane
 grid, the IGVC navigator, Nav2's controller, velocity smoother and collision
@@ -692,67 +891,68 @@ the course, stays between the lines and goes around the barrels.
 **It does not perceive anything.** This is the important one and it is easy to
 misreport. The lane lines and the barrel positions come out of
 `IGVC_track_generator/track_points.json`, not out of the camera or the lidar.
-The camera, depth image, point cloud and lidar all publish, and **nothing plans
-on any of them**. It is a *ground-truth* navigation test, and that is
-deliberate: when perception is added, a failure can be blamed on perception
-rather than on navigation.
-
 More precisely, `gazebo_nav_test_nav2_overrides.yaml` replaces the costmap
 `plugins` list with `["lane_layer", "inflation_layer"]`, so Nav2's
-`obstacle_layer` is never even instantiated. Every obstacle the robot has ever
+`obstacle_layer` is **never instantiated**. Every obstacle the robot has ever
 avoided in this simulator came from the JSON.
 
-**The Hough lane detector does run**, and needs nothing extra: it is CLAHE,
-Canny and `HoughLinesP` with no torch, and it produced 253 occupied cells in
-`/lane_map` over a 90 s self-driven run. Nothing plans on its output.
-**YOLOPv2 (`lane_segmentation_node`) does not run here**: it needs torch, which
-this image does not have, and weights that are not in the repo.
+**The Hough lane detector does run** and needs nothing extra: CLAHE, Canny and
+`HoughLinesP`, no torch. It produced 253 occupied cells in `/lane_map` over a
+90 s self-driven run. Nothing plans on its output. **YOLOPv2
+(`lane_segmentation_node`) does not run here**: it needs torch, which this
+image does not have, and weights that are not in the repo.
 
-**The camera point cloud is rotated 90 degrees.** Measured, not suspected: the
-cloud carries body-convention data stamped with the optical frame, so through
-its own frame the floor stands on its end. It is bridged, nothing consumes it,
-and `obstacle_layer` is off, so it cannot currently do harm. **It is not
-fixed**, deliberately, because fixing it means connecting a Nav2 consumer that
-has never been connected. See `GAZEBO_SETUP.md` 10.6 and 10.10.
+**The camera point cloud is rotated 90 degrees.** Measured, not suspected, and
+deliberately not fixed, because fixing it connects a Nav2 consumer that has
+never been connected.
 
-**`/fix` is not published.** The GPS row of the interface contract is the one
-unbridged row. Nothing consumes it today.
+**`/fix` is not published** and **ros2_control is not in the loop**: Nav2's
+twist goes straight to Gazebo's DiffDrive, so joint limits and the controller
+update rate are untested in simulation.
 
 **It is not a ZED camera.** The simulated cameras publish on the same topics
-with the same frame ids and the same intrinsics as the real ZED wrapper, so
-downstream code cannot tell the difference. The *content* is a plain pinhole
-camera with exact ray-cast depth. ZED neural depth, visual odometry and object
-detection have no Gazebo equivalent, and Stereolabs have said they are not
-planning to support Gazebo. The simulated field of view is 100 degrees and
-**which lens is actually fitted to the robot is unknown**, so the sim is either
-4.6 degrees too narrow or 26 degrees too wide and the sign is not known.
+with the same frame ids and intrinsics as the real ZED wrapper, so downstream
+code cannot tell the difference. The *content* is a plain pinhole camera with
+exact ray-cast depth. The simulated field of view is 100 degrees and **which
+lens is actually fitted to the robot is unknown**, so the sim is either 4.6
+degrees too narrow or 26 degrees too wide and the sign is not known.
 
-**ros2_control is not in the loop.** Nav2's twist goes straight to Gazebo's
-built-in DiffDrive, which does the wheel kinematics itself. Joint limits and
-the controller update rate are therefore untested in simulation.
-
-**Nothing here has been run on any machine but the one at the top of this
-file.** Not the RTX 5080 laptop, not the Windows 10 machine, not native Linux.
+**Tier A is the only measured tier.** Tier B is unverified anywhere, tier C is
+measured only on this laptop with its GPU switched off, and macOS is untested.
+Nothing here has been run on the RTX 5080 laptop, the Windows 10 machine or
+native Linux.
 
 ---
 
 ## Quick reference
 
 ```bash
-# all of these from a WSL2 shell, in the repo root
-bash scripts/gazebo/bootstrap.sh                                   # zero to verified
-IMAGE_TAR=/mnt/d/igvc-gazebo-jazzy.tar bash scripts/gazebo/bootstrap.sh   # from USB
+# PowerShell, as Administrator, on a blank machine
+winget install --id Git.Git --exact --source winget --accept-source-agreements
+git config --global core.autocrlf input
+wsl --install                 # THEN REBOOT
+wsl --update
+winget install --id Docker.DockerDesktop --exact --source winget   # THEN REBOOT
+# then: Docker Desktop > Settings > Resources > WSL Integration > your distro > Apply & Restart
+
+# WSL2 Ubuntu shell, from here on
+git clone --recurse-submodules https://github.com/wworth-IGVC/IGVC_robot_2027.git
+cd IGVC_robot_2027
+bash scripts/gazebo/bootstrap.sh                # zero to verified, prints your tier
+BUILD_IMAGE=1 bash scripts/gazebo/bootstrap.sh  # fallback if GHCR is unreachable
 
 docker compose -f docker-compose.windows.yml up -d igvc_gazebo
 docker compose -f docker-compose.windows.yml restart igvc_gazebo   # reset
 docker compose -f docker-compose.windows.yml down                  # stop
 
-docker exec -it igvc_gazebo bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh                  # drive it yourself
-docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"  # it drives itself
-docker exec -it igvc_gazebo bash                                   # a shell, for teleop
+# tier A or B
+docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
+# tier C
+docker exec -it igvc_gazebo bash -c "CAMERAS=front HEADLESS=1 RVIZ=1 NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
+# a shell, for teleop
+docker exec -it igvc_gazebo bash
 
-# the three checks. cwd inside the container is /root/ros2_ws;
-# the repo is one level down in src/IGVC_robot_2026.
+# the three checks
 docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh"
 docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/bringup_smoke_test.sh"
 docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/autonomy_check.sh"
@@ -764,6 +964,5 @@ docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/aut
 | `/odom` | corrected odometry, world-aligned, origin at the spawn point |
 | `/scan` | RPLidar C1 |
 | `/front_zed_camera_x/zed_node/rgb/color/rect/image` | front camera, ZED contract name |
-| `/front_zed_camera_x/zed_node/depth/depth_registered` | front depth |
 | `/lane_ground_truth`, `/lane_map`, `/lane_costmap` | the ground-truth lane grids |
 | `/sim/odom_body_frame` | Gazebo's RAW odometry. Do not use it; see `GAZEBO_SETUP.md` 9.3 |
