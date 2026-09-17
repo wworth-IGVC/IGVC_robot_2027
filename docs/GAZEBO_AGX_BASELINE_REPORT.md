@@ -1332,7 +1332,7 @@ Documents:
 | `README.md` | Opens with what the project is, that it is the team repo as of September 2026, three commands to a driving robot, and what works and does not with numbers |
 | `docs/IGVC_2027_Gazebo_Setup_Guide.docx` | Regenerated from the quickstart so the Word copy cannot disagree with the Markdown |
 | `docs/runbooks/SOFTWARE_SESSION_2026-09-17.md` | **New.** Pre-flight, a timed two-hour plan, five likeliest failures, the no-GPU fallback, the demo order, eight known-not-working items to read aloud, four questions for Aidan |
-| `CLAUDE.md` (in-repo) | Said "ROS 2 **Humble**" at the top. Corrected, with what is still Humble and why |
+| `CLAUDE.md` (in-repo) | Said "ROS 2 **Humble**" at the top. Corrected, but the file is excluded in `.git/info/exclude` and has never been tracked, so the change is local-only. See C-19 |
 
 **One bug found by running a script rather than reading it.** The new
 `-Weights` switch on `setup-windows.ps1` collided with its own local
@@ -1414,9 +1414,19 @@ people leave out. The quickstart now says four and flags the stale comment.
 carried on a USB drive. Now measured and written down at both ends, including
 how to spot a truncated tar and the exFAT limit.
 
-**C-19. The in-repo `CLAUDE.md` said "ROS 2 Humble" in its second line.** The
-simulator is Jazzy and has been since `fac55cb`. Corrected, with what genuinely
-is still Humble.
+**C-19. The in-repo `CLAUDE.md` said "ROS 2 Humble" in its second line, and
+it turns out nobody but Liam can read it anyway.** The simulator is Jazzy and
+has been since `fac55cb`. The line was corrected, **but the correction is
+local-only and does not reach the team**: `CLAUDE.md` is excluded in
+`.git/info/exclude`, which is a per-clone exclusion rather than `.gitignore`,
+and the file **has never been tracked**. So a teammate cloning `main` gets no
+in-repo `CLAUDE.md` at all, and the wrong distro line was never distributed
+either. `git add` was refused and the exclusion was **not** overridden, because
+someone chose it deliberately and reversing that is a repository-policy
+decision rather than a documentation fix. **This needs a decision:** either
+commit the file so the orientation it provides is shared, or delete it so
+nobody edits a file that goes nowhere. Same question as the session-root
+documents, which also exist only on one disk.
 
 **C-20. `docs/GAZEBO_QUICKSTART.md` claimed "Verified 2026-09-15" while
 describing behaviour that was fixed on 2026-09-17.** Dates and the machine
