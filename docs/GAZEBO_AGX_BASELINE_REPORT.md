@@ -2135,6 +2135,46 @@ All reversible, all deliberate.
    tested on Windows without touching the working Windows workspace.
 6. **Test isolation:** project `macverify`, `ROS_DOMAIN_ID=77`.
 
+### 18.5a Two bootstrap defects found by running it, not by reading it
+
+Both surfaced when the Windows path was re-run to prove the parameterisation
+had not broken it. **Neither affects the documented WSL2 invocation**, which is
+why the clean-clone verification in section 16 did not catch either.
+
+**1. The tier was silently misreported as UNKNOWN.** `bootstrap.sh` printed
+`WARN TIER UNKNOWN ... reported 'unreported'` on the line immediately after
+`render_check.sh` had printed `YOUR TIER: A`. The cause is MSYS path
+conversion: the tier was read with `docker exec "$CONTAINER" cat
+/tmp/render_tier`, and Git Bash rewrites `/tmp/render_tier` into a Windows path
+before docker sees it, so the read failed and the value fell through to
+`unreported`. From a real WSL2 shell there is no rewriting and it worked.
+
+This is worse than a cosmetic misreport. **The entire purpose of the tier is
+that a machine cannot be told its GPU works when it does not**, and a check
+that degrades silently to UNKNOWN weakens exactly that guarantee. It now parses
+the tier out of `RENDER_OUT`, which the script already captures, and keeps the
+file read as a fallback with `MSYS_NO_PATHCONV=1`. Output parsing is
+shell-independent.
+
+**2. The closing banner contradicted its own warning.** With `SKIP_SMOKE=1` the
+script warned "the simulator is NOT verified" and then, two lines later,
+printed "Bootstrap complete. The simulator is verified on this machine." It now
+says the simulator is not verified and to re-run without the flag.
+
+**Verified by re-running from Git Bash**, where the first defect reproduced:
+`PASS TIER A` instead of `WARN TIER UNKNOWN`, and the closing text now agrees
+with the warning above it.
+
+**This is the third time on this project that running a thing found something
+reading it did not**, after the ZED image that built cleanly and died at
+launch, and the `-Weights` parameter collision in `setup-windows.ps1`.
+
+**Scope note:** fixing these changes Windows behaviour, which the brief
+otherwise ruled out. The judgement was that the rule's intent is "do not break
+the Windows path", that both changes only affect an invocation the
+documentation does not use, and that leaving a known silent-misreport in place
+after finding it would be worse. Both are small and reversible if you disagree.
+
 ### 18.6 What could not be tested, and the likeliest failure
 
 1. **Whether the colcon build completes under emulation, and how long it
@@ -2180,6 +2220,7 @@ Branch `mac-support`, cut from `main` at `f513273`. **Nothing pushed.**
 | `94c9506` | Add a macOS compose file, headless only, with the display plumbing removed |
 | `952b92f` | Let bootstrap.sh take a compose file, service and container, Windows unchanged |
 | `4c22497` | Document the macOS path, and ask the Mac owner for the data nobody has |
+| `694c803` | Fix two bootstrap defects that running it from Git Bash exposed |
 
 plus the commit carrying this report section.
 
