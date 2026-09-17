@@ -337,7 +337,7 @@ regenerated world must be committed in the same change or nobody's checkout
 changes.
 
 **2.3 and 2.4**, RQ-06 and RQ-11 briefs under `docs/decisions/`.
-**2.5**, runbooks under `docs/runbooks/` for the 5080 laptop, the Windows 10
+**2.5**, runbooks (kept locally, not in this repo, see 16.8) for the 5080 laptop, the Windows 10
 machine, and native Linux.
 
 ### Phase 3, P2
@@ -1331,7 +1331,7 @@ Documents:
 | `docs/DOCKER_CHANGES.md` | New section 15: the images and which one you need, the two sizes 4.6x apart, the measured offline path, volumes, every environment variable, the `FASTDDS_DEFAULT_PROFILES_FILE` asymmetry, amended outstanding list |
 | `README.md` | Opens with what the project is, that it is the team repo as of September 2026, three commands to a driving robot, and what works and does not with numbers |
 | `docs/IGVC_2027_Gazebo_Setup_Guide.docx` | Regenerated from the quickstart so the Word copy cannot disagree with the Markdown |
-| `docs/runbooks/SOFTWARE_SESSION_2026-09-17.md` | **New.** Pre-flight, a timed two-hour plan, five likeliest failures, the no-GPU fallback, the demo order, eight known-not-working items to read aloud, four questions for Aidan |
+| `SOFTWARE_SESSION_2026-09-17.md` | **New**, and **no longer in this repo**, see 16.8. Pre-flight, a timed two-hour plan, five likeliest failures, the no-GPU fallback, the demo order, eight known-not-working items to read aloud, four questions for Aidan |
 | `CLAUDE.md` (in-repo) | Said "ROS 2 **Humble**" at the top. Corrected, but the file is excluded in `.git/info/exclude` and has never been tracked, so the change is local-only. See C-19 |
 
 **One bug found by running a script rather than reading it.** The new
@@ -1482,3 +1482,44 @@ write it down here changed it, because writing it down is another commit. Nothin
 in tonight's session works until this push lands, because the whole session is
 people cloning it. Confirm it by opening the repository on GitHub and checking
 that `scripts/gazebo/bootstrap.sh` appears in the web view.
+
+### 16.8 Two working documents moved off the public repo
+
+**Requested by Liam after the push.** `docs/SESSION_HANDOFF.md` and
+`docs/runbooks/` are internal working notes: they name individuals, discuss
+whose machine is likely to fail and how, carry meeting logistics, and in the
+handoff's case carry a list of this project's own claims that are known false.
+That is useful to us and it is not public-repo material.
+
+Both are now kept at `C:\IGVC 2027\local-notes\`, alongside the other
+local-only documents, and verified byte-identical to what was removed before
+the removal happened. `.gitignore` carries both paths so nobody, human or
+agent, re-adds them by accident.
+
+**The limit of this, stated plainly: removing them from the tip does not
+remove them from the published history.** They were pushed before the request
+arrived, so `docs/SESSION_HANDOFF.md` remains readable on the public repo at
+`2343dad`, `781fc68` and `a7cf7b9`, and the runbook at `67a9bac`, to anyone who
+clones or who has the commit URL. **This commit reduces visibility, not
+exposure.**
+
+Scrubbing them from history properly would mean rewriting every commit from
+`2343dad` onward and force-pushing over a public branch, on both `main` and
+`gazebo-phase1`. That was **not** done, and it needs a decision rather than a
+reflex, because:
+
+- It is a force-push to a public repository, which is destructive and
+  outward-facing, and it would happen in the hour before seven people clone
+  that repository. A teammate who clones mid-rewrite gets a confusing state.
+- **GitHub keeps unreferenced objects reachable by direct commit SHA** after a
+  force-push, so the old commits can still be fetched by URL until GitHub
+  garbage-collects them. Genuinely purging them means asking GitHub support.
+  A force-push alone should not be reported as "removed".
+- Anyone who has already cloned keeps their copy regardless.
+- Every hash from `2343dad` onward changes, which invalidates the commit
+  references in section 14 of this report and in the handoff itself.
+
+The honest assessment: if the concern is casual discovery by someone browsing
+the repository, this commit handles it. If the concern is that the content
+exists on GitHub at all, only a rewrite plus a request to GitHub support
+handles it, and it is better done after tonight's session than before it.

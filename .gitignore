@@ -19,3 +19,10 @@ __pycache__/
 
 # Microsoft Office lock/owner files (created while a .docx is open in Word)
 ~$*
+
+# Internal working notes, kept locally in C:\IGVC 2027\local-notes and
+# deliberately NOT on the public repo: agent session handoffs and the
+# meeting runbooks. Both name individuals and discuss machines and team
+# logistics, which is not public-repo material.
+docs/runbooks/
+docs/SESSION_HANDOFF.md
