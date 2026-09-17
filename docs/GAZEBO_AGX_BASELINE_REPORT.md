@@ -1977,3 +1977,217 @@ docker manifest inspect ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
 That last command must succeed **with no credentials**. If it returns `denied`,
 the visibility change did not take and every attendee's `docker pull` will fail
 the same way.
+
+---
+
+## 18. A macOS path, built and verified as far as a Windows machine allows
+
+**Written 2026-09-17 evening, as a background task while the software session
+ran.** The goal was narrow: let a Mac owner run the simulator's automated
+checks headless. A Gazebo or RViz window on a Mac is out of scope, for reasons
+that are re-verified in 18.1.
+
+Branch **`mac-support`**, cut from `main` at `f513273`. Nothing pushed.
+
+### 18.1 The starting claims, each checked rather than assumed
+
+| # | Claim | Verdict | Evidence |
+| --- | --- | --- | --- |
+| 1 | Docker Desktop on macOS gives containers no GPU, so all rendering is software | **VERIFIED**, externally | Docker's own GPU documentation states support is only available on Windows with the WSL2 backend. Not checkable from this repo; carried from the research in section 17.3 |
+| 2 | The published image is **amd64 only** | **VERIFIED today** | `docker manifest inspect` returns an OCI index with exactly two entries: `amd64/linux` (`sha256:d93b95a4...`) and `unknown/unknown`, the buildx attestation. **No arm64 entry.** |
+| 3 | XQuartz cannot display Gazebo; its GLX is below the renderer's OpenGL 3.3 | **CONCLUSION VERIFIED, NUMBER CORRECTED** | See below |
+| 4 | `docker-compose.windows.yml` mounts WSL2 and WSLg paths that do not exist on macOS | **VERIFIED** | The `igvc_gazebo` service mounts `/usr/lib/wsl:ro`, `/tmp/.X11-unix` and `/mnt/wslg`, declares `devices: /dev/dxg`, and sets `gpus: all`. All four are Windows-only |
+| 5 | `bootstrap.sh` uses that compose file | **VERIFIED** | It was hardcoded at line 41, `COMPOSE_FILE=docker-compose.windows.yml` |
+| 6 | Tier C already passes: 18 of 18, odometry to 0.18 percent | **VERIFIED exactly** | The section 17.2 run reports `topic checks passed: 18 failed: 0` and `distance ratio 0.9982`, which is 0.18 percent |
+
+**Correction to claim 3.** The brief says XQuartz's indirect GLX offers
+"roughly OpenGL 2.1". The research in section 17.3 cited an open XQuartz issue
+putting indirect GLX at **1.4**. Both figures circulate, they describe
+different paths (direct versus indirect), and **both are below the OpenGL 3.3
+that gz-sim's `ogre2` engine requires**, so the conclusion is unaffected and
+the design is unchanged. The exact ceiling is **NOT VERIFIED here**: it needs a
+Mac. Recorded because a number quoted confidently and wrongly is how this
+project has lost time before.
+
+**Two additions to the record, both found while checking.**
+
+- **`shm_size` needed no work.** The brief asked me to check whether the
+  Windows file already handles it. It does: `shm_size: "2gb"` is already there.
+  The Mac file matches it rather than introducing it.
+- **`bootstrap.sh` is already macOS-safe on its one GNU-only construct.** Its
+  disk check runs `df -BG --output=avail`, which BSD `df` on macOS does not
+  support, but stderr is suppressed and it falls through to
+  `df -k . | awk '{print int($4/1048576)}'`. Field 4 is `Avail` on both GNU and
+  BSD `df`, so the fallback is correct on macOS. Verified by reading; a
+  grep for the other usual offenders (`readlink -f`, `sed -i`, `date -d`,
+  `grep -P`, `stat -c`) returns nothing.
+
+### 18.2 What was added
+
+| File | What it does |
+| --- | --- |
+| `docker-compose.mac.yml` | **New.** The Gazebo service with every Windows assumption removed: no `gpus`, no `/dev/dxg`, no `/usr/lib/wsl`, no WSLg mounts, no `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` or `PULSE_SERVER`, no `GALLIUM_DRIVER`. Adds `platform: linux/amd64` and `LIBGL_ALWAYS_SOFTWARE=1`. Keeps `shm_size: "2gb"`. Container `igvc_gazebo_mac` and volumes `igvc_gazebo_mac_*`, distinct from the Windows ones |
+| `docs/MAC_SETUP.md` | **New.** What works and what cannot, the install steps, the commands in order with expected output, where to record a failure, and the arm64 scoping note. Opens by stating that no Mac has run it |
+| `docs/MAC_VERIFICATION_CHECKLIST.md` | **New.** A tear-off list for the Mac owner: command, what good looks like, and a blank for what actually happened, for twelve steps |
+| `scripts/gazebo/bootstrap.sh` | **Extended, Windows behaviour unchanged.** `COMPOSE_FILE`, `SERVICE` and `CONTAINER` become `${VAR:-<the same default>}`, and a new `PULL_PLATFORM` defaults to empty so the Windows `docker pull` is invoked exactly as before. Verified: with nothing set, the three resolve to `docker-compose.windows.yml`, `igvc_gazebo`, `igvc_gazebo`, and `PULL_PLATFORM` is empty |
+
+**The launch route, worked out from the scripts rather than assumed.**
+`start_sim.sh` applies `HEADLESS=1` *after* `RVIZ`, so `HEADLESS=1` alone
+forces `headless:=true rviz:=false` and overrides any `RVIZ` setting. More
+usefully, **all three check scripts are already headless by default**:
+`bringup_smoke_test.sh` and `autonomy_check.sh` both gate RViz behind
+`${RVIZ:-0}`, and `render_check.sh` always runs `gz sim -s
+--headless-rendering`, a server with no GUI at all. **So the Mac instruction is
+simply "do not pass `RVIZ=1`", and no special headless flags are needed.**
+
+`bootstrap.sh` **can** be reused rather than duplicated, which is the answer to
+the question the brief left open. The macOS invocation is:
+
+```bash
+COMPOSE_FILE=docker-compose.mac.yml SERVICE=igvc_gazebo_mac \
+CONTAINER=igvc_gazebo_mac PULL_PLATFORM=linux/amd64 \
+bash scripts/gazebo/bootstrap.sh
+```
+
+It also tolerates tier C: `render_check.sh` exits 1 on software rendering by
+design, and `RENDER_RC` is referenced only inside a warning message, so no
+`fail` depends on it. Confirmed by grep.
+
+### 18.3 Windows-side verification
+
+`docker-compose.mac.yml` was run **on Windows**, project `macverify`,
+`ROS_DOMAIN_ID=77`. With no GPU request and no display mounts it reproduces
+the macOS condition in every respect **except processor architecture**, which
+is exactly the part that cannot be tested here.
+
+| Step | Command | Result | Wall clock |
+| --- | --- | --- | --- |
+| Parse | `docker compose -f docker-compose.mac.yml config` | **exit 0**, resolves; bind mount relative, `platform: linux/amd64`, `shm_size: 2147483648` | under 1 s |
+| Start | `compose up -d igvc_gazebo_mac` | container **Up** | under 1 s |
+| Leak check | `printenv` and `ls` inside | `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`, `GALLIUM_DRIVER` **all empty**; `/usr/lib/wsl`, `/tmp/.X11-unix`, `/dev/dxg` **all absent**; `ROS_DOMAIN_ID=77`, `LIBGL_ALWAYS_SOFTWARE=1` | |
+| Build | colcon, 4 packages, **fresh volumes** | `build ok`, **exit 0** | **13 s** |
+| Render | `render_check.sh` | `ADAPTER: llvmpipe (LLVM 20.1.2, 256 bits)`, `RESULT: SOFTWARE RENDERING`, **`YOUR TIER: C`**, exit 1 by design | **14 s** |
+| Smoke | `bringup_smoke_test.sh` | **`topic checks passed: 18   failed: 0`**, exit 0. `DRIVE TEST : PASS` 4.377 m, `FRAME TEST : PASS`, heading **0.13 deg**, ratio **0.9981** | **116 s** |
+| Autonomy | `autonomy_check.sh` | **`AUTONOMY CHECK: PASS`**, exit 0. 61.5 m driven under its own control, centreline deviation mean 0.68 m / max 1.78 m, worst clearance **+0.095 m**, sample rate 11.8 Hz. MOVED, PROGRESS, IN LANE and ON THE SLAB all PASS | **176 s** |
+| No window | `ps -ef` for `rviz2` or `gz sim gui` | **no `rviz2` and no `gz sim gui` process at any point** | |
+| Grep | resolved `compose config` for X11, WSLg, GPU | **no display mount, no device, no GPU reservation** | |
+
+**Failures are loud, demonstrated on three deliberately broken inputs:**
+
+| Broken input | Result |
+| --- | --- |
+| `COMPOSE_FILE=docker-compose.nope.yml bash scripts/gazebo/bootstrap.sh` | **exit 1**, stops at step 1, names the missing file and the cwd |
+| `docker compose -f docker-compose.mac.yml up -d igvc_gazebo` (the Windows service name) | **exit 1**, `no such service: igvc_gazebo` |
+| A scratchpad copy of the Mac file with a non-existent image tag | **exit 1** in seconds: `pull access denied ... repository does not exist`. **This validates the decision to omit `build:`**, see 18.5 |
+
+### 18.4 Against the tier A baseline
+
+| | Tier A, Windows compose | Mac compose on Windows |
+| --- | --- | --- |
+| Adapter | `D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)` | `llvmpipe (LLVM 20.1.2, 256 bits)` |
+| Tier | A | **C** |
+| Smoke | 18 of 18 | **18 of 18** |
+| Heading disagreement | 0.13 deg | **0.13 deg** |
+| Distance ratio | 0.9989 | **0.9981** |
+
+**Which differences are the absence of the GPU:** the adapter, the tier, and
+camera throughput. Section 17.2 already measured the camera cost on this
+machine: 1.63 Hz delivered against 15 Hz requested at the tier A default, and
+0.608 real time.
+
+**Which differences are not explained by the GPU at all:** none. **The
+odometry numbers are effectively identical**, heading disagreement the same to
+two decimals and the distance ratio differing by 0.08 percent, which is
+run-to-run variation. That is the expected result and it is worth stating,
+because it is the evidence that the physics and the odometry path do not care
+about rendering. **A Mac should reproduce those two numbers.** If it does not,
+that is a genuine finding and not an emulation artifact, which is why the
+checklist asks for them specifically.
+
+**What would need a Mac to explain:** any difference in the colcon build, any
+timing, and anything involving `docker pull --platform`.
+
+### 18.5 Assumptions made because you were unreachable
+
+All reversible, all deliberate.
+
+1. **No `build:` section in `docker-compose.mac.yml`**, unlike the Windows
+   file. With one present, `docker compose up` on a machine that had not
+   pulled the image would silently start building it, and on Apple Silicon
+   that is an emulated multi-hour build that can fill a disk. Without it the
+   same mistake fails in seconds, which fail test 3 demonstrates. **Reverse
+   by pasting the `build:` block back.**
+2. **`QT_QPA_PLATFORM=offscreen` is deliberately NOT set** in the compose
+   file. Nothing in the default path starts a Qt application, and setting it
+   globally would make an accidental `RVIZ=1` produce silence instead of a
+   loud error. It is documented as a per-command escape hatch instead.
+   **Reverse by adding one environment line.**
+3. **`LD_LIBRARY_PATH` dropped entirely** rather than trimmed. On Windows it
+   exists only to put `/usr/lib/wsl/lib` first; ROS's own `setup.bash` sets it
+   correctly, and the image config sets none.
+4. **`bootstrap.sh` extended rather than duplicated.** A separate
+   `bootstrap-mac.sh` would have avoided touching the file at all, but it
+   would drift. The `${VAR:-default}` form was judged to satisfy "extend only
+   where an extension cannot change Windows behaviour", and that was verified
+   by resolving the defaults with the variables unset.
+5. **Names:** container `igvc_gazebo_mac`, volumes `igvc_gazebo_mac_*`. The
+   distinct volumes matter more than they look: they are what let this be
+   tested on Windows without touching the working Windows workspace.
+6. **Test isolation:** project `macverify`, `ROS_DOMAIN_ID=77`.
+
+### 18.6 What could not be tested, and the likeliest failure
+
+1. **Whether the colcon build completes under emulation, and how long it
+   takes. This is the most likely thing to fail** and it is step 6 of the
+   checklist, deliberately before anything else interesting. Compiling C++
+   under instruction translation is the heaviest thing in the sequence. It
+   takes 13 seconds natively here and nobody knows the emulated figure.
+2. **Rosetta versus the default QEMU path.** Rosetta is off by default and is
+   not required. It also cannot advertise AVX or AVX2 to Linux guests, which
+   is exactly what Mesa's software rasteriser benefits from, so it may be
+   slower. The checklist asks which setting was used.
+3. **macOS Docker Desktop itself**: its VM, its default resource limits, and
+   whether `docker pull --platform linux/amd64` behaves as expected.
+4. **Every timing.** Tier C on a Mac is a guess until measured.
+
+### 18.7 The arm64 question, written only
+
+Not started, per instruction. Full scoping is in `docs/MAC_SETUP.md` section 7.
+In brief: a native arm64 image **removes the emulation layer and nothing
+else**. Rendering stays on the CPU, because the GPU limitation is about Docker
+on macOS rather than about architecture, **so there is still no window on a
+Mac even with arm64.**
+
+Feasible, verified from the real package indexes: REP-2000 lists Noble arm64 as
+**Tier 1 for Jazzy**, `packages.ros.org` declares
+`Architectures: i386 amd64 arm64 armhf`, the arm64 index carries **3667
+`ros-jazzy-*` packages** including `ros-gz`, `ros-gz-sim` and `ros-gz-bridge`,
+and **this image needs no ZED SDK**, which is the usual blocker here. It needs
+a `docker buildx` multi-architecture build and somewhere to push both
+manifests, which GHCR already supports under the existing tag.
+
+**Estimate: half a day** with native arm64 build hardware, materially longer
+cross-built under emulation. **Do not start it before a filled-in checklist
+comes back**: if emulation is tolerable this is a nice-to-have, and if the
+emulated build fails outright it becomes the only way a Mac participates.
+
+### 18.8 Commits and the push command
+
+Branch `mac-support`, cut from `main` at `f513273`. **Nothing pushed.**
+
+| Commit | What |
+| --- | --- |
+| `94c9506` | Add a macOS compose file, headless only, with the display plumbing removed |
+| `952b92f` | Let bootstrap.sh take a compose file, service and container, Windows unchanged |
+| `4c22497` | Document the macOS path, and ask the Mac owner for the data nobody has |
+
+plus the commit carrying this report section.
+
+```powershell
+cd "C:\IGVC 2027\IGVC_robot_2027"
+git push -u origin mac-support
+```
+
+`main` is untouched by this work. Nothing here changes any Windows behaviour,
+and that claim is backed by the default-resolution check in 18.2 rather than
+by inspection alone.
