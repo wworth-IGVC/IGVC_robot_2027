@@ -594,7 +594,11 @@ Two fallbacks, in order:
 
 ## 5. macOS
 
-**Short answer: tonight, pair with a Windows laptop on tier A or B.**
+**Short answer: pair with a Windows laptop for anything visual. For headless
+work there is now a documented path: see `MAC_SETUP.md` and
+`docker-compose.mac.yml`, which run the automated checks with no display at
+all. No Mac has run it yet, so please fill in
+`MAC_VERIFICATION_CHECKLIST.md` if you try.**
 
 A Mac is not excluded in principle, and the headless checks should run. But
 the one thing people assume will work does not, so read the third point before
