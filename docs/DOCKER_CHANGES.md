@@ -1,11 +1,11 @@
-# Docker environment — change record
+# Docker environment, change record
 
 Documents every change made to the Docker setup in this fork, the reason for
 each one, and how it was verified. Written so a reviewer can check the claims
 rather than take them on trust.
 
 - **Fork:** `wworth-IGVC/IGVC_robot_2027` (of `Gold-Rush-Robotics/IGVC_robot_2026`)
-- **Baseline commit:** `a4b7433` (the fork point — nothing below this line existed then)
+- **Baseline commit:** `a4b7433` (the fork point, nothing below this line existed then)
 - **Tested on:** Windows 11 (build 26200), Docker Engine 29.7.2, Compose v5.5.1,
   WSL2 / Ubuntu 26.04, NVIDIA RTX 5070 Ti Laptop (Blackwell, sm_120)
 
@@ -49,29 +49,29 @@ Summary: 22 packages finished [4min 15s]
 COLCON_EXIT=0
 ```
 
-The two remaining stderr packages emit compiler warnings only — see §5.3.
+The two remaining stderr packages emit compiler warnings only, see §5.3.
 
 **2. The private ZED image has an open replacement.** `docker-compose.yml`
 depended on `ghcr.io/gold-rush-robotics/dev-zed`, which is private, which most
 team accounts cannot pull, and for which no build recipe is published anywhere
-in the organisation (§5.2 — verified, not assumed).
+in the organisation (§5.2, verified, not assumed).
 `docker/Dockerfile.igvc-zed-humble` builds an equivalent x86 image from public
 sources, and the full workspace builds inside it: **22 packages, exit 0** (§7.1).
 
-**3. Windows works.** `docker-compose.yml` cannot run on Docker Desktop at all —
+**3. Windows works.** `docker-compose.yml` cannot run on Docker Desktop at all, 
 it bind-mounts `/dev`, sets `network_mode: host`, and requests
 `runtime: nvidia`. `docker-compose.windows.yml` plus `scripts/setup-windows.ps1`
 give the three Windows machines on the team a working path (§3.3, §6.2).
 
 Everything claimed here was verified against real build output. §7 lists each
 check and the command that produces it. Where an early diagnosis turned out to
-be wrong, the correction is recorded rather than quietly dropped — see §4.2.1.
+be wrong, the correction is recorded rather than quietly dropped, see §4.2.1.
 
 ---
 
 ## 2. Image fixes (`docker/Dockerfile.humble-fused-drive`)
 
-### 2.1 setuptools / packaging conflict — broke all 22 packages
+### 2.1 setuptools / packaging conflict, broke all 22 packages
 
 **Symptom.** Every `ament_python` package failed:
 
@@ -102,7 +102,7 @@ but the `packaging` library present in the image predates that keyword.
 **Why it hid everything else.** `colcon build` aborts on the first failure
 unless `--continue-on-error` is passed. `debug_gui` sorts first alphabetically,
 so its failure stopped the run and the other 21 packages reported as
-`not processed` — not as passing. The single defect masked the whole picture.
+`not processed`, not as passing. The single defect masked the whole picture.
 
 **Fix.** Pin setuptools in its own layer, *after* the torch install, since that
 install is what drags it forward:
@@ -116,7 +116,7 @@ Resolves to setuptools 58.2.0 / packaging 21.3.
 **Verified.** `debug_gui` went from a hard crash to `Finished <<< debug_gui
 [0.70s]`, and the run advanced from 0/22 to 20/22.
 
-### 2.2 Missing `libasio-dev` — broke `ublox_gps` and `ublox`
+### 2.2 Missing `libasio-dev`, broke `ublox_gps` and `ublox`
 
 **Symptom.**
 
@@ -140,14 +140,14 @@ installed its dependencies as a hand-maintained apt list that omitted it. The
 ### 2.3 Missing `diagnostic_updater`
 
 `ublox_gps` also declares `<depend>diagnostic_updater</depend>`, absent from the
-image. This was hidden behind the asio failure — CMake stopped at the first
+image. This was hidden behind the asio failure, CMake stopped at the first
 missing dependency. Added `ros-humble-diagnostic-updater`.
 
 ### 2.4 Missing `python3-pyqt5` and `sensor_msgs_py`
 
 `src/debug_gui/package.xml` declares `<exec_depend>python3-pyqt5</exec_depend>`.
 Being an exec dependency, the package *builds* without it and fails only when
-run — a latent runtime failure rather than a build error. Added
+run, a latent runtime failure rather than a build error. Added
 `python3-pyqt5` and `ros-humble-sensor-msgs-py`.
 
 ### 2.5 Duplicate OpenCV installation
@@ -174,7 +174,7 @@ on rebuild.
 
 ## 3. Compose changes
 
-### 3.1 `docker-compose.yml` — restored the Humble service
+### 3.1 `docker-compose.yml`, restored the Humble service
 
 The entire `igvc_humble_fused_drive` service (previously lines 37–90) was
 commented out, while `README.md` documented it as the supported workflow:
@@ -193,7 +193,7 @@ It was committed as:
 - DEVENV_HOST_PATH=/home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026
 ```
 
-That is another developer's home directory. The variable is **not** dead — it is
+That is another developer's home directory. The variable is **not** dead, it is
 read by `src/igvc_simulation_interface/igvc_simulation_interface/simulation_interface.py:95`
 to map container paths to host paths, and the code warns once if unset. So it
 was parameterized rather than deleted:
@@ -206,13 +206,13 @@ The path also explains its own origin: `Gold-Rush-Robotics/DevEnv` is a public
 repo whose `.devcontainer/devcontainer.json` sets
 `"DEVENV_HOST_PATH": "${localWorkspaceFolder}"`. The intended workflow is to
 place this repo inside `DevEnv/jazzy_ws/`. The parameterized form is compatible
-with that — the devcontainer supplies the value.
+with that, the devcontainer supplies the value.
 
-### 3.3 `docker-compose.windows.yml` — new
+### 3.3 `docker-compose.windows.yml`, new
 
 `docker-compose.yml` cannot run on Docker Desktop for Windows. It bind-mounts
 `/dev`, `/tmp`, and `/tmp/.X11-unix`, sets `network_mode: host`, and requests
-`runtime: nvidia` — none of which are valid there.
+`runtime: nvidia`, none of which are valid there.
 
 This is a **separate file**, not an override, because Compose merges volume
 lists by target and therefore cannot *remove* an inherited mount. It must be
@@ -223,12 +223,12 @@ docker compose -f docker-compose.windows.yml build igvc_humble_fused_drive
 ```
 
 Name the service explicitly. Since §4.5.4 added the two ZED variants, a bare
-`docker compose build` builds all three images — about 40 minutes and 70 GB.
+`docker compose build` builds all three images, about 40 minutes and 70 GB.
 
 GPU access is preserved through `gpus: all`. Build output goes to named volumes
 so colcon artifacts stay off the (slow) Windows bind mount.
 
-### 3.4 `igvc_zed_humble` service — new, in both compose files
+### 3.4 `igvc_zed_humble` service, new, in both compose files
 
 Service for the consolidated ZED image described in §4. It follows the same
 shape as `igvc_humble_fused_drive`: repo bind-mounted at
@@ -236,7 +236,7 @@ shape as `igvc_humble_fused_drive`: repo bind-mounted at
 `igvc_zed_log` named volumes for the colcon output directories.
 
 **One subtlety, checked rather than assumed.** Unlike the fused-drive image, this
-image ships a populated `/root/ros2_ws/install` — that is where the six ZED
+image ships a populated `/root/ros2_ws/install`, that is where the six ZED
 packages live. Mounting a named volume over it looks like it would hide them.
 It does not: Docker seeds an empty *named* volume from the image's content at
 that path on first creation. Verified:
@@ -255,7 +255,7 @@ will keep serving the old copy. After rebuilding the image, run:
 docker compose down -v
 ```
 
-A bind mount at the same path would have hidden the packages outright — this
+A bind mount at the same path would have hidden the packages outright, this
 works only because these are named volumes.
 
 ---
@@ -275,7 +275,7 @@ Error response from daemon: error from registry: unauthorized
 
 Forking the repository does not grant registry access. A search of every public
 Gold-Rush-Robotics repository (§5.2) found **no build recipe for it anywhere**,
-so it cannot be reproduced either — it is an unreproducible binary dependency.
+so it cannot be reproduced either, it is an unreproducible binary dependency.
 
 ### 4.2 Approach
 
@@ -299,11 +299,11 @@ Content-Type: binary/octet-stream
 Content-Length: 1630536643
 ```
 
-`nvidia/cuda:13.0.0-devel-ubuntu22.04` was likewise confirmed to exist — CUDA 13
+`nvidia/cuda:13.0.0-devel-ubuntu22.04` was likewise confirmed to exist, CUDA 13
 does still publish Ubuntu 22.04 images, which is what makes a CUDA-13 + Humble
 combination possible at all.
 
-### 4.2.1 How the SDK version was chosen — including one wrong answer
+### 4.2.1 How the SDK version was chosen, including one wrong answer
 
 This section records the sequence honestly, because the middle step **looked
 verified and was not**. If you only read one thing here, read §4.5.
@@ -312,7 +312,7 @@ verified and was not**. If you only read one thing here, read §4.5.
 | --- | --- | --- |
 | 1 | 5.1.0 | fails to compile |
 | 2 | 5.3.0 | compiles, all checks pass, **node dies on launch** |
-| 3 | 5.2.3 | works — verified by launching the node (§7.2) |
+| 3 | 5.2.3 | works, verified by launching the node (§7.2) |
 
 The first build attempt pinned SDK **5.1.0**, matching the version in the old
 `dev-zed:5.1.0-13.0.0` tag. `zed_components` failed to compile:
@@ -356,15 +356,15 @@ gives:
 ```
 
 The reasoning error was assuming a *minimum* requirement when the wrapper
-enforces a **closed range** — and the upper bound is only checked at runtime.
+enforces a **closed range**, and the upper bound is only checked at runtime.
 The lesson generalises past this repo: *a build is not a test of a program that
 validates its environment when it starts.*
 
 Attempt 3 pinned **5.2.3**, the newest patch inside the org fork's supported
 window, and verified it by launching the node (§7.2).
 
-The full analysis — why the cap exists, why `jetson-zed` is unaffected, and the
-two supported wrapper/SDK pairings now provided — is in **§4.5**.
+The full analysis, why the cap exists, why `jetson-zed` is unaffected, and the
+two supported wrapper/SDK pairings now provided, is in **§4.5**.
 
 ### 4.3 Consolidation
 
@@ -406,7 +406,7 @@ igvc-zed-humble  latest  28.6GB      # unpacked, once actually used
 
 This machine uses the containerd image store
 (`driver-type: io.containerd.snapshotter.v1`, overlayfs), which unpacks layers
-into snapshots **lazily — on the first container run, not at build time**. That
+into snapshots **lazily, on the first container run, not at build time**. That
 is measurable, and it is why a freshly built image can look deceptively small:
 
 ```text
@@ -420,7 +420,7 @@ igvc-zed-humble  upstream   ls=28.6GB
 ```
 
 So **an image you have built but not yet run has not finished costing you
-disk.** Budget the larger number, and add build cache on top — it reached
+disk.** Budget the larger number, and add build cache on top, it reached
 **55.9 GB** while developing these images. `docker system df` shows all of it;
 `docker builder prune` reclaims the cache.
 
@@ -430,7 +430,7 @@ CUDA or adding the GUI tools.
 
 On Windows the smaller image is the right default: Docker Desktop cannot pass
 through USB, so a ZED camera is unusable there, and the 22 workspace packages
-build without the SDK (proven — the 4 GB image has no SDK and builds 22/22).
+build without the SDK (proven, the 4 GB image has no SDK and builds 22/22).
 
 ### 4.5 Wrapper / SDK pairing, and the two variants
 
@@ -441,7 +441,7 @@ ZED image. **A build-only test cannot validate this image.**
 
 `zed_components/src/include/sl_version.hpp` defines a minimum *and* a maximum
 supported SDK, checked in `zed_camera_component_main.cpp` as
-`(MAJOR * 10 + MINOR)` — the patch level is not considered:
+`(MAJOR * 10 + MINOR)`, the patch level is not considered:
 
 ```cpp
 if (((ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) <
@@ -454,13 +454,13 @@ Both ends fail, but they fail in **very different ways**:
 
 | SDK | Wrapper | Result |
 | --- | --- | --- |
-| 5.1.0 | org fork (max 5.2) | fails to **compile** — obvious, caught by any build |
+| 5.1.0 | org fork (max 5.2) | fails to **compile**, obvious, caught by any build |
 | 5.3.0 | org fork (max 5.2) | **compiles perfectly, node refuses to start** |
 | 5.2.3 | org fork (max 5.2) | works |
 | 5.3.0 | upstream v5.4.1 (max 5.4) | works |
 
 The 5.3.0 + fork combination is the dangerous one. The image builds with no
-errors, all six ZED packages install, `ros2 pkg list` shows them — and then:
+errors, all six ZED packages install, `ros2 pkg list` shows them, and then:
 
 ```text
 [INFO] Load Library: .../libzed_camera_component.so
@@ -524,7 +524,7 @@ one being chosen unilaterally.
 | Wrapper | org fork v5.2.1 | upstream **v5.4.1**, pinned |
 | ZED SDK | 5.2.3 | 5.3.0 |
 | Image tag | `igvc-zed-humble:latest` | `igvc-zed-humble:upstream` |
-| Matches `jetson-zed` | no | **yes** — same wrapper source and SDK |
+| Matches `jetson-zed` | no | **yes**, same wrapper source and SDK |
 | Wrapper currency | 70 commits behind upstream | current |
 
 ```bash
@@ -559,11 +559,11 @@ Anonymous pull test against `ghcr.io/gold-rush-robotics/*`:
 
 | Image | Result |
 | --- | --- |
-| `dev_env` | HTTP 200 — public |
-| `jetson-zed` | HTTP 200 — public |
-| `dev-zed` | HTTP 403 — private |
-| `jetson-ros-base` | HTTP 403 — private |
-| `isaac-ros` | HTTP 403 — private |
+| `dev_env` | HTTP 200, public |
+| `jetson-zed` | HTTP 200, public |
+| `dev-zed` | HTTP 403, private |
+| `jetson-ros-base` | HTTP 403, private |
+| `isaac-ros` | HTTP 403, private |
 
 Available tags: `dev_env` → 1–7, 9, latest. `jetson-zed` → 5.0-36.4,
 5.1-36.4.7, 5.3-36.4.7.
@@ -579,7 +579,7 @@ of them points to only three images: `jetson-ros-base` (5), `dev_env` (2),
 manifest reports `"architecture": "arm64"` and it is built `FROM
 nvcr.io/nvidia/l4t-jetpack:r36.4.0`. It cannot run on an x86 laptop.
 
-### 5.3 Not defects — checked and deliberately left alone
+### 5.3 Not defects, checked and deliberately left alone
 
 - **`models/` missing.** Intentional. It is gitignored, and
   `src/igvc_lane_detection/scripts/fetch_yolopv2_weights.sh` populates it. A
@@ -617,13 +617,13 @@ private `dev-zed`, which §4 replaces.
 `VERSION="jazzy-36.4.7-2"`, but its Dockerfile builds **Humble**
 (`ARG ROS2_DIST=humble`, `ENV ROS_DISTRO=humble`, installs `ros-humble-ros-core`
 and `ros-humble-ros-base`, runs rosdep `--rosdistro humble`). The image tagged
-`jazzy-...` contains Humble. Worth correcting upstream — it is actively
+`jazzy-...` contains Humble. Worth correcting upstream, it is actively
 misleading.
 
 **Stale comments in this repo.** `docker-compose.jetson.yml` describes
 `igvc_jetson_zed` as *"ROS 2 Jazzy + ZED SDK 5"* and *"Includes: … ROS 2
 Jazzy"*, but the image is Humble and the service's own commented command sources
-`/opt/ros/humble/setup.bash`. Comments only — no functional effect. Left for a
+`/opt/ros/humble/setup.bash`. Comments only, no functional effect. Left for a
 separate change.
 
 **Submodules point upstream, not at the org forks.** `isaac/exts` tracks
@@ -636,7 +636,7 @@ confirming.
 
 ## 6. Supporting changes
 
-### 6.1 `.gitattributes` — new
+### 6.1 `.gitattributes`, new
 
 With `core.autocrlf=true` (the Windows default) and no `.gitattributes`, a
 Windows clone rewrites shell scripts to CRLF. A CRLF script fails inside a Linux
@@ -653,7 +653,7 @@ binaries explicitly.
 > **Note for existing clones:** this changes line endings at the next checkout.
 > Commit or stash local work before pulling it.
 
-### 6.2 `scripts/setup-windows.ps1` — new
+### 6.2 `scripts/setup-windows.ps1`, new
 
 Prerequisite checker and installer for Windows, written for teammates new to
 Docker. Checks Windows build, WSL2, Docker daemon, Compose, GPU passthrough,
@@ -669,7 +669,7 @@ Two bugs found while testing it, both worth knowing independently:
    `(docker ... 2>&1) | Out-String` sets `$?` to `$false` even on exit code 0,
    because each stderr line becomes an ErrorRecord. Use `$LASTEXITCODE`.
 2. **`nvidia-smi` output differs under WSL2.** It prints
-   `NVIDIA-SMI x  KMD Version: y  CUDA UMD Version: z` — the string
+   `NVIDIA-SMI x  KMD Version: y  CUDA UMD Version: z`, the string
    `Driver Version` never appears. Matching on `Driver Version` false-alarms on
    every Windows machine. The script matches `NVIDIA-SMI` instead.
 
@@ -692,7 +692,7 @@ limitations on Windows.
 - **Repository layout** table did not mention `docker-compose.windows.yml` or
   `scripts/`; both are now listed.
 - **Maintainer notes** now say to mirror any new compose service into the
-  Windows file, and to pin `setuptools` after touching a Dockerfile pip stack —
+  Windows file, and to pin `setuptools` after touching a Dockerfile pip stack, 
   the exact trap in §2.1.
 
 #### 6.3.1 A broken command in the clean-rebuild instructions
@@ -708,7 +708,7 @@ Error response from daemon: get igvc_robot_2026_igvc_humble_build: no such volum
 in a fork checked out as `IGVC_robot_2027` the volumes are
 `igvc_robot_2027_igvc_humble_*`. The README hardcoded the upstream 2026 names.
 
-A note explaining exactly this already existed in the README — but 77 lines
+A note explaining exactly this already existed in the README, but 77 lines
 further down, past the point where anyone copy-pasting the command would already
 have hit the error.
 
@@ -724,7 +724,7 @@ required **after rebuilding an image**, because named volumes are seeded from
 the image only on first creation (§3.4). Without it, a rebuilt image silently
 keeps serving the previous build output.
 
-### 6.4 `.gitignore` — Office lock files
+### 6.4 `.gitignore`, Office lock files
 
 Opening `docs/IGVC_2027_Docker_Setup_Guide.docx` in Word creates a hidden
 owner file, `~$VC_2027_Docker_Setup_Guide.docx`, in the same directory. It
@@ -741,10 +741,10 @@ afterwards.
 
 ### 6.5 Documentation artifacts
 
-- `docs/IGVC_2027_Docker_Setup_Guide.docx` — step-by-step guide for teammates
+- `docs/IGVC_2027_Docker_Setup_Guide.docx`, step-by-step guide for teammates
   who have never used Docker. Sizes and SDK versions in it are the measured
   ones from §7, not estimates.
-- `docs/DOCKER_CHANGES.md` — this file.
+- `docs/DOCKER_CHANGES.md`, this file.
 
 ---
 
@@ -788,11 +788,11 @@ Both workspace builds were verified against images built **from scratch** with
 the corrected Dockerfiles, not against incrementally patched layers.
 
 > **Every check in the table above also passed on the broken SDK 5.3.0 build.**
-> Image built, six ZED packages resolved, 22 IGVC packages compiled — and the
+> Image built, six ZED packages resolved, 22 IGVC packages compiled, and the
 > node still died on launch (§4.5.1). Build-time checks are necessary and not
 > sufficient. §7.2 is the one that catches it.
 
-### 7.2 Runtime check — the one that actually matters
+### 7.2 Runtime check, the one that actually matters
 
 Static checks cannot detect the wrapper's SDK guard, because it runs when the
 node starts. This launches the node with the repo's own parameter override file
@@ -820,7 +820,7 @@ What matters is *where*:
 | --- | --- |
 | `designed to work with ZED SDK ... up to vX.Y` | **wrong SDK/wrapper pairing** (§4.5) |
 | a parameter error | the override YAML is incompatible with this wrapper |
-| `CAMERA STREAM FAILED TO START`, retrying | **pass** — software stack is fine, only hardware is absent |
+| `CAMERA STREAM FAILED TO START`, retrying | **pass**, software stack is fine, only hardware is absent |
 
 Result for variant A (org fork wrapper + SDK 5.2.3):
 
@@ -836,7 +836,7 @@ Result for variant A (org fork wrapper + SDK 5.2.3):
 
 Passed: no version rejection, all services advertised, reached camera open and
 retried cleanly. It also confirms the repo's `common_stereo_real.yaml` is
-accepted — see §7.3.
+accepted, see §7.3.
 
 Result for variant B (upstream wrapper v5.4.1 + SDK 5.3.0):
 
@@ -848,7 +848,7 @@ Result for variant B (upstream wrapper v5.4.1 + SDK 5.3.0):
 [INFO] Please verify the camera connection
 ```
 
-Also passed. Note this is the **same SDK 5.3.0 that fails with the org fork** —
+Also passed. Note this is the **same SDK 5.3.0 that fails with the org fork**, 
 proof that the fault was never the SDK version on its own, only its pairing
 with a wrapper that caps at 5.2.
 
@@ -874,9 +874,9 @@ wrapper exists:
 | --- | --- |
 | `zed_wrapper/launch/zed_camera.launch.py` present at the path `zed_multi.launch.py` resolves | yes |
 | Launch arguments the repo passes vs those the wrapper declares | **14 of 14 accepted** (repo passes 14, wrapper declares 29) |
-| Repo's `common_stereo_real.yaml` loaded | yes — `Using ROS parameters override file: ...` |
-| ZED URDF parses | yes — all 6 camera frames published by `robot_state_publisher` |
-| Parameters set by the repo but not declared by the wrapper | 29, mostly `object_detection.*`. **Silently ignored, not fatal** — the node started with the override applied. They have no effect, so object-detection tuning in that file is currently inert. |
+| Repo's `common_stereo_real.yaml` loaded | yes, `Using ROS parameters override file: ...` |
+| ZED URDF parses | yes, all 6 camera frames published by `robot_state_publisher` |
+| Parameters set by the repo but not declared by the wrapper | 29, mostly `object_detection.*`. **Silently ignored, not fatal**, the node started with the override applied. They have no effect, so object-detection tuning in that file is currently inert. |
 
 The launch-argument comparison is done by AST-parsing `zed_multi.launch.py`
 rather than by regex: the repo builds the dict and then adds three keys
@@ -893,10 +893,10 @@ pass.
    and **28.6 GB of disk** (plus build cache, which reached 55.9 GB here).
    Pulling a published image transfers 9.70 GB and skips the build entirely.
    Push it to GHCR once and have everyone pull.
-3. **Correct the `jetson-ros-base` tag** upstream — `jazzy-36.4.7-2` contains
+3. **Correct the `jetson-ros-base` tag** upstream, `jazzy-36.4.7-2` contains
    Humble (§5.4).
 4. **Fix the stale Jazzy comments** in `docker-compose.jetson.yml` (§5.4).
-5. **Confirm submodule remotes** — upstream Stereolabs vs the org forks (§5.4).
+5. **Confirm submodule remotes**, upstream Stereolabs vs the org forks (§5.4).
 6. **ZED camera on Windows.** `usbipd-win` can attach USB devices into WSL2, but
    ZED cameras are high-bandwidth USB3 and USB/IP handles that poorly. Test
    before relying on it.
@@ -906,7 +906,7 @@ pass.
 8. **Confirm WSLg on the Windows 10 machine** (§10.3). It should work on 22H2
    with the Store version of WSL (`wsl --update`), but nobody has tried it. If
    it does not, that machine is headless-only and everything else still works.
-9. ~~**`gz_ros2_control` source build**~~ **RESOLVED by section 11** — it ships
+9. ~~**`gz_ros2_control` source build**~~ **RESOLVED by section 11**, it ships
    as a prebuilt binary on Jazzy and is installed in the image. Whether to
    *use* it rather than a topic bridge is still RQ-06, still open.
 10. **Decide whether the other images need the GPU rendering settings** (§10.2).
@@ -1264,8 +1264,8 @@ before it.
 
 This is precisely the argument §10 used to reject Gazebo Fortress, which also
 ends May 2027. That analysis applied the EOL test to the simulator and never
-turned it on the distro underneath, then went on to build Harmonic — the
-correct simulator — on top of a distro with the identical problem. Jazzy also
+turned it on the distro underneath, then went on to build Harmonic, the
+correct simulator, on top of a distro with the identical problem. Jazzy also
 covers the 2028 team, which matters given annual turnover.
 
 The 2027 team independently reached the same place. Per the coding-discussion
@@ -1283,7 +1283,7 @@ Very little, because almost nothing in §10 was ROS-version-specific.
 | Dockerfile | Rewritten, but only the apt section. ~15 lines *deleted*. |
 | Compose service | 4 lines: dockerfile path, image tag, `LD_LIBRARY_PATH`, `ROS_DISTRO`. |
 | `render_check.sh` | One comment. |
-| `bridge_smoke_test.sh` | One line — now `/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash`. |
+| `bridge_smoke_test.sh` | One line, now `/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash`. |
 | `render_check.sdf`, `three_camera_load.sdf` | **None.** The `gz-sim-*-system` plugin names are identical. |
 | `sensor_bench.sh` | **None.** |
 | The four GPU settings | **None.** They are WSL2/Docker/GPU facts. |
@@ -1297,11 +1297,11 @@ Very little, because almost nothing in §10 was ROS-version-specific.
    (Fortress, despite the `gz-` name). On Jazzy, `ros-jazzy-gz-ros2-control`
    1.2.20 exists and depends on the same `ros-jazzy-gz-*-vendor` packages as
    `ros_gz`. Installed, and `libgz_ros2_control-system.so` verified present in
-   the image. **Available is not adopted** — RQ-06 is still open.
+   the image. **Available is not adopted**, RQ-06 is still open.
 2. **No third-party apt repo.** The whole packages.osrfoundation.org block is
    gone: no GPG key fetch, no source list.
 3. **No flavour split, so no `Conflicts:`.** `ros-jazzy-ros-gzharmonic` and
-   `ros-jazzy-ros-gzfortress` do not exist — confirmed absent from the live
+   `ros-jazzy-ros-gzfortress` do not exist, confirmed absent from the live
    noble index. There is one `ros-jazzy-ros-gz`.
 4. **Harmonic becomes the supported pairing.** REP 2000 lists Fortress for
    Humble and Harmonic for Jazzy, so the same simulator goes from off-label to
@@ -1343,7 +1343,7 @@ Humble image. The ~100 MB difference is `gz_ros2_control` and the
 stating what replaced it. Its compose service is retained as
 `igvc_gazebo_humble` under a `deprecated` profile, so it is hidden from
 `docker compose up` and from bare `build`, but still reachable by explicit name
-(Compose v5.5.1 auto-enables a profile when a service is named directly —
+(Compose v5.5.1 auto-enables a profile when a service is named directly, 
 checked). Its colcon volumes are separate from the Jazzy service, the same
 reasoning as the two ZED variants in §4.5.4.
 
@@ -1702,3 +1702,188 @@ thing blocking `obstacle_layer`.
 Item 7, `render_check.sh` on the other two machines, is unchanged, but note that
 until 14.1 was fixed the script would have failed on those machines for a reason
 that has nothing to do with their GPUs. Any earlier result from them is void.
+
+---
+
+## 15. Everything a teammate depends on, in one place
+
+Written 2026-09-17 for the software sub-team meeting, because the facts a new
+person needs were spread over fourteen sections. Every number here was
+measured on Windows 11 Home build 26200, RTX 5070 Ti Laptop, driver 610.88,
+Docker Engine 29.7.2 with the WSL2 backend, WSL2 Ubuntu-26.04.
+
+### 15.1 The images, and which one you actually need
+
+| Image | Size on disk | Distro | Do you need it |
+| --- | --- | --- | --- |
+| `igvc-gazebo-jazzy:latest` | **5.57 GB** | **Jazzy** | **Yes. This is the simulator and the only image the Gazebo path uses.** |
+| `igvc-humble-fused-drive:latest` | 14.1 GB | Humble | Only for YOLOPv2 perception. It is the Jetson stand-in and carries torch. |
+| `igvc-zed-humble:latest` and `:upstream` | 28.6 GB each | Humble | Only for ZED camera code, and a ZED camera cannot be used from Docker on Windows. |
+| `igvc-gazebo-harmonic:latest` | 4.24 GB | Humble | **No. Deprecated**, kept only so old results reproduce. |
+
+`docker system df` on this machine: 68.88 GB of images, 29.06 GB of build
+cache, of which 21.86 GB is shared across images. **The share of the build
+cache belonging to any one image is not cleanly attributable**, which is why
+the build-path disk figure in the quickstart is labelled a margin rather than
+a measurement.
+
+`setup-windows.ps1` used to end by building `igvc_humble_fused_drive`. That is
+14.1 GB the simulator does not use, and on shared campus wifi it is an entire
+meeting. It now builds nothing. See 15.6.
+
+### 15.2 Two image sizes, about 4.6x apart, and both are correct
+
+The containerd image store unpacks layers lazily, so a freshly loaded or
+freshly built image under-reports until you run it. Measured today, on the
+same image:
+
+| Moment | `docker image ls` reports |
+| --- | --- |
+| immediately after `docker load` | **1.2 GB** |
+| after the container has run | **5.57 GB** |
+
+The 1.2 GB figure is the compressed download size; 5.57 GB is the unpacked
+on-disk size. If a teammate says the image is 1.2 GB and you say 5.57 GB, you
+are both right and you are looking at different moments. Plan disk against
+**5.57 GB**.
+
+### 15.3 The offline path, measured
+
+Liam carries the image on a USB drive so nobody pulls or builds over campus
+wifi. Produced with:
+
+```bash
+docker save igvc-gazebo-jazzy:latest -o igvc-gazebo-jazzy.tar
+```
+
+| Step | Measured |
+| --- | --- |
+| `docker save` wall time | **14.6 s** |
+| resulting file | **1,201,505,280 bytes, 1.20 GB** |
+| `docker load -i` wall time, image **fully absent** | **1 m 17.0 s** |
+
+The load figure is a true cold load: the image was removed with
+`docker image rm` first and `docker image ls` confirmed it gone, so no layer
+was already present. Reload with layers present is much faster and is not a
+useful number to quote.
+
+The tar is a complete OCI layout: a `blobs/sha256/` directory holding the
+compressed layers (largest 905 MB, then 120 MB, 110 MB, 29.8 MB, 28.1 MB,
+6.7 MB), plus `index.json`, `manifest.json` and `oci-layout`. Check a copy is
+not truncated with `tar -tf igvc-gazebo-jazzy.tar | tail -4`.
+
+An **exFAT** drive is needed if the image ever grows past 4 GB, because FAT32
+cannot hold a single file that large. At 1.20 GB either works today; do not
+assume it stays that way.
+
+### 15.4 Volumes, and the one that bites
+
+`igvc_gazebo` mounts the repo and keeps its colcon output in **named volumes**:
+
+| Mount | What |
+| --- | --- |
+| `.:/root/ros2_ws/src/IGVC_robot_2026` | the repo, **bind** mounted, relative to the compose file |
+| `igvc_gazebo_build:/root/ros2_ws/build` | colcon build tree |
+| `igvc_gazebo_install:/root/ros2_ws/install` | colcon install tree |
+| `igvc_gazebo_log:/root/ros2_ws/log` | colcon logs |
+| `/usr/lib/wsl:/usr/lib/wsl:ro` | the WSL GPU driver libraries |
+| `/tmp/.X11-unix`, `/mnt/wslg` | WSLg display sockets |
+
+Two consequences that have each cost time:
+
+**`docker compose down -v` is required after rebuilding the image.** Named
+volumes seed from the image only when first created, so without `-v` a rebuilt
+image keeps serving the old workspace and you debug a fix that is not running.
+
+**The bind mount is relative, so the container always mounts whichever checkout
+you ran `docker compose` from.** That is what makes an isolated test clone
+possible: `COMPOSE_PROJECT_NAME=freshtest` prefixes the named volumes
+(`freshtest_igvc_gazebo_build`) so a test cannot reuse the working copy's
+build tree. It does **not** change `container_name`, which is fixed at
+`igvc_gazebo`, so only one can exist at a time and the old one must be removed
+first.
+
+The workspace itself is small: **build 1.8 MB, install 1.2 MB**. Four packages
+are built and three of those are install-only.
+
+### 15.5 Environment variables on `igvc_gazebo`, and why each matters
+
+| Variable | Value | Why |
+| --- | --- | --- |
+| `GALLIUM_DRIVER` | `d3d12` | routes Mesa through the WSL D3D12 path, which is what reaches the GPU |
+| `MESA_D3D12_DEFAULT_ADAPTER_NAME` | `NVIDIA` | **this laptop has an Intel iGPU and an NVIDIA card**, and Mesa picking the Intel one made `gz sim` crash inside Intel's WSL driver. Change or delete it on an AMD or Intel machine |
+| `LD_LIBRARY_PATH` | `/usr/lib/wsl/lib:/opt/ros/jazzy/lib` | the WSL driver libraries must come first |
+| `DISPLAY`, `WAYLAND_DISPLAY` | inherited from the shell | **empty when run from PowerShell**, which is exactly why there is no window. Not an error, just unset |
+| `XDG_RUNTIME_DIR` | `/mnt/wslg/runtime-dir` | WSLg socket directory |
+| `RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | matches the Humble perception container, so the two can share a graph |
+| `ROS_DOMAIN_ID` | `0` | **shared.** Two people on one network with the same domain id will see each other's simulators |
+| `ROS_LOCALHOST_ONLY` | `0` | deprecated on Jazzy and it warns about it on every run. Harmless |
+| `FASTDDS_BUILTIN_TRANSPORTS` | `UDPv4` | disables shared memory, which pre-empts the classic silent failure where discovery works and large messages never arrive |
+| `GZ_VERSION` | `harmonic` | |
+| `IGVC_WORKSPACE_ROOT` | `/root/ros2_ws/src/IGVC_robot_2026` | why that path keeps the **2026** name |
+
+**`gz` and `ros2` are not on PATH in a bare `docker exec`.** `/root/.bashrc`
+does not source ROS, and on this image `gz` comes from the ROS **vendor**
+packages at `/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz` (gz-sim 8.15.0). For
+an interactive shell:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /root/ros2_ws/install/setup.bash    # after a colcon build
+```
+
+The three check scripts now source ROS themselves, so they no longer need it.
+`render_check.sh` did not, and that is 14.1.
+
+### 15.6 The `FASTDDS_DEFAULT_PROFILES_FILE` asymmetry. Still present, still unfixed.
+
+Recorded in 14.4 and repeated here because it is the kind of thing that gets
+rediscovered mid-debug. **Neither Gazebo service sets it, on either compose
+file.** Verified again today by grepping both files:
+
+| File | Line | Service |
+| --- | --- | --- |
+| `docker-compose.windows.yml` | 46 | `igvc_humble_fused_drive` only |
+| `docker-compose.yml` | 24, 66, 158, 225 | four services, **none of them `igvc_gazebo_linux`** |
+
+So on Windows exactly one of two services sets it, and on Linux four of five
+do. The value points at
+`src/igvc_test_bringup/config/fastdds_udp.xml` inside the repo bind mount.
+
+**Whether it matters is untested.** What is measured is that the two
+containers do interoperate without it on the message counts (P0-1: within 1%
+across seven topics), and that the Humble container prints `sequence size
+exceeds remaining buffer` three times per process whatever it subscribes to,
+including when it subscribes to nothing. A Jazzy node subscribing to nothing
+prints none. **Setting this variable on the Gazebo service is the first thing
+to try when that defect is investigated**, and it is why the Phase 0 fallback
+plan named it. It has not been tried, so do not record it as a fix.
+
+### 15.7 Outstanding, amended again
+
+Against the list in section 8:
+
+- **Item 7, `render_check.sh` on the other machines.** Unchanged and now the
+  largest untested surface. Note again that any result from before 14.1 is
+  void, because the script failed on a clean container for a reason unrelated
+  to the GPU.
+- **Item 8, WSLg on the Windows 10 machine.** Unchanged. `setup-windows.ps1`
+  now separates the three build thresholds (19041 WSL2, 19044 WSLg, 19045
+  Docker Desktop) and says what to do at each, so the answer will at least be
+  legible when someone tries.
+- **Item 21, the camera point cloud orientation.** **No longer outstanding as
+  a question: it IS rotated 90 degrees**, measured, with both offsets
+  predicted from the URDF beforehand and matched to 3.4 mm and 2.1 mm. It is
+  now outstanding as a **fix**, and the fix is deliberately not in `main`,
+  because `gazebo_nav_test_nav2_overrides.yaml` never instantiates
+  `obstacle_layer` at all, so applying it connects a consumer that has never
+  been connected. See `GAZEBO_TODO.md`.
+- **New: the `sequence size exceeds remaining buffer` defect.** Directional,
+  Humble-side, three times per process, independent of what is subscribed. An
+  open defect, not a passed gate. See 15.6.
+- **New: `setup-windows.ps1` builds nothing.** It is a prerequisite check that
+  hands over to `scripts/gazebo/bootstrap.sh`, run from a WSL2 shell. Its disk
+  threshold was a flat 30 GB, neither measured nor right for either path; it
+  is now 12 GB for the offline path, derived in the quickstart, and prints
+  both the number it wants and the number it found.
+- **Items 1 to 6 and 9 to 20** are unchanged by this session.
