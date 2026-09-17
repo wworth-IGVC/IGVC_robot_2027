@@ -1,0 +1,125 @@
+# docker-compose.mac.yml
+# macOS variant of the Gazebo simulator service. HEADLESS ONLY.
+#
+# NO MAC HAS RUN THIS. It was written by reading docker-compose.windows.yml and
+# verified by running it on Windows in an isolated project, where it behaves
+# like a Mac in every respect except processor architecture. See
+# docs/MAC_SETUP.md and docs/MAC_VERIFICATION_CHECKLIST.md.
+#
+# Use it explicitly, never as an override:
+#   docker compose -f docker-compose.mac.yml up -d igvc_gazebo_mac
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS DELIBERATELY DOES NOT DO, AND WHY
+#
+# There is no display plumbing here at all, and that is not an omission.
+#
+#   - Docker Desktop on macOS gives containers no GPU, so all rendering is on
+#     the CPU through Mesa's llvmpipe.
+#   - XQuartz cannot display Gazebo or RViz. Its indirect GLX is far below the
+#     OpenGL 3.3 that gz-sim's ogre2 render engine requires, so `gz sim` fails
+#     with a render-engine error rather than running slowly.
+#
+# So a Gazebo or RViz window on a Mac is out of scope. Every automated check
+# in scripts/gazebo/ already runs headless by default, which is why the
+# headless path is the whole path here. Do NOT add DISPLAY, /tmp/.X11-unix or
+# any X11 mount to this file: it cannot work and it would imply that it can.
+#
+# Dropped relative to docker-compose.windows.yml, all Windows-specific:
+#   gpus: all                      Docker Desktop on macOS has no GPU to give
+#   devices: /dev/dxg              the WSL2 GPU device node
+#   /usr/lib/wsl:ro                the WSL GPU driver libraries
+#   /tmp/.X11-unix, /mnt/wslg      WSLg display sockets
+#   DISPLAY, WAYLAND_DISPLAY       no display, see above
+#   XDG_RUNTIME_DIR, PULSE_SERVER  both pointed into /mnt/wslg
+#   GALLIUM_DRIVER=d3d12           the WSL2 hardware path
+#   MESA_D3D12_DEFAULT_ADAPTER_NAME  likewise
+#   LD_LIBRARY_PATH                only existed to put /usr/lib/wsl/lib first;
+#                                  ROS's own setup.bash sets it correctly
+#   build:                         see the note on the image line below
+# ---------------------------------------------------------------------------
+
+services:
+  igvc_gazebo_mac:
+    # amd64 only. The published image has no arm64 manifest, so on Apple
+    # Silicon this runs under emulation. Stated explicitly rather than left to
+    # a platform-mismatch warning, so the behaviour is predictable.
+    platform: linux/amd64
+
+    image: igvc-gazebo-jazzy:latest
+
+    # NOTE: there is deliberately no `build:` section, unlike the Windows file.
+    # With one present, `docker compose up` on a machine that has not pulled
+    # the image would silently start building it, and on Apple Silicon that is
+    # an emulated multi-hour build that can fill the disk. Without it, the same
+    # mistake fails immediately with "image not found", which is the failure we
+    # want. Pull the image first:
+    #   docker pull --platform linux/amd64 ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+    #   docker tag ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest igvc-gazebo-jazzy:latest
+
+    # Distinct from igvc_gazebo on purpose, so a Mac container can never be
+    # confused with the Windows one in a document, a script or a stray
+    # `docker exec`.
+    container_name: igvc_gazebo_mac
+
+    stdin_open: true
+    tty: true
+    working_dir: /root/ros2_ws
+
+    # Matches the Windows file, which already sets this. Docker's default
+    # /dev/shm is 64 MB, which is too small for Fast DDS shared-memory
+    # transport, and that failure is quiet: discovery works and large messages
+    # never arrive. FASTDDS_BUILTIN_TRANSPORTS=UDPv4 below disables shared
+    # memory anyway, so this is defence in depth rather than the only guard.
+    shm_size: "2gb"
+
+    volumes:
+      # Relative, so it works wherever the Mac owner cloned the repo. There is
+      # no /mnt/c on a Mac and no absolute host path is assumed anywhere in
+      # this file. The path INSIDE the container keeps the 2026 name on
+      # purpose: the DDS profile and IGVC_WORKSPACE_ROOT both reference it.
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      # Named volumes, distinct from the Windows ones. Two reasons: a colcon
+      # workspace built under emulation should not be mixed with a native one,
+      # and it means this file can be tested on Windows without touching the
+      # working Windows workspace.
+      - igvc_gazebo_mac_build:/root/ros2_ws/build
+      - igvc_gazebo_mac_install:/root/ros2_ws/install
+      - igvc_gazebo_mac_log:/root/ros2_ws/log
+
+    environment:
+      # Force Mesa onto the CPU rasteriser. On macOS this is what would happen
+      # regardless, since no GPU reaches the container; setting it explicitly
+      # means render_check.sh reports TIER C deterministically instead of
+      # depending on what Mesa guesses.
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - GZ_VERSION=harmonic
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      # Taken from the host shell that runs `docker compose up`, exactly as on
+      # Windows. IMPORTANT: the container keeps whatever value it was created
+      # with. Changing this variable later does nothing to a container that
+      # already exists; you have to `docker compose -f docker-compose.mac.yml
+      # down` and bring it up again. Verify with:
+      #   docker exec igvc_gazebo_mac printenv ROS_DOMAIN_ID
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      # Disables DDS shared memory, which pre-empts the classic silent failure
+      # where discovery succeeds and large messages never arrive.
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DISTRO=jazzy
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      # NOTE: QT_QPA_PLATFORM is deliberately NOT set to "offscreen" here.
+      # Nothing in the default path starts a Qt application: all three check
+      # scripts run headless unless RVIZ=1 is passed explicitly. Setting
+      # offscreen globally would make an accidental RVIZ=1 silently produce no
+      # window instead of failing loudly, and a loud failure is the more
+      # useful outcome. If you hit a Qt "could not connect to display" error
+      # from something unexpected, set it for that one command:
+      #   docker exec -e QT_QPA_PLATFORM=offscreen igvc_gazebo_mac ...
+
+    command: ["bash"]
+
+volumes:
+  igvc_gazebo_mac_build:
+  igvc_gazebo_mac_install:
+  igvc_gazebo_mac_log:
