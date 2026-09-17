@@ -1523,3 +1523,426 @@ The honest assessment: if the concern is casual discovery by someone browsing
 the repository, this commit handles it. If the concern is that the content
 exists on GitHub at all, only a rewrite plus a request to GitHub support
 handles it, and it is better done after tonight's session than before it.
+
+---
+
+## 17. Blank-slate laptops, a published image, and three GPU tiers
+
+**Written 2026-09-17, in the ninety minutes before the software session.** The
+scope changed three ways from section 16: no USB drive, the image comes from a
+registry; assume a **fresh Windows install** with nothing configured; and
+**every machine must reach something runnable**, including laptops with no
+discrete GPU and, as far as is honest, a MacBook.
+
+Time was the binding constraint and it is worth recording what that cost. See
+17.8 for what was not done.
+
+### 17.1 The GHCR audit, and what Liam has to do by hand
+
+**Publishing a public package is irreversible in practice, so the image was
+audited first.** What was checked, and how:
+
+| Checked | Method | Result |
+| --- | --- | --- |
+| Secret build arguments, private base images | `grep` the Dockerfile for `FROM`, `ARG`, `--mount=type=secret` | Clean. One `FROM ros:jazzy-ros-base`, no secret ARGs |
+| The **layer history**, not just the Dockerfile | `docker history --no-trunc` over every layer | Clean. Only public apt installs from `packages.ros.org` and `archive.ubuntu.com`, and the ROS apt source deb is installed with a `sha256sum --strict --check` |
+| Credential-shaped files anywhere on the filesystem | `find / -xdev` for `id_rsa*`, `*.pem`, `*.p12`, `.netrc`, `.git-credentials`, `.npmrc`, `authorized_keys` | Clean. The only `.pem` files are the CA root certificates in `/etc/ssl/certs`, which belong there |
+| The usual secret directories | direct `ls` | `/root/.ssh`, `/root/.docker`, `/root/.aws`, `/root/.config/gh`, `/root/.gnupg`, `/root/.kube` all **absent**. `/etc/apt/auth.conf.d` exists and is **empty** |
+| Shell history and build leftovers | `/root/.bash_history`, `/tmp/*`, `/var/tmp/*` | **None present** |
+| ZED SDK or Stereolabs content | `find` for `*stereolabs*`, `libsl_zed*`, `/usr/local/zed` | **Absent.** This is the private-layer risk and it is not there |
+| Token and private-key patterns | `grep -rIE` for `ghp_`, `github_pat_`, `AKIA`, `BEGIN PRIVATE KEY` over `/root /etc /opt /usr/local` | **No matches** |
+| Authenticated apt repos | `grep` all of `/etc/apt/` for `://user:pass@` | **No matches**. Two sources, both public and both signed |
+| Project source baked in | `find / -xdev -iname '*IGVC*'`, plus `ls` of the workspace | **Nothing.** `/root/ros2_ws/src`, `install` and `build` are all **absent** |
+
+**The most useful single finding: the image contains no project code at all.**
+The repository is bind-mounted at runtime, so the published artefact is ROS 2
+Jazzy plus Gazebo Harmonic plus Nav2 and nothing of ours. That makes the
+publication decision much easier than it would otherwise be.
+
+The audit ran in a container started with **no volume mounts**, so the
+bind-mounted repo could not pollute the result.
+
+**Tagged, from the existing local image, no rebuild:**
+
+```text
+ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
+ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+```
+
+Local image id `sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31`,
+`os=linux arch=amd64`, 5.57 GB unpacked. **The registry digest does not exist
+until the push happens**, so it is not recorded here; read it from the push
+output or from `docker manifest inspect`.
+
+**Two steps are Liam's and cannot be done from here.**
+
+1. **Create a classic PAT.** `https://github.com/settings/tokens` >
+   **Tokens (classic)** > **Generate new token (classic)** > tick
+   **`write:packages`** and **`read:packages`** > **Generate token**.
+   **It must be a classic token.** GitHub's own documentation states that
+   Packages only supports authentication with a personal access token
+   (classic); the fine-grained permissions reference has no Packages
+   permission of any kind. This is a known trap and it wastes ten minutes if
+   hit.
+2. **Log in and push**, keeping the token out of shell history by pasting it at
+   the prompt:
+
+   ```powershell
+   cd "C:\IGVC 2027\IGVC_robot_2027"
+   docker login ghcr.io -u CobaltTornado
+   docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
+   docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+   ```
+
+3. **Set the package visibility to Public.** Profile > **Packages** >
+   `igvc-gazebo-jazzy` > **Package settings** > **Danger Zone** >
+   **Change visibility** > **Public**. **A new package defaults to private,
+   and a private package fails at pull time for every attendee with `denied`.**
+   Note the package appears under the **user**, not the repository, until it is
+   linked.
+
+**Verification is pending and it is Liam's push that unblocks it.** The plan,
+per the instruction not to test by deleting the working image: `docker logout
+ghcr.io`, then an anonymous `docker manifest inspect`, which needs no
+credentials for a public package and touches no local layers. **The pull time
+on this machine is therefore NOT MEASURED**, and that is a gap, not an
+omission: it could not be measured before the artefact existed. The
+comparable figure that *is* measured is 1.20 GB over the wire against 5.57 GB
+unpacked, from the earlier `docker save` work.
+
+**Why a registry rather than Docker Hub, and worth writing down:** Docker Hub
+rate-limits anonymous pulls **per source IP**, so a room of people behind one
+NAT shares a single allowance. GHCR does not limit anonymous pulls of a public
+package the same way. That alone justifies the move independent of the USB
+question.
+
+**LAN fallback: documented, not built.** If GHCR is unreachable from the room,
+the tarball can be served off Liam's laptop over HTTP. One section in the
+session runbook, no scripts, with two honest cautions: WSL2's network address
+is not the Windows address, so a `python3 -m http.server` inside WSL2 may need
+a port proxy; and a campus network that isolates clients defeats it entirely,
+in which case the real fallback is `BUILD_IMAGE=1`, which needs
+`packages.ros.org` but not GHCR.
+
+### 17.2 The tier matrix, with every measurement and every gap
+
+`render_check.sh` had a defect that mattered for exactly this: it reported
+hardware rendering only if the log matched `nvidia|geforce|rtx`, so **a machine
+rendering in hardware on an Intel or AMD adapter fell through to
+`RESULT: UNKNOWN`** and read as broken. It now extracts the adapter from
+`GL_RENDERER`, names the tier, says what to do next, and writes the tier to
+`/tmp/render_tier` so `bootstrap.sh` reads the verdict rather than re-deriving
+it.
+
+| Tier | Machine | Path | Status |
+| --- | --- | --- | --- |
+| **A** | Discrete NVIDIA | WSLg through D3D12 | **MEASURED.** The baseline |
+| **B** | Integrated Intel or AMD only | WSLg through D3D12, plausibly hardware | **UNTESTED anywhere.** No such machine was available |
+| **C** | Any Windows machine, software rendering | `LIBGL_ALWAYS_SOFTWARE=1` | **MEASURED today**, on this laptop with its GPU disabled |
+| **D** | macOS | see 17.3 | **UNTESTED**, and partly refuted |
+
+**Tier A, measured:**
+
+```text
+ADAPTER: D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)
+RESULT: HARDWARE RENDERING (NVIDIA)
+YOUR TIER: A          exit 0
+```
+
+**Tier B is honestly untested and the document says so rather than implying
+equivalence.** What can be said without measuring: the mechanism is the same
+D3D12 path, so a current WDDM driver should hardware-accelerate; and this
+project's own notes record an Intel-adapter crash inside Intel's WSL driver on
+a machine that has **both** an Intel iGPU and a discrete card, which is why
+`MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` is pinned in the compose file. A
+pure-Intel machine does not hit that pin. `render_check.sh` now tells a tier B
+user their GPU genuinely is rendering, and asks them to report numbers back.
+
+**Tier C, measured today.** Method: 30 second windows, **counting messages**
+rather than asking for a rate, with real time factor computed from `/clock`
+rather than read from Gazebo's `real_time_factor`, which sits near 1.0 while
+cameras crawl.
+
+| Configuration | Real time factor | Camera delivered | Lidar delivered |
+| --- | --- | --- | --- |
+| 640x360 @ 15 Hz, front (the tier A default) | **0.608** | **1.63 Hz**, 11% of requested | 6.10 Hz |
+| **320x180 @ 5 Hz, front (the recommendation)** | **0.854** | **4.27 Hz**, 85% of requested | 8.53 Hz |
+| 320x180, `sim_cameras:=none` | **0.996** | none by definition | 9.95 Hz |
+
+**And the result that decides whether tier C counts as runnable:
+`bringup_smoke_test.sh` passed at 18 of 18, exit 0, under software rendering**,
+with odometry 4.673 m against ground truth 4.681 m, heading disagreement
+0.13 deg and distance ratio **0.9982**. So **a laptop with no usable GPU meets
+tonight's target.** That is the single most useful number in this section.
+
+Three things follow, and they are written into the quickstart's tier C path:
+
+- **The camera is the entire cost.** Turning cameras off returns real time to
+  0.996. Physics and lidar are fine on the CPU, which is why navigation,
+  odometry and control work stay valid on tier C.
+- **Ask for less and you get most of it.** At 320x180 and 5 Hz the simulator
+  delivers 85% of requested frames; at the tier A default it delivers 11%.
+- **`sim_cameras:=none` can never reach 18 of 18**, because the smoke test
+  checks four camera topics. Tier C keeps the front camera, small.
+
+The tier C recipe is **headless plus RViz, not the Gazebo window**, because the
+Gazebo GUI is itself a rendered 3D view and competes with the simulation for
+the same CPU.
+
+**All of these are laptop-with-GPU-disabled numbers**, which is the same code
+path a GPU-less machine takes but is not a measurement of any real tier C
+machine, and none of them say anything about the AGX.
+
+### 17.3 macOS, and two premises that did not survive
+
+Researched rather than assumed, and each finding labelled.
+
+| Claim | Verdict | What the evidence says |
+| --- | --- | --- |
+| Docker Desktop on macOS does not expose the GPU to Linux containers, so rendering is software only | **VERIFIED** | Docker's GPU documentation states that GPU support in Docker Desktop is only available on Windows with the WSL2 backend. The cause is architectural: containers run in a Linux VM on Apple's Virtualization framework, which provides no 3D-capable virtual GPU. There is no `--gpus` equivalent to try |
+| Apple Silicon needs emulation for this amd64 image | **VERIFIED** | Docker's multi-platform docs: you cannot run a `linux/amd64` container on an arm64 host without emulation. Our image is single-arch amd64 |
+| It needs `--platform linux/amd64` | **ASSUMED, overstated** | With only an amd64 manifest there is nothing for Docker to select, so `docker run` starts it under emulation with a platform-mismatch warning. Worth setting `platform: linux/amd64` in compose for predictability, but not a gate |
+| It needs **Rosetta** | **REFUTED** | Docker's settings reference lists "Use Rosetta for x86_64/amd64 emulation on Apple Silicon" as **Disabled by default**. The default path is QEMU via `binfmt_misc`, which Docker's docs warn is much slower for compute-heavy tasks, and CPU rasterisation is exactly that. Rosetta also cannot advertise AVX/AVX2 to Linux guests, which matters because Mesa's LLVM JIT would fall back to narrower SSE paths |
+| Emulation cost stacks on software rendering | **ASSUMED** | Mechanically sound, nobody has benchmarked gz-sim in this stack. Expect it to be bad; do not put a number on it |
+| macOS has no WSLg equivalent | **ASSUMED** | An absence claim, so no single document asserts it. Docker Desktop for Mac ships no display-server integration, and Apple removed X11 years ago, which is why XQuartz exists separately |
+| **XQuartz can display the Gazebo GUI** | **REFUTED, and this is the one that decides tonight** | XQuartz's GLX caps at roughly **OpenGL 1.4**; gz-sim's default `ogre2` engine requires **above 3.3, preferably 4.3+**. Enabling indirect GLX runs GL calls against that 1.4 stack, so `gz sim` **fails with an ogre2 OpenGL error rather than rendering slowly** |
+
+**So the honest macOS position: tonight, a Mac owner pairs with a Windows
+laptop on tier A or B.** Not because the checks would not run, but because the
+one visual path everybody assumes works is a verified dead end. The headless
+checks should run under emulation, since the autonomy path takes its lane lines
+and barrels from `track_points.json` rather than from the camera, but that is
+**ASSUMED**: nobody here has tested it on a Mac. If a visual path is ever
+wanted, the route is an X server plus VNC or noVNC *inside* the container,
+which rasterises client-side and never touches XQuartz's GL.
+
+**Backlog note, scoped and not started: a native arm64 image is feasible, and
+more so than expected.** Verified by downloading the real apt indexes rather
+than reading documentation: REP-2000 lists Ubuntu Noble arm64 as **Tier 1 for
+Jazzy**; `packages.ros.org/ros2/ubuntu/dists/noble/Release` declares
+`Architectures: i386 amd64 arm64 armhf`; the arm64 index carries **3667
+`ros-jazzy-*` packages** including `ros-jazzy-ros-gz`, `ros-jazzy-ros-gz-sim`
+and `ros-jazzy-ros-gz-bridge`; and this image needs **no ZED SDK**, which is
+the usual arm64 blocker. **Estimate: half a day**, mostly a `docker buildx`
+multi-arch pipeline plus one round of verification on an actual Mac. **Not
+started.**
+
+### 17.4 The blank-slate prerequisite list, with sizes and times
+
+Every `winget` package Id below was **verified by running `winget`**, not
+recalled. Two of them are traps.
+
+| Step | Id, verified | Download | Time | Reboot? |
+| --- | --- | --- | --- | --- |
+| Git for Windows | **`Git.Git`** 2.55.0.3 | about 65 MB | 1 to 2 min | no |
+| WSL2 plus Ubuntu | **`wsl --install`**, not winget | about 500 MB | 3 to 5 min | **YES** |
+| `wsl --update` | | about 130 MB | under 1 min | no |
+| Docker Desktop | **`Docker.DockerDesktop`** 4.91.0 | about 600 MB | 5 to 8 min | **YES** |
+| WSL Integration | a **UI step**, unscriptable | | 1 min | restarts Docker |
+| Clone with 9 submodules | | about 600 MB | **17.4 s measured** | no |
+| The image, pulled | | about 1.2 GB, 5.57 GB unpacked | not yet measured | no |
+
+**Rough room total: about 2.4 GB per laptop, so five laptops is on the order of
+12 GB.** On a shared uplink that is the binding constraint of the evening,
+which is why the runbook starts downloads at minute zero and staggers the pulls
+in pairs rather than running five at once.
+
+**The two traps, both worth the ink:**
+
+- **Do not install `Microsoft.Git`.** That Id is real, but it is Microsoft's
+  fork build rather than the standard Git for Windows installer.
+- **Do not install WSL from winget.** `Microsoft.WSL` exists (2.7.13), which
+  contradicts the assumption that it does not, but `wsl --install` remains
+  correct because only it enables the Windows optional features (Virtual
+  Machine Platform, WSL) that WSL2 needs. An msix install does not.
+
+Also verified: **`winget` itself is present by default on Windows 11** (this
+machine reports v1.29.290) but on **Windows 10 it arrives via an App Installer
+update** and is commonly missing or stale, so treat it as "verify first" there.
+That matters because the third programmer is on Windows 10. Every step has a
+manual download link for exactly this reason.
+
+**Windows version thresholds, separated because they get conflated:**
+
+| Build | Gates |
+| --- | --- |
+| 19041 | WSL2 itself |
+| **19044** | **WSLg, that is, whether a Linux window can ever appear** |
+| **19045** | what current Docker Desktop requires |
+
+**Disk, re-derived for the pull path:** 5.57 GB image, 0.60 GB clone with
+submodules, 0.003 GB colcon workspace, roughly 4 GB for Docker Desktop plus the
+WSL2 Ubuntu distro. **About 10.2 GB.** The threshold is set at **20 GB**, and
+**30 GB** to build, above the measurement rather than at it, because
+`docker_data.vhdx` grows and never shrinks and Windows 11 Home has no Hyper-V
+to compact it. `setup-windows.ps1` prints both the number it wants and the
+number it found. The build figure is labelled a margin and not a measurement,
+because 21.86 GB of this machine's 29.06 GB of build cache is shared across
+four images and no single image's share is cleanly attributable.
+
+**`setup-windows.ps1` never checked for Git at all**, which was odd for a
+script whose purpose is getting a clone onto a blank machine. It now checks
+Git and `core.autocrlf`, because `true` rewrites this repo's `.sh` files to
+CRLF and every script then fails inside the container with `bad interpreter:
+/usr/bin/env bash^M`.
+
+### 17.5 Gate status on the merge result
+
+| Gate | Result | Numbers |
+| --- | --- | --- |
+| `render_check.sh` | **PASS**, exit 0 | `D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`, `YOUR TIER: A`. Re-run after the tier rewrite |
+| `bringup_smoke_test.sh` | **PASS**, exit 0 | **18 passed, 0 failed.** Robot moved 7.418 m on `/cmd_vel`, heading disagreement **0.13 deg**, distance ratio **0.9989**. Re-run on the final tip |
+| `autonomy_check.sh` | **PASS**, exit 0 | From section 16: 83.0 m driven, max 1.86 m off the centreline, 0.0% over the paint |
+
+**`autonomy_check.sh` was not re-run in this pass, and that is a deliberate,
+checked decision rather than an omission.** `git diff --name-only
+a7cf7b9..HEAD` restricted to the autonomy path returns nothing: no file under
+`src/`, `config/`, `docker/`, the compose files, or `bringup_smoke_test.sh`,
+`autonomy_check.sh`, `sim_preflight.sh`, `start_sim.sh`, `pose_logger.py` or
+`generate_igvc_world.py` changed. The only script edits in this pass are
+`render_check.sh`, `bootstrap.sh` and `setup-windows.ps1`, and neither of the
+last two is in any gate's execution path. `render_check.sh` did change and was
+therefore re-run.
+
+**Additionally, and this is new evidence rather than a re-run:
+`bringup_smoke_test.sh` also passes at 18 of 18 under forced software
+rendering**, which is a strictly harder condition than the gate requires.
+
+### 17.6 Documentation that was wrong before this pass
+
+**C-21. Every USB and offline-transfer instruction is now wrong.** A sweep of
+all 225 tracked files found **56 hits** across 8 files. The instructions are
+removed from `GAZEBO_QUICKSTART.md` (an entire section 5 titled "Making the USB
+drive", plus the recommended fast path, the timing table, the disk budget, the
+sample output and the cheat sheet), `bootstrap.sh`, `setup-windows.ps1` (where
+it was **runtime output**, not a comment), `README.md`, `GAZEBO_TODO.md`,
+`CLAUDE.md` and the regenerated `.docx`. The **measurements** in section 16 of
+this report are left as a historical record, because they were genuinely taken;
+only the instructions are gone.
+
+**C-22. `render_check.sh` reported a working Intel or AMD GPU as `UNKNOWN`.**
+It matched only `nvidia|geforce|rtx`. Any machine rendering in hardware on an
+integrated adapter got `RESULT: UNKNOWN` and an instruction to inspect the log
+by hand, which reads as a broken machine. Given that tier B is a whole class of
+teammate laptop, this would have produced a false failure in the room.
+
+**C-23. `setup-windows.ps1` did not check for Git.** A prerequisite script for
+getting a clone onto a blank machine, with no Git check and no `core.autocrlf`
+check, while CRLF is a documented way to break every script in this repo.
+
+**C-24. The quickstart began several steps after where a blank machine
+actually is.** It assumed Git, Docker Desktop, WSL2 and a configured WSL
+Integration toggle already existed, and opened at "get the repository". On a
+fresh Windows install that is three installs and two reboots too late.
+
+**C-25. The "XQuartz with `DISPLAY` set" advice for macOS was wrong**, and it
+came from this task's own framing as well as general folklore. XQuartz's GLX
+caps near OpenGL 1.4 and gz-sim's `ogre2` needs above 3.3, so it fails with an
+OpenGL error rather than running slowly. Anyone sent down that path would have
+spent the evening on a dead end.
+
+**C-26. "Apple Silicon needs Rosetta" was wrong.** Rosetta is optional and off
+by default in Docker Desktop; the default emulation path is QEMU
+`binfmt_misc`. Related: `--platform linux/amd64` is good practice, not a hard
+requirement.
+
+**C-27. The disk thresholds were derived for the tar path and did not count
+Docker Desktop or the WSL2 distro at all.** 12 GB became 20 GB for the pull
+path, from a re-derivation that includes roughly 4 GB for the tooling a blank
+machine does not have yet.
+
+### 17.7 Clean-clone verification: NOT RUN
+
+**Blocked, and honestly so.** The instruction is to clone the **pushed** `main`
+from GitHub and pull the image as a teammate would. Both halves depend on
+Liam: the push of these commits, and the GHCR package existing and being
+public. Neither had happened when the time ran out, and cloning the local path
+again would verify something different from what was asked and would not
+exercise the registry pull at all.
+
+**What is verified, from section 16:** a clean clone with `--recurse-submodules`
+into an isolated compose project, following only the written quickstart,
+completed at **exit 0 in 201 s**, nine of nine steps, 18 of 18 topic checks,
+with `.sh` line endings confirmed LF and shebangs intact. What that run does
+**not** cover is the two things that changed today: the **GHCR pull** and the
+**tier reporting**.
+
+**The exact sequence to run after the push**, so it is not re-derived:
+
+```bash
+docker logout ghcr.io
+docker manifest inspect ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest   # must succeed anonymously
+cd /mnt/c/temp && rm -rf freshtest && mkdir freshtest && cd freshtest
+time git clone --recurse-submodules https://github.com/wworth-IGVC/IGVC_robot_2027.git clone
+cd clone
+COMPOSE_PROJECT_NAME=freshtest bash scripts/gazebo/bootstrap.sh
+```
+
+**Do not delete the working image to force a cold pull.** Section 16 records
+that a remove-and-reload cost about **14 GB of `docker_data.vhdx`** that
+Windows 11 Home cannot reclaim.
+
+### 17.8 What was not done, and where this stopped
+
+Stated plainly rather than left to be discovered.
+
+- **`docs/DOCKER_CHANGES.md` has no GHCR section.** Section 15.3 still
+  describes the offline path as the primary one. The pull-limit note and the
+  VHDX growth warning are in the quickstart and in this section instead. This
+  is the largest documentation gap from this pass.
+- **`docs/GAZEBO_SETUP.md` was not updated** for the tier matrix or the
+  `render_check.sh` rewrite. Sections 10.7 to 10.10 from the previous pass are
+  still accurate; they simply do not mention tiers.
+- **The clean-clone verification did not run.** 17.7.
+- **The GHCR pull time is not measured**, because the package does not exist
+  yet. 17.1.
+- **`autonomy_check.sh` was not re-run.** Justified by diff in 17.5, not by
+  assumption.
+- **Tier B remains untested**, and no amount of writing fixes that: it needs an
+  Intel or AMD laptop.
+
+The `IN LANE` decision Liam made is carried: **`TOL` was not touched.** It is
+described as a reported number and as provisional, with the reason stated in
+both the quickstart and the runbook: the metric ignores yaw, and the pose log
+it originally read was sampled at 1.92 Hz, which overstated the clearance
+margin by at least 2.4x. No threshold gets tuned until the metric is right.
+
+The `CLAUDE.md` decision is carried too: it stays **excluded and untracked**.
+The distro line was corrected locally and the correction reaches nobody, which
+is recorded as C-19 in section 16. Backlog: scrub the machine-specific paths
+and the false "one ROS graph across two machines" claim before it is ever
+tracked.
+
+### 17.9 The push commands, in order
+
+PowerShell, which is where these get run:
+
+```powershell
+cd "C:\IGVC 2027\IGVC_robot_2027"
+git push origin main
+```
+
+**Do not hand a `/c/...` path to PowerShell.** It resolves it as a relative
+path, tries `C:\c\IGVC 2027\...`, fails, and the `git push` on the next line
+then runs in whatever directory you were already in and reports "not a git
+repository". PowerShell 5.1 has no `&&`, which is why these stay two lines.
+
+Then, and **in this order, because the second is what attendees hit**:
+
+```powershell
+docker login ghcr.io -u CobaltTornado
+docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
+docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+```
+
+then **set the package visibility to Public in the GitHub UI**, then verify as
+an outsider:
+
+```powershell
+docker logout ghcr.io
+docker manifest inspect ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+```
+
+That last command must succeed **with no credentials**. If it returns `denied`,
+the visibility change did not take and every attendee's `docker pull` will fail
+the same way.
