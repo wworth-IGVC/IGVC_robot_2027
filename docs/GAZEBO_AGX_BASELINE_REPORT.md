@@ -1589,7 +1589,7 @@ output or from `docker manifest inspect`.
 
    ```powershell
    cd "C:\IGVC 2027\IGVC_robot_2027"
-   docker login ghcr.io -u CobaltTornado
+   docker login ghcr.io -u wworth-IGVC
    docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
    docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
    ```
@@ -1601,14 +1601,33 @@ output or from `docker manifest inspect`.
    Note the package appears under the **user**, not the repository, until it is
    linked.
 
-**Verification is pending and it is Liam's push that unblocks it.** The plan,
-per the instruction not to test by deleting the working image: `docker logout
-ghcr.io`, then an anonymous `docker manifest inspect`, which needs no
-credentials for a public package and touches no local layers. **The pull time
-on this machine is therefore NOT MEASURED**, and that is a gap, not an
-omission: it could not be measured before the artefact existed. The
-comparable figure that *is* measured is 1.20 GB over the wire against 5.57 GB
-unpacked, from the earlier `docker save` work.
+**DONE and verified 2026-09-17, after this section was first written.** The
+push happened and the package is **public**, confirmed the way that actually
+proves it: `docker logout ghcr.io` followed by an anonymous
+`docker manifest inspect`, which returned the manifest with no credentials and
+touched no local layers. Digest
+`sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31`, and
+the published index carries **amd64 only** plus a buildx attestation entry, so
+macOS and arm64 stay unsupported exactly as documented.
+
+**Three corrections to what this section originally said**, each of which cost
+time on the day:
+
+- **The GHCR account is `wworth-IGVC`**, the charlotte.edu account that owns
+  the repository, not `CobaltTornado`. The package namespace is user-scoped, so
+  **only the namespace owner can push to it.**
+- **GHCR never accepts an account password, only a token.** Trying the account
+  password presents as a credentials problem and is not one.
+- **The repository-scoped package URL 404s.** The working public page is
+  `https://github.com/users/wworth-IGVC/packages/container/package/igvc-gazebo-jazzy`,
+  because the image was pushed from a local Docker rather than from Actions and
+  so is not linked to the repository. **Whether a web page loads is not a test
+  of public visibility**; the anonymous manifest fetch is.
+
+**The pull time on a fresh machine is still NOT MEASURED**, because the package
+existed only minutes before the session. The comparable figure that *is*
+measured is 1.20 GB over the wire against 5.57 GB unpacked, from the earlier
+`docker save` work.
 
 **Why a registry rather than Docker Hub, and worth writing down:** Docker Hub
 rate-limits anonymous pulls **per source IP**, so a room of people behind one
@@ -1739,6 +1758,7 @@ recalled. Two of them are traps.
 | `wsl --update` | | about 130 MB | under 1 min | no |
 | Docker Desktop | **`Docker.DockerDesktop`** 4.91.0 | about 600 MB | 5 to 8 min | **YES** |
 | WSL Integration | a **UI step**, unscriptable | | 1 min | restarts Docker |
+| `setup-windows.ps1` | must be run as `powershell -ExecutionPolicy Bypass -File ...`, because a fresh Windows defaults to **Restricted** | | under 1 min | no |
 | Clone with 9 submodules | | about 600 MB | **17.4 s measured** | no |
 | The image, pulled | | about 1.2 GB, 5.57 GB unpacked | not yet measured | no |
 
@@ -1851,14 +1871,17 @@ Docker Desktop or the WSL2 distro at all.** 12 GB became 20 GB for the pull
 path, from a re-derivation that includes roughly 4 GB for the tooling a blank
 machine does not have yet.
 
-### 17.7 Clean-clone verification: NOT RUN
+### 17.7 Clean-clone verification: NOT RUN, and no longer blocked
 
-**Blocked, and honestly so.** The instruction is to clone the **pushed** `main`
-from GitHub and pull the image as a teammate would. Both halves depend on
-Liam: the push of these commits, and the GHCR package existing and being
-public. Neither had happened when the time ran out, and cloning the local path
-again would verify something different from what was asked and would not
-exercise the registry pull at all.
+**Not run, and now for a different reason than when this was written.** Both
+blockers have since cleared: `main` is pushed and the GHCR package is public
+and anonymously pullable. What remains is simply that there was no time left
+before the session to run it, and it must not be faked: cloning the local path
+would verify something different from what was asked and would not exercise
+the registry pull at all.
+
+**So this is the first thing to do after the session**, not a permanent gap.
+The sequence is below and it needs nothing from anyone else.
 
 **What is verified, from section 16:** a clean clone with `--recurse-submodules`
 into an isolated compose project, following only the written quickstart,
@@ -1930,7 +1953,7 @@ repository". PowerShell 5.1 has no `&&`, which is why these stay two lines.
 Then, and **in this order, because the second is what attendees hit**:
 
 ```powershell
-docker login ghcr.io -u CobaltTornado
+docker login ghcr.io -u wworth-IGVC
 docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
 docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
 ```
