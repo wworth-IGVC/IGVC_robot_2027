@@ -798,7 +798,7 @@ descendant: `main..MDC` is 61 commits ending 2026-06-01, and `main` is 22 ahead.
 | collision_monitor StopZone | `enabled: true` | **`enabled: false`** | **Yes**, MDC's hard stop is off |
 | Navigator | lane follow | + `/mission/state` yield gate, + **stuck-reverse recovery**, + path hysteresis, + heading limit | **Yes**, a Phase 1 run would reverse and can idle waiting on a node we do not launch |
 | Navigator staleness gates | 5.0 / 5.0 / 0.6 / 0.25 | **2.0 / 0.8 / 2.0 / 0.4** | **Yes**, tighter gates will abort on a slow sim |
-| **`wheel_radius`** | **0.2032** (flagged wrong) | **0.1016** | **RQ-02 is effectively answered on MDC** |
+| **`wheel_radius`** | **0.2032** (flagged wrong) | **0.1016** | **P2-14, the wheel radius item, may already be answered on MDC.** Not RQ-02, which is GPU rendering and is unrelated |
 | `sim:=true` argument | present, selects primitive colliders | **removed**; mesh colliders unconditional | **Yes, MDC segfaults dartsim** |
 | Mesh paths | `package://...` | **`file:///home/nitin-5090/...`** | **Yes, the description loads nowhere** |
 | Sensor poses | lidar `0.225 0 0.46`, ZED yaw +/-95 deg | lidar **`0.345 0 0.52`**, ZED yaw **+/-45 deg**, **4th rear camera** | **Yes** |
@@ -882,6 +882,242 @@ status still need updating, and I have deliberately not done it** until the
 branch question in §13 is resolved, because the right destination depends on the
 answer. That is the one deliverable from your list I am holding back, and it is
 one edit either way.
+
+---
+
+## 13A. Corrections to Phase 1
+
+Raised on review, 2026-09-17. Two overturned my numbers, one found real
+duplication, one was a mislabel.
+
+**D-1. The clearance metric ignored yaw, and yaw eats two thirds of the margin.
+Confirmed and corrected.** A fixed half-width is the robot's lateral extent only
+when it is aligned with the lane. Skewed, a corner leads, and the reach
+perpendicular to the lane is `(W/2)|cos t| + (L/2)|sin t|`. Taking the length
+from the URDF bounding box rather than the design report, the chassis is
+**0.810 x 0.970 m**, so the reach runs from 0.405 m aligned to
+`hypot(0.405, 0.485) = 0.632 m` at the worst angle, 50.1 degrees.
+
+This is not a hypothetical. Measured across a full run the robot sits at a
+**mean 20.7 degrees** to the lane and peaks at **65.3 degrees**, because the
+navigator is continuously re-aiming. Recomputed with the rotated footprint, on
+three fresh runs:
+
+| Run | Max centreline deviation | Worst clearance, chassis | Worst clearance, Nav2 | Over the line |
+| --- | --- | --- | --- | --- |
+| 4 | 2.04 m | **+0.093 m** | +0.135 m | 0.0% |
+| 5 | 1.95 m | **+0.087 m** | +0.127 m | 0.0% |
+| 6 | 1.98 m | **+0.078 m** | +0.119 m | 0.0% |
+
+So the conclusion survives, and I will say it plainly: **the robot never put a
+corner over the paint in any run.** But the margin is **8 to 9 cm**, not the
+25 cm I reported yesterday. That is a much less comfortable number and it is the
+right one.
+
+**D-2. 1.92 Hz was too slow, and the error was 2.4x.** Raised to 10 Hz
+(`POSE_HZ`), achieving about 15 Hz in practice. Re-scoring one 831-sample run at
+decreasing rates isolates the effect:
+
+| Effective rate | Worst clearance | Max centreline deviation |
+| --- | --- | --- |
+| 15.8 Hz | **+0.093 m** | 2.04 m |
+| 7.9 Hz | +0.116 m | 2.04 m |
+| 4.0 Hz | +0.153 m | 2.04 m |
+| 2.0 Hz | **+0.227 m** | 2.04 m |
+
+The two quantities behave differently, which is itself the finding: **the worst
+clearance is a brief event and the worst deviation is not**, so the old rate
+overstated the margin by 2.4x while leaving the deviation untouched. Note the
+downsampling is a weaker test than a genuine low-rate run, because it starts
+from a dense log and can retain the peak sample; treat 2.4x as a lower bound on
+the error.
+
+**D-3. A regression baseline that is now visibly a coin flip, and I am not
+touching it.** At honest sampling the `IN LANE` gate produced **2.04 (FAIL),
+1.95 (PASS), 1.98 (PASS)** against its flat 2.00 m tolerance. Earlier runs at
+2 Hz reported 1.53, 1.54 and 1.93. One run in three now fails.
+
+The behaviour did not regress: 47 to 51 m driven under its own control every
+time, on the slab throughout, and 0.0% of samples over the paint in all three.
+What changed is that the measurement got honest. **The gate is measuring the
+wrong quantity** (a constant tolerance against a lane whose width varies by a
+factor of two) and it sits right on its own threshold. Per instruction I have
+**not** changed the criterion, and I have not raised `TOL` to make it green,
+which would be the wrong fix twice over. **This needs your decision**, and it is
+the one thing currently making `autonomy_check.sh` unreliable as a regression
+gate.
+
+**D-4. The width profile is now imported, not copied.** `constants.py` in the
+track-generator submodule is a pure constants module with no imports or side
+effects, so `generate_igvc_world.py` imports it directly and a missing submodule
+is a hard error rather than a guessed fallback. Verified: the imported values
+regenerate a **byte-identical** world, so the hand-mirrored numbers were right
+and nothing about the course changes. No consistency check is needed because
+there is no longer a second definition.
+
+**D-5. The "RQ-02" label in §11 was wrong.** RQ-02 is GPU rendering. The wheel
+radius item is **P2-14**. Fixed in place.
+
+**D-6. The sub-10-ft corridor is definitional, not systematic.** `track.png`'s
+narrowest corridor is 0.282 m under the ten-foot minimum, and that is exactly
+two painted line widths: the 10-to-20 ft range is the **outer** track width
+including the paint, so the drivable corridor between inner edges is that minus
+`2 x 5 px = 0.2822 m`. `int(10 * 10.8)` is 108 exactly, so truncation
+contributes **nothing** at the minimum. The residual 0.023 m between nominal
+(2.766 m) and measured (2.743 m) is sub-pixel rasterisation of a stamped disc.
+
+---
+
+## 13B. The three P0 items
+
+### P0-1: cross-container DDS, a partial pass with an open defect
+
+The scope narrowed first: `lane_detection` (Hough) needs no torch and already
+runs inside the Gazebo image, so only `lane_segmentation_node` (YOLOPv2) needs
+the Humble container. The gate was run on the topics that node consumes,
+counting messages in both containers **simultaneously** for 30 s.
+
+| Topic | Jazzy (same container as the sim) | Humble (across the boundary) |
+| --- | --- | --- |
+| rgb image | 354 | 356 |
+| depth | 353 | 355 |
+| camera_info | 357 | 357 |
+| zed odom | 691 | 691 |
+| /odom | 691 | 691 |
+| /clock | 17188 | 17011 |
+| /tf | 1161 | 1159 |
+
+Within 1%, comfortably inside the 10% criterion. Payloads are right too:
+691200 B = 640x360x3 for RGB, 921600 B = 640x360x4 for 32FC1 depth, and
+`/tf_static` delivers its one latched message with 24 transforms once the
+subscriber uses `TRANSIENT_LOCAL` (my first probe used sensor-data QoS and read
+zero, which was my bug, not a finding).
+
+**THE OPEN DEFECT.** The Humble container printed, verbatim and exactly three
+times per process:
+
+```text
+sequence size exceeds remaining buffer
+```
+
+What I established before stopping:
+
+- It is **not topic-specific**. It appears three times whichever single topic is
+  subscribed: rgb, depth, camera_info, odom, clock, tf and tf_static each gave
+  the same three lines.
+- It is **not data-related**. A Humble node subscribing to **nothing at all**,
+  with the Jazzy graph up, still prints all three.
+- It is **directional**. A Jazzy node subscribing to nothing prints **none**.
+- Every payload that arrives is intact and the counts match.
+
+So the working hypothesis is a **discovery-phase** parse failure: Humble's Fast
+DDS cannot read something Jazzy's participants advertise. **That is a
+hypothesis, not a conclusion.** I did not capture the failing packet, did not
+identify the field, and did not rule out that some low-rate message is being
+dropped silently in a way 30 s of counting would not reveal.
+
+**This gate is a partial pass, not a pass.** Message counts staying intact while
+a deserializer complains is precisely the silent-partial-failure class that has
+bitten this project twice. It should be closed properly before YOLOPv2 results
+from the Humble container are trusted.
+
+### P0-3: point-cloud orientation, answered, and it is the bad answer
+
+The cloud is emitted in the **body** convention (x forward) and stamped with the
+**optical** frame. `gz_frame_id` sets a header string; it does not rotate data.
+
+| Run | Normal axis | Offset on that axis | Angle to +Z | Inliers |
+| --- | --- | --- | --- | --- |
+| Through the cloud's own stamped frame | **X** | **-0.0994 m** | **89.78 deg** | 100% |
+| Forced through the body frame (control) | **Z** | **-0.2311 m** | **0.39 deg** | 100% |
+
+Predicted beforehand from the URDF geometry: **-0.096 m** and **-0.229 m**.
+Measured: -0.0994 and -0.2311. **Agreement to 3.4 mm and 2.1 mm.** That is the
+part worth keeping: the model of the bug predicted the numbers before the
+measurement, so the fix is a known quantity rather than a guess.
+
+The extents make it plain. Through the stamped frame the whole cloud collapses
+into a 12 cm slab, x from -0.22 to -0.10, which is the floor stood on its end.
+Through the body frame it is a ground plane running x from 1.14 to 16.22 m at
+z = -0.23.
+
+**Infinity filtering: the cleanup landed, and the numbers above are POST
+cleanup.** The first run reported extents of `inf` and `nan` and only 45%
+inliers, because `skip_nans` does not drop infinities and the bridge passes
+exact ray-cast range with `+inf` past the far clip. After filtering explicitly,
+127022 of 230400 points are dropped as non-finite, 103378 remain, and both fits
+reach 100% inliers. The verdict was the same before and after; the numbers are
+only trustworthy after.
+
+The check is committed as `scripts/gazebo/cloud_frame_check.py` and it names
+which of four mistakes was made rather than just failing.
+
+### P0-3 consequence, which the next session must not miss
+
+`nav2_lane_follow_config.yaml:251-258` lists `obstacle_layer` **enabled**, with
+`observation_sources: "front_pointcloud left_pointcloud right_pointcloud
+lidar_scan"`, in both costmaps. But `gazebo_nav_test_nav2_overrides.yaml:36-44`
+replaces `plugins` with `["lane_layer", "inflation_layer"]` in both costmaps,
+which stops `obstacle_layer` being instantiated at all.
+
+**So the answer is the second one: the clouds never reach `obstacle_layer`, and
+`autonomy_check.sh` has been passing with no live obstacle evidence whatsoever.**
+Every obstacle the robot has ever avoided came from `track_points.json` through
+`gt_nav_bridge_node`, which `GAZEBO_SETUP.md` 10.3 already says plainly.
+
+The consequence for the next session is the dangerous half: **fixing the cloud
+frame and re-enabling `obstacle_layer` connects a consumer that has never been
+connected.** That is not a bug fix, it is a new system under test. Expect
+autonomy behaviour to change, re-baseline all three gates afterwards, and do not
+attribute the change to the frame fix alone.
+
+### P0-4: sim-side lane evaluator, built and run, first numbers in hand
+
+`scripts/gazebo/lane_eval_sim.py` scores a detector against the lane **lines**
+generated from the same `track_points.json` and the same width profile the world
+is painted from, so reference and stimulus are the same geometry by
+construction. It reports cell IoU plus two distance-tolerant scores at a stated
+tolerance, because a painted line is under one cell wide and IoU swings on a
+one-cell offset.
+
+Measured, robot driving itself for 100 s, front camera only, tolerance 0.25 m:
+
+| | `lane_detection` (Hough), own grid | control: the ground-truth bridge's grid |
+| --- | --- | --- |
+| grid | 320x320 @ 0.125 m | 800x800 @ 0.100 m |
+| occupied cells | 328 | 2946 |
+| cell IoU | 0.0434 | 0.2314 |
+| hit rate @ 0.25 m | **0.491** | 0.676 |
+| coverage, whole window | 0.115 | 0.996 |
+| coverage, observed region | **0.464** | 0.996 |
+| predicted to paint, median | 0.255 m | 0.096 m |
+
+**These are the first non-zero lane metrics this project has produced.** For
+scale, design report figure 7 reported IoU 0.083 with 96.8% of frames dropped,
+and it was measuring a units mismatch.
+
+Read them against the control, not against 1.0. The control is a grid derived
+from the same JSON as the reference, and it still only reaches a hit rate of
+0.676, because `gt_nav_bridge_node` stamps a lethal rim near but not exactly on
+the painted line. **0.676 is the practical ceiling of this metric, so the Hough
+detector's 0.491 is about 73% of achievable.** Coverage over the whole window
+(0.115) is unfair to a camera that only observed 636 cells in one lap; restricted
+to reference paint within 1.5 m of an observed cell it is **0.464**.
+
+**A measurement error I made and caught.** The first run scored 0.2314 IoU and
+0.996 coverage and I nearly reported it as the detector's. It was not.
+`lane_detection.py` hardcodes `/lane_map`, and `gazebo_nav_test.launch.py` also
+starts `gt_nav_bridge_node`, which publishes the same name. The grid I scored was
+800x800 at 0.100 m, which is the ground-truth bridge's geometry, not
+`lane_detection`'s 320x320 at 0.125 m from its own config. **I was scoring the
+ground truth against itself.** Caught by checking the grid geometry against the
+config rather than trusting the topic name. The rerun remaps to
+`/hough/lane_map`.
+
+**Not done:** `lane_segmentation` (YOLOPv2) is unscored. It needs weights that
+are not on disk (`models/` does not exist; `fetch_yolopv2_weights.sh` downloads
+them and verifies no checksum) and it must run in the Humble container, which
+depends on P0-1 being closed properly.
 
 ---
 
