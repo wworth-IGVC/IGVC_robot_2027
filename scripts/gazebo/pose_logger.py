@@ -31,9 +31,10 @@ still takes one `gz model -p` reading at the end for that.
 Usage:
     pose_logger.py OUT_FILE DURATION_S SPAWN_X SPAWN_Y [RATE_HZ]
 
-Each line: world_x world_y sim_time
+Each line: world_x world_y sim_time yaw_rad
 """
 
+import math
 import sys
 import time
 
@@ -86,7 +87,18 @@ def main():
             p = node.last.pose.pose.position
             t = (node.last.header.stamp.sec
                  + node.last.header.stamp.nanosec * 1e-9)
-            fh.write('%.6f %.6f %.3f\n' % (p.x + sx, p.y + sy, t))
+            # Yaw is a fourth column, appended so older logs still parse.
+            # It is needed because the robot's lateral extent depends on its
+            # heading relative to the lane: a 0.81 x 0.97 m chassis reaches
+            # 0.405 m sideways when aligned and up to 0.632 m when skewed, so
+            # a fixed half-width understates how close it came to the paint.
+            # gazebo_odom_shim has already rotated /odom into world axes, so
+            # this yaw is a world heading and needs no spawn offset, unlike
+            # the position above.
+            q = node.last.pose.pose.orientation
+            yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                             1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+            fh.write('%.6f %.6f %.3f %.6f\n' % (p.x + sx, p.y + sy, t, yaw))
             fh.flush()
             written += 1
 

@@ -80,7 +80,7 @@ p = json.load(open('$TRACK', encoding='utf-8'))['robot_start_pose']['position_m'
 print('%.6f %.6f' % (p['x'], p['y']))
 ")
 echo "watching for ${DURATION}s..."
-python3 "$(dirname "$0")/pose_logger.py" /tmp/track_log.txt "$DURATION" $SPAWN 2.0
+python3 "$(dirname "$0")/pose_logger.py" /tmp/track_log.txt "$DURATION" $SPAWN "${POSE_HZ:-10.0}"
 
 # One ground-truth reading, for the one thing odometry cannot tell us: whether
 # the robot is still on the ground slab. Wheels spinning in mid-air produce
@@ -120,7 +120,11 @@ for line in open(log_file):
     except ValueError:
         continue
     if len(nums) >= 3:
-        pts.append((nums[0], nums[1], nums[2]))
+        # 4th column is yaw, added 2026-09-17. Older logs have three columns
+        # and still parse; the clearance metric reports itself unavailable
+        # rather than silently assuming the robot was aligned with the lane.
+        pts.append((nums[0], nums[1], nums[2],
+                    nums[3] if len(nums) >= 4 else None))
 
 if len(pts) < 5:
     print('  FAIL: only %d usable pose samples' % len(pts))
@@ -168,12 +172,34 @@ except Exception as exc:      # noqa: BLE001 - reported, never fatal
     HAVE_WIDTH = False
     WIDTH_ERR = str(exc)
 
-# Two half-widths, because the repo disagrees with itself about how wide the
-# robot is. 0.405 m is the chassis collision mesh (the widest part of the
-# robot, wider than the wheels); 0.350 m is what Nav2's footprint parameter
-# says. Reporting both makes the disagreement visible instead of picking one.
-ROBOT_HALF_TRUE = 0.405
-ROBOT_HALF_NAV2 = 0.350
+# Two footprints, because the repo disagrees with itself about the robot's
+# size. The chassis collision mesh measures 0.810 x 0.970 m and is the widest
+# part of the robot, wider than the wheels; Nav2's footprint parameter says
+# 0.700 x 1.000 m. Reporting both keeps the disagreement visible.
+ROBOT_HALF_TRUE, ROBOT_LEN_HALF_TRUE = 0.405, 0.485
+ROBOT_HALF_NAV2, ROBOT_LEN_HALF_NAV2 = 0.350, 0.500
+
+
+def lateral_reach(half_w, half_l, rel_yaw):
+    """How far the footprint reaches sideways at rel_yaw to the lane.
+
+    A fixed half-width is the robot's lateral extent only when it is aligned
+    with the lane. Skewed, a corner leads: the rectangle's reach perpendicular
+    to the lane is (W/2)|cos t| + (L/2)|sin t|, peaking at hypot(W/2, L/2).
+
+    For the true chassis that is 0.405 m aligned and 0.632 m at the worst
+    angle, so ignoring yaw understates the reach by up to 0.227 m. That is
+    most of the clearance margin, which is why this is not a refinement.
+    """
+    return abs(half_w * math.cos(rel_yaw)) + abs(half_l * math.sin(rel_yaw))
+
+
+def lane_tangent(i):
+    """Heading of the lane at centreline index i."""
+    n = len(centre)
+    ax, ay = centre[(i - 2) % n]
+    bx, by = centre[(i + 2) % n]
+    return math.atan2(by - ay, bx - ax)
 
 
 path_len = sum(math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
@@ -188,11 +214,22 @@ devs = [d for d, _ in dev_idx]
 # half-width). Negative means the chassis edge crossed the inner edge of the
 # paint.
 clear_true = clear_nav2 = None
-if HAVE_WIDTH:
+yaw_missing = any(p[3] is None for p in pts)
+if HAVE_WIDTH and not yaw_missing:
     n_c = len(centre)
-    halves = [track_inner_edge_m(i / float(n_c)) for _, i in dev_idx]
-    clear_true = [h - (d + ROBOT_HALF_TRUE) for h, (d, _) in zip(halves, dev_idx)]
-    clear_nav2 = [h - (d + ROBOT_HALF_NAV2) for h, (d, _) in zip(halves, dev_idx)]
+    clear_true, clear_nav2, rel_yaws = [], [], []
+    for (d, i), p in zip(dev_idx, pts):
+        h = track_inner_edge_m(i / float(n_c))
+        # Wrap to [-pi, pi]; the robot may be driving the lane either way, and
+        # a rectangle is symmetric, so only the acute angle to the lane axis
+        # matters.
+        t = math.atan2(math.sin(p[3] - lane_tangent(i)),
+                       math.cos(p[3] - lane_tangent(i)))
+        rel_yaws.append(abs(math.degrees(t)))
+        clear_true.append(h - (d + lateral_reach(
+            ROBOT_HALF_TRUE, ROBOT_LEN_HALF_TRUE, t)))
+        clear_nav2.append(h - (d + lateral_reach(
+            ROBOT_HALF_NAV2, ROBOT_LEN_HALF_NAV2, t)))
 # Odometry cannot see the robot fall off the slab - free-spinning wheels read
 # the same as driving - so the height comes from one gz ground-truth reading.
 worst_z = abs(final_z - 0.2311)
@@ -212,12 +249,20 @@ print('  sim time covered     : %.1f s' % elapsed)
 if clear_true is not None:
     worst_t, worst_n = min(clear_true), min(clear_nav2)
     over_t = 100.0 * sum(1 for c in clear_true if c < 0) / len(clear_true)
-    print('  lane clearance       : worst %+.3f m at the 0.405 m chassis '
-          'half-width, %+.3f m at Nav2\'s 0.350 m' % (worst_t, worst_n))
-    print('                         (negative = chassis edge past the paint; '
-          '%.0f%% of samples over the line)' % over_t)
-    print('                         REPORTED, not a pass criterion. '
-          'Measured against the local painted half-width, not a constant.')
+    hz = (len(pts) - 1) / elapsed if elapsed > 0 else 0.0
+    print('  sample rate          : %.1f Hz (%d samples over %.1f s of sim time)'
+          % (hz, len(pts), elapsed))
+    print('  yaw to lane          : mean %.1f deg, max %.1f deg'
+          % (sum(rel_yaws) / len(rel_yaws), max(rel_yaws)))
+    print('  lane clearance       : worst %+.3f m (chassis 0.810 x 0.970 m), '
+          '%+.3f m (Nav2 0.700 x 1.000 m)' % (worst_t, worst_n))
+    print('                         (negative = footprint corner past the '
+          'paint; %.1f%% of samples over the line)' % over_t)
+    print('                         Rotated footprint against the LOCAL '
+          'painted half-width. REPORTED, not a pass criterion.')
+elif yaw_missing:
+    print('  lane clearance       : NOT MEASURED (pose log has no yaw column; '
+          'rerun with the current pose_logger.py)')
 else:
     print('  lane clearance       : NOT MEASURED (%s)' % WIDTH_ERR)
 print()
