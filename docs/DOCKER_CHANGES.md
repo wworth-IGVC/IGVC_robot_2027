@@ -1747,10 +1747,13 @@ on-disk size. If a teammate says the image is 1.2 GB and you say 5.57 GB, you
 are both right and you are looking at different moments. Plan disk against
 **5.57 GB**.
 
-### 15.3 The offline path, measured
+### 15.3 The offline path, measured. SUPERSEDED by section 16.
 
-Liam carries the image on a USB drive so nobody pulls or builds over campus
-wifi. Produced with:
+**The image now comes from GHCR, see section 16.** This section is kept as a
+record of what the offline path cost, not as an instruction. Nobody should be
+carrying the image on a drive.
+
+Produced with:
 
 ```bash
 docker save igvc-gazebo-jazzy:latest -o igvc-gazebo-jazzy.tar
@@ -1887,3 +1890,129 @@ Against the list in section 8:
   is now 12 GB for the offline path, derived in the quickstart, and prints
   both the number it wants and the number it found.
 - **Items 1 to 6 and 9 to 20** are unchanged by this session.
+
+---
+
+## 16. The Gazebo image is published to GHCR
+
+**Published 2026-09-17**, replacing the USB drive described in section 15.3.
+Section 15.3's measurements stand as a record of what the offline path cost;
+it is no longer the way anyone gets the image.
+
+### 16.1 What is published
+
+| | |
+| --- | --- |
+| Registry | **GitHub Container Registry**, `ghcr.io` |
+| Tags | `ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest` and `:2026-09-17` |
+| Digest | `sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31` |
+| Visibility | **Public**, verified anonymously |
+| Architectures | **amd64 only**, plus a buildx attestation entry |
+| Size | about 1.2 GB over the wire, 5.57 GB unpacked |
+
+**amd64 only is deliberate and it is why macOS and arm64 remain unsupported**,
+exactly as `GAZEBO_QUICKSTART.md` section 5 describes. A multi-arch build is a
+backlog item, not a gap.
+
+**The package is user-scoped, owned by `wworth-IGVC`**, the charlotte.edu
+account that owns the repository. The namespace is the owner, so **only the
+namespace owner can push to it**. Pushing as any other account fails, which
+cost time on the day.
+
+### 16.2 The two URLs, one of which does not work
+
+The **public package page** is:
+
+```text
+https://github.com/users/wworth-IGVC/packages/container/package/igvc-gazebo-jazzy
+```
+
+The **repository-scoped URL 404s**:
+
+```text
+github.com/wworth-IGVC/IGVC_robot_2027/pkgs/container/igvc-gazebo-jazzy
+```
+
+**Why:** the image was pushed from a local Docker install rather than from a
+GitHub Actions workflow, so GitHub has no link between the package and the
+repository. A package only appears under the repository once it is linked.
+
+**And the important consequence: a web page loading or not loading is NOT a
+test of public visibility.** The real test is an anonymous manifest fetch:
+
+```powershell
+docker logout ghcr.io
+docker manifest inspect ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+```
+
+That must return the manifest with **no credentials**. It did. If it returns
+`denied`, the package is still private and every attendee's `docker pull` will
+fail the same way, whatever the web page shows.
+
+### 16.3 Pushing it again, when the image changes
+
+```powershell
+docker login ghcr.io -u wworth-IGVC
+docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
+docker push ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+```
+
+Three things that each wasted time on the day:
+
+- **The username is `wworth-IGVC`**, the namespace owner, not a personal
+  account that merely has push rights to the repository.
+- **Paste a classic PAT at the `Password:` prompt.** **GHCR never accepts an
+  account password, only a token.** Trying the account password looks like a
+  credentials problem and is not one.
+- **It must be a classic token with `write:packages`.** GitHub's documentation
+  states that Packages only supports authentication with a personal access
+  token (classic), and the fine-grained permissions reference has no Packages
+  permission at all.
+- Avoid the `$env:CR_PAT = Read-Host ... | ConvertFrom-SecureString
+  -AsPlainText` recipe that circulates for this. **`-AsPlainText` needs
+  PowerShell 7** and Windows ships 5.1, so it fails with a parameter error.
+  The plain interactive `docker login` above works everywhere.
+
+### 16.4 A pre-publication audit, because a public package is public
+
+Run before the push, in a container started with **no volume mounts** so the
+bind-mounted repository could not pollute the result. Ten checks over the
+layer history and the image filesystem: secret build arguments and private
+base images, the full `docker history`, credential-shaped files across the
+whole filesystem, the usual secret directories, shell history and build
+leftovers, ZED SDK or Stereolabs content, token and private-key patterns,
+authenticated apt repositories, and project source.
+
+**All clean.** The full table is in
+`GAZEBO_AGX_BASELINE_REPORT.md` section 17.1. The single most useful finding:
+**the image contains no project code at all**, because the repository is
+bind-mounted at runtime, so the published artefact is ROS 2 Jazzy plus Gazebo
+Harmonic plus Nav2 and nothing of ours. The only `.pem` files are the CA roots
+in `/etc/ssl/certs`, which belong there.
+
+### 16.5 Why a registry rather than Docker Hub, and rather than a drive
+
+**Docker Hub rate-limits anonymous pulls per source IP.** A room of people
+behind one NAT shares a single allowance, so a group setup session is exactly
+the case that trips it. GHCR does not limit anonymous pulls of a public
+package the same way. That justifies the move independently of the USB
+question.
+
+Against the USB drive: one file on one drive is a single point of failure that
+has to be physically passed around, and it cannot be updated after the fact.
+
+### 16.6 Outstanding, from this change
+
+- **Add `LABEL org.opencontainers.image.source` to
+  `docker/Dockerfile.gazebo-jazzy`.** That is what links a package to its
+  repository, which would make the repository-scoped package URL in 16.2
+  resolve, put the package on the repository's own Packages tab, and let the
+  package inherit repository permissions instead of needing per-package
+  settings. Small, and it belongs with the next image change rather than as a
+  rebuild of its own.
+- **The pull time on a fresh machine is not measured.** The package existed
+  only minutes before the session, and the measured comparison that does exist
+  is 1.20 GB over the wire against 5.57 GB unpacked, from section 15.3.
+- **Publishing from Actions rather than a local Docker** would link the
+  package automatically and remove the "only the namespace owner can push"
+  constraint in 16.3. Not started.
