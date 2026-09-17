@@ -186,7 +186,13 @@ git config --global core.autocrlf input
 clone is safe either way. Setting this makes it safe even if something else on
 your machine has opinions.
 
-**Verify:**
+**>>> Open a NEW PowerShell window before the next step. <<<** After a
+`winget` install, the new program is not on the PATH of the session that
+installed it, so `git --version` in the same window says "not recognized" even
+though the install succeeded. That is not a failed install, it is a stale
+PATH.
+
+**Verify, in the new window:**
 
 ```powershell
 git --version
@@ -296,14 +302,55 @@ Both must print `Hello from Docker!`. If the WSL2 one says
 `docker: command not found` or `cannot connect`, WSL Integration is off. Go
 back to step 5.
 
-### 2.4 Anything else?
+### 2.4 Check it all at once, and mind the execution policy
+
+One script checks every prerequisite above and tells you what is wrong in
+plain language. **Invoke it exactly like this:**
+
+```powershell
+cd "C:\IGVC 2027\IGVC_robot_2027"
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+```
+
+**Do not run `.\scripts\setup-windows.ps1` directly.** On a fresh Windows 10
+or 11 install the default execution policy is **Restricted**, so a plain
+invocation refuses to run and prints this:
+
+```text
+.\scripts\setup-windows.ps1 : File C:\...\setup-windows.ps1 cannot be loaded
+because running scripts is disabled on this system. For more information, see
+about_Execution_Policies at https:/go.microsoft.com/fwlink/?LinkID=135170.
+    + CategoryInfo          : SecurityError: (:) [], PSSecurityException
+    + FullyQualifiedErrorId : UnauthorizedAccess
+```
+
+**That is not a broken script and it is not a permissions problem with your
+account.** The `-ExecutionPolicy Bypass -File` form above **needs no
+administrator rights** and changes no machine setting; it applies to that one
+invocation only. Prefer it over `Set-ExecutionPolicy`, which changes the
+policy persistently.
+
+It checks the Windows build against all three thresholds, WSL2, Git and
+`core.autocrlf`, Docker, GPU passthrough, free disk (printing both the number
+it wants and the number it found) and whether your submodules are populated.
+Expect it to end with:
+
+```text
+  All required checks passed.
+  Prerequisites are in place. Nothing was built.
+```
+
+It builds nothing and starts nothing. `-CheckOnly` makes no difference, since
+it never changes anything anyway.
+
+### 2.5 Anything else?
 
 **Nothing.** You do not need Python, `make`, a compiler or an editor on
 Windows. ROS 2, Gazebo, `colcon` and `python3` all live **inside the
 container**, and `git`, `bash` and `df` come with WSL2 Ubuntu. If a document
 tells you to install Python for this path, it is out of date.
 
-### 2.5 Time and bandwidth, measured
+### 2.6 Time and bandwidth, measured
 
 | Step | Download | Time on this machine |
 | --- | --- | --- |
@@ -400,6 +447,34 @@ The image comes from **GitHub Container Registry**. It is a public package, so
 **no `docker login` is needed**: about 1.2 GB over the wire, unpacking to
 5.57 GB on disk.
 
+```text
+ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest
+ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17
+digest sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31
+```
+
+**Which of the two image paths is verified:** the **pull is the primary path
+and it is verified**, confirmed anonymously with `docker manifest inspect`
+after `docker logout`, so it needs no credentials. The
+**build-from-Dockerfile fallback below is kept but has not been verified end
+to end in this configuration**; treat it as a fallback rather than an equal
+option.
+
+The published index carries **amd64 only**, plus a buildx attestation entry.
+That is why macOS and arm64 remain unsupported, exactly as section 5
+describes.
+
+The public package page, if you want to look at it in a browser, is
+
+`https://github.com/users/wworth-IGVC/packages/container/package/igvc-gazebo-jazzy`
+
+Note that the repository-scoped URL
+(`github.com/wworth-IGVC/IGVC_robot_2027/pkgs/container/...`) **404s**, because
+the package was pushed from a local Docker rather than from Actions and is
+therefore not linked to the repository. **The real proof that the package is
+public is an anonymous `docker manifest inspect` after `docker logout`, not
+whether a web page loads.**
+
 | Variable | Effect |
 | --- | --- |
 | `BUILD_IMAGE=1` | build from the Dockerfile instead of pulling. The fallback for when GHCR is unreachable. 10 to 20 minutes instead of a few |
@@ -474,6 +549,18 @@ Note the compose file: **`docker-compose.windows.yml`**, not the plain
 **Four packages, not three**, and the fourth is the one people leave out:
 `zed_description` is a submodule that `igvc_test_description` depends on, and
 omitting it fails the build.
+
+**Get your `ROS_DOMAIN_ID` before you start, not after.** Everyone defaults to
+**0**, and ROS 2 discovery crosses the local network, so two people running
+simulators on the same wifi **will see each other's robots**: both publish
+`/clock`, `/odom` and `/tf` for the same robot, time and pose jump between
+them, and Nav2 plans against a robot that teleports. It looks exactly like a
+navigation bug. **Domain IDs are handed out per person at the start of a
+session**, so ask for yours then rather than debugging it later:
+
+```bash
+export ROS_DOMAIN_ID=<your number>     # in every shell, before anything else
+```
 
 **Do not use `docker compose run`.** It creates a *new* container with a random
 name every time, so a second `run` gives you a second, separate simulator
@@ -929,13 +1016,16 @@ native Linux.
 ```bash
 # PowerShell, as Administrator, on a blank machine
 winget install --id Git.Git --exact --source winget --accept-source-agreements
+# then OPEN A NEW WINDOW, or git is not yet on this session's PATH
 git config --global core.autocrlf input
 wsl --install                 # THEN REBOOT
 wsl --update
 winget install --id Docker.DockerDesktop --exact --source winget   # THEN REBOOT
 # then: Docker Desktop > Settings > Resources > WSL Integration > your distro > Apply & Restart
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1   # check everything
 
 # WSL2 Ubuntu shell, from here on
+export ROS_DOMAIN_ID=<your number>              # ask for yours, do not leave it at 0
 git clone --recurse-submodules https://github.com/wworth-IGVC/IGVC_robot_2027.git
 cd IGVC_robot_2027
 bash scripts/gazebo/bootstrap.sh                # zero to verified, prints your tier
