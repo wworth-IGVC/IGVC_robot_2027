@@ -1,4 +1,4 @@
-# Gazebo against the 2026 robot as designed — AGX Orin baseline
+# Gazebo against the 2026 robot as designed, AGX Orin baseline
 
 **Phase 0 only. Written 2026-09-17. Awaiting approval before any Phase 1 work.**
 
@@ -17,18 +17,18 @@ overturned four load-bearing beliefs. Each one would have cost a session.
 
 1. **"Four FollowPath aborts in 143 s" is a misread instrument.** The number
    comes from `/navigator/status`, which prints `aborts={self._consecutive_aborts}`
-   (`navigator.py:1702`). That counter is `min(x + 1, 4)` — it **saturates at 4**
+   (`navigator.py:1702`). That counter is `min(x + 1, 4)`, it **saturates at 4**
    (`navigator.py:1595`, `:1644`, `:1684`) and **resets to 0 on success**
    (`:1675`). It also counts goal *rejections*, and explicitly does **not**
    count `STATUS_CANCELED` ("expected when we replan"). So `aborts=4` means "at
    least four consecutive failures at the instant it was sampled". The true
    total is unknown. My run today printed `aborts=1`. Nothing in
-   `autonomy_check.sh` counts aborts at all — it echoes that string once
+   `autonomy_check.sh` counts aborts at all, it echoes that string once
    (`:99-100`).
 
 2. **The robot's camera and its planner are looking at two different courses.**
    `generate_igvc_world.py:137-138` paints a **constant 12 ft (3.658 m)** lane
-   into `igvc_course.sdf`. Nav2's corridor does not come from that file at all —
+   into `igvc_course.sdf`. Nav2's corridor does not come from that file at all, 
    `track_ground_truth_node.py:339-374` derives it from contours in
    `IGVC_track_generator/track.png`, which measures **2.766 m to 6.068 m**
    (median 4.431 m). Median disagreement **0.864 m**, maximum **2.410 m**, and in
@@ -49,13 +49,13 @@ overturned four load-bearing beliefs. Each one would have cost a session.
 
 4. **The P0 item names the wrong node.** `GAZEBO_TODO.md` and `STATUS.md:24`
    say the Gazebo image has no torch "so `lane_detection_node` cannot start".
-   `lane_detection.py` imports **no torch** (grep count 0); it is classical CV —
+   `lane_detection.py` imports **no torch** (grep count 0); it is classical CV, 
    CLAHE, HSV gate, Canny, `HoughLinesP`. The node that hard-fails without torch
    is **`lane_segmentation_node`** (YOLOPv2). Related: `STATUS.md:25` says
    `num_cameras: 3` makes "the synchroniser never fire and log nothing".
    `lane_detection.py:81-91` builds **one independent synchroniser per camera**,
    so camera 0 fires normally on the front camera; only 1 and 2 starve. And it
-   **does** log — a 2 s watchdog with a throttled WARN (`:119`, `:924-929`).
+   **does** log, a 2 s watchdog with a throttled WARN (`:119`, `:924-929`).
 
 ---
 
@@ -70,19 +70,19 @@ All three gates pass. These are the numbers any later phase must not regress.
 | `autonomy_check.sh` | **PASS**, exit 0 | 51.3 m driven, span 23.1 m, centreline deviation mean 0.54 m / max 1.54 m, on the slab throughout, `aborts=1` |
 
 Environment: Docker 29.7.2, 24 CPUs, 16.4 GB to the VM. **123.6 GB free on C:**
-— well above the 40 GB floor. `docker system df`: 68.9 GB images (33.6 GB
+, well above the 40 GB floor. `docker system df`: 68.9 GB images (33.6 GB
 reclaimable), 29.1 GB build cache.
 
 ### Two de-risking probes I ran because they change the plan
 
-**torch on Blackwell — PASSES.** `igvc-humble-fused-drive`: torch
+**torch on Blackwell, PASSES.** `igvc-humble-fused-drive`: torch
 **2.14.0+cu130**, CUDA 13.0, cuDNN 9.24, `is_available: True`, device
 `NVIDIA GeForce RTX 5070 Ti Laptop GPU`, capability `(12, 0)`, and
 `arch_list` contains **`sm_120`**. A real convolution ran on the GPU:
 `CONV_FORWARD_OK (1, 16, 224, 224) sum=24495.5254`. ultralytics 8.4.146,
 cv2 4.5.4, numpy 1.26.4. **`onnxruntime` is absent.**
 
-**Cross-container plumbing — better than expected.** Both containers sit on
+**Cross-container plumbing, better than expected.** Both containers sit on
 `igvc_robot_2027_default` (172.19.0.2 and .3), DNS resolves between them, and
 both set `RMW_IMPLEMENTATION=rmw_fastrtps_cpp`, `ROS_DOMAIN_ID=0` and
 `FASTDDS_BUILTIN_TRANSPORTS=UDPv4`. That last one disables shared memory, which
@@ -97,8 +97,8 @@ over the wire. That is gate 3.1.3 and it stays a gate.
 - **`render_check.sh` never sources ROS.** `gz` on this image comes from the ROS
   *vendor* packages (`/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz`, gz-sim
   **8.15.0**), and `/root/.bashrc` does not source `setup.bash`. So the
-  documented command — `bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh`
-  — fails on a clean container with `gz: No such file or directory` and reports
+  documented command, `bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh`
+ , fails on a clean container with `gz: No such file or directory` and reports
   `RESULT: UNKNOWN`. One-line sim-side fix.
 - **`sim_cameras` validates nothing.** `gazebo_sim.urdf.xacro:209,212` are two
   `xacro:if`s with no else. Any typo (`fron`, `front,left`, `true`) silently
@@ -106,7 +106,7 @@ over the wire. That is gate 3.1.3 and it stays a gate.
 
 ---
 
-## 2. Deployment map, and the topology contradiction — resolved
+## 2. Deployment map, and the topology contradiction, resolved
 
 The contradiction was: the design report says the Jetson is the brain and sends
 CAN; `SIM_WORK_RESUMPTION.md` infers a laptop because `igvc_jetson_stack` is
@@ -115,7 +115,7 @@ commented out.
 **Both were reasoning from a file that did not launch the competition run.**
 `upstream/more_diverging_changes:scripts/auton_launch.sh:3-4` runs
 `docker start dazzling_easley` then `docker exec -it dazzling_easley`.
-`dazzling_easley` is a Docker-generated random name — created by a bare
+`dazzling_easley` is a Docker-generated random name, created by a bare
 `docker run`, outside compose entirely. No compose file on any branch declares
 it; all four declare fixed `container_name` values. **Which service is commented
 out proves nothing about what ran.**
@@ -135,7 +135,7 @@ The evidence that does discriminate, all of it pointing at the Jetson:
 no compose service granting CAN via `devices:`. Both CAN implementations use
 **SocketCAN**, which is a *network* interface, not a `/dev` node
 (`can_interface.cpp:305` `socket(PF_CAN, SOCK_RAW, CAN_RAW)`). `network_mode:
-host` plus `privileged: true` — which both active services have — is exactly
+host` plus `privileged: true`, which both active services have, is exactly
 and sufficiently what SocketCAN needs.
 
 **And a supporting claim in our own docs is wrong.** `SIM_WORK_RESUMPTION.md:179-181`
@@ -154,8 +154,8 @@ RMW on 2026-05-16 and never updated the comment.
 | --- | --- | --- | --- |
 | 3× ZED X, LiDAR, GPS | Physical sensors on the Jetson. **Confidence: high.** | Gazebo sensors in `igvc-gazebo-jazzy`, renamed onto the ZED namespace by `gazebo_bridge.yaml` | Same, plus `/fix` from a Gazebo `navsat` sensor |
 | Lane detection | Jetson (`lane_segmentation_node`, YOLOPv2). **Report names YOLOPv2 once, with no resolution and no frame rate.** | Not running | `igvc-humble-fused-drive` as the Jetson stand-in |
-| Obstacle detection | **See §3 — the report and the code disagree.** | Not running; obstacles come from `track_points.json` | Nav2 stock `ObstacleLayer` on bridged `/scan` + clouds |
-| Odometry | ZED depth + IMU + LiDAR fused with GPS "using a ZED ROS 2 wrapper" (report p.15) — technically implausible, see §3 | `gazebo_odom_shim` rotating Gazebo odometry by the spawn yaw | Unchanged |
+| Obstacle detection | **See §3, the report and the code disagree.** | Not running; obstacles come from `track_points.json` | Nav2 stock `ObstacleLayer` on bridged `/scan` + clouds |
+| Odometry | ZED depth + IMU + LiDAR fused with GPS "using a ZED ROS 2 wrapper" (report p.15), technically implausible, see §3 | `gazebo_odom_shim` rotating Gazebo odometry by the spawn yaw | Unchanged |
 | Nav2 + IGVC navigator | Jetson. **Confidence: high**, same container as the drive stack. | `igvc-gazebo-jazzy` | Unchanged |
 | Drive | `diff_drive_controller` + ODrive `CanInterface`, CAN from the Jetson | Gazebo DiffDrive plugin, no ros2_control | Unchanged pending RQ-06 |
 
@@ -176,19 +176,19 @@ competition-window commit (`nchan18`). These are not third-party claims.
 | Report says | Code says |
 | --- | --- |
 | Obstacle detection: a custom **13-class** ONNX through the ZED wrapper (p.15) | The model has **15 classes**. Parsed from `best.onnx` metadata: `{0:'3', 1:'Tire', 2:'pedestrianCrossing', 3:'person', 4:'signalAhead', 5-9: speedLimit20/25/30/35/40, 10:'stop', 11:'stopAhead', 12:'tire', 13:'traffic barrel', 14:'yield'}`. Ultralytics **YOLOv12n**, imgsz 640. Class 0 labelled `'3'` and `Tire`/`tire` duplicated look like labelling bugs. |
-| …loaded through the ZED ROS 2 wrapper | **Nothing in the repository consumes the ZED wrapper's detection output** — zero subscribers to `obj_det`/`ObjectsStamped`/`zed_msgs` across all 16 branches. `od_enabled: false` in both configs the rest of the repo uses. The one enabled config, `zed2i_custom_detection.yaml`, is referenced by a launch file that exists **only on branch `2026/zed`**, and its `custom_onnx_file` points at `/home/root/ros2_ws/.../best.onnx` — a path that does not exist and is malformed (`/home/root`). |
+| …loaded through the ZED ROS 2 wrapper | **Nothing in the repository consumes the ZED wrapper's detection output**, zero subscribers to `obj_det`/`ObjectsStamped`/`zed_msgs` across all 16 branches. `od_enabled: false` in both configs the rest of the repo uses. The one enabled config, `zed2i_custom_detection.yaml`, is referenced by a launch file that exists **only on branch `2026/zed`**, and its `custom_onnx_file` points at `/home/root/ros2_ws/.../best.onnx`, a path that does not exist and is malformed (`/home/root`). |
 | LiDAR data "fused with GPS using a ZED ROS 2 wrapper" (p.15) | The ZED wrapper has no LiDAR ingest. The LiDAR is a USB/J40 peripheral in the schematic. **The report's most implausible claim.** |
 | "negligible difference" between sim and reality (§8.5) | Three lines of text, zero data, no sim-vs-real measurement. It was a claim about Isaac streaming HD1200 into the real ZED SDK. It does not transfer to Gazebo's 640×360 pinhole RGB. Quoting it for Gazebo would be a category error. |
 | RPLIDAR **C4** (p.12) | **C1** throughout: `rplidar_c1.urdf.xacro`, `top_rplidar_c1_link`, sensor `rplidar_c1` |
 | Self-Drive functions: **sixteen** (§7.2) and **twenty-one** (§1.2.3, §7.2) | Both appear, four lines apart, plus "sixteen completed in one run" which equals the total asserted elsewhere. |
-| Nav2 with "SmacHybrid Planner and Regulated Pure Pursuit" (p.15) | Planner is `SmacPlanner2D` (2D, not Hybrid); controller is RegulatedPurePursuit. But the report's *mechanism* description — sampling carrot distances over a distribution and scoring candidates on speed/obstacle-distance/progress — describes DWB or MPPI, not RPP. |
+| Nav2 with "SmacHybrid Planner and Regulated Pure Pursuit" (p.15) | Planner is `SmacPlanner2D` (2D, not Hybrid); controller is RegulatedPurePursuit. But the report's *mechanism* description, sampling carrot distances over a distribution and scoring candidates on speed/obstacle-distance/progress, describes DWB or MPPI, not RPP. |
 | No wheel radius, no resolution, no frame rate anywhere | Grep across all 19 pages: `radius` 0 hits, `fps`/`Hz` 0 hits, `resolution` 0 hits. The report gives RQ-02 no help at all. |
-| Cover: "Date Submitted: May 15, 2025"; body: "the 2026 competition rules" | — |
+| Cover: "Date Submitted: May 15, 2025"; body: "the 2026 competition rules" |, |
 | §5.2.2: "Images will be attached below" showing detection results | `p.15` and `p.16` contain **zero embedded images**. |
 
 **What this means for the added obstacle-detection item.** The real
 detection-to-costmap node is `obstacle_costmap.py`, which consumes
-`/yolo/detections_3d` from **`yolo_ros`, not the ZED SDK** — and it exists only
+`/yolo/detections_3d` from **`yolo_ros`, not the ZED SDK**, and it exists only
 on `2026/more_diverging_changes` and `2026/test_comp_changes_isaac_smi`, not on
 `main`. On `main`, obstacles reach the costmap as **raw sensor data through
 Nav2's stock `ObstacleLayer`** (`nav2_lane_follow_config.yaml:251-258`,
@@ -206,13 +206,13 @@ already retracts the 0.87 m. The 0.70 m needs retracting too.
 
 | Source | Width |
 | --- | --- |
-| **URDF collision geometry** — chassis mesh bbox under `rpy yaw +90°` | **0.810 m** (`test_robot_body.urdf.xacro:203-208`) |
+| **URDF collision geometry**, chassis mesh bbox under `rpy yaw +90°` | **0.810 m** (`test_robot_body.urdf.xacro:203-208`) |
 | Nav2 footprint (both costmaps) | **0.700 m** (`nav2_lane_follow_config.yaml:250`, `:354`) |
 | collision_monitor StopZone | 0.800 m (`:176`) |
 | collision_monitor SlowZone | 1.000 m (`:169`) |
 | Design report | 0.762 m (2.5 ft) |
 
-The **chassis** is the widest part, not the wheels — the wheels are ~0.17 m
+The **chassis** is the widest part, not the wheels, the wheels are ~0.17 m
 inside the chassis envelope (outer faces at +0.3164 / −0.3239). So Nav2 plans
 and inflates for a robot **11 cm narrower than its own collision model**.
 `GAZEBO_SETUP.md:660`'s "the robot is 0.70 m wide" promoted a config value to a
@@ -224,7 +224,7 @@ Nav2 actually plans in (`track.png`): 1.767 m clear, minus
 rim `gt_nav_bridge_node` stamps = 1.367 m of free cells. Nav2 then inflates both
 sides: 1.367 − 2 × 0.35 (inscribed radius) = **0.667 m** below
 `INSCRIBED_INFLATED_OBSTACLE`, and 1.367 − 2 × 0.75 (inflation_radius) is
-**negative** — *there is no zero-cost cell anywhere in that gap*. A 0.810 m
+**negative**, *there is no zero-cost cell anywhere in that gap*. A 0.810 m
 robot does not fit in 0.667 m; a 0.700 m one barely does.
 
 Widening the footprint to the true 0.81 m raises the inscribed radius to 0.405
@@ -232,13 +232,13 @@ and **makes this worse before it makes it correct**. That is still the right
 trade, but it is a deliberate decision, not a drive-by fix.
 
 **Three config comments that contradict their own values** (all in
-`nav2_lane_follow_config.yaml`, none of which I will edit — they are real-robot
+`nav2_lane_follow_config.yaml`, none of which I will edit, they are real-robot
 config):
 
 - `:315-316` "lethal_cost_threshold is set **ABOVE 100** so lane cells come in
-  as high-cost (253) rather than lethal (254)" — the value on `:325` is **90**,
+  as high-cost (253) rather than lethal (254)", the value on `:325` is **90**,
   and `gt_nav_bridge_node.py:274` writes lane cells as exactly **100**. So
-  100 ≥ 90 and they become **LETHAL (254)** — precisely the failure the comment
+  100 ≥ 90 and they become **LETHAL (254)**, precisely the failure the comment
   says forced `use_collision_detection: false`. The same comment reasons about
   MPPI; the configured controller is RegulatedPurePursuit.
 - `:331-339` titled "Reduced from 0.75m", reasons to "0.50m", and the value two
@@ -248,7 +248,7 @@ config):
 
 Also worth knowing: **collision_monitor's point-cloud sources are all
 `enabled: false` in the shipped real config** (`:189`, `:197`, `:205`), so its
-stop and slow polygons can never trip — on the real robot, not just in sim.
+stop and slow polygons can never trip, on the real robot, not just in sim.
 
 ---
 
@@ -259,23 +259,23 @@ yet except the baseline, because Phase 0 stops before the work.
 
 | # | Item | Status | One-line reason |
 | --- | --- | --- | --- |
-| — | Regression baseline (render / smoke / autonomy) | **VERIFIED** | 18/18, autonomy PASS, GPU confirmed — §1 |
-| — | torch on Blackwell | **VERIFIED** | `sm_120` present, real conv ran on GPU — §1 |
+|, | Regression baseline (render / smoke / autonomy) | **VERIFIED** | 18/18, autonomy PASS, GPU confirmed, §1 |
+|, | torch on Blackwell | **VERIFIED** | `sm_120` present, real conv ran on GPU, §1 |
 | P0-1 | Get perception running | **PLANNED** | Path is clear; the to-do list names the wrong node (§0.4) |
 | P0-2 | `num_cameras` sim override | **VERIFIED, not needed** | `/lane_map` carries 253 occupied cells with camera 0 alone; one startup WARN only (§10.7) |
 | P0-3 | Camera point cloud orientation | **PLANNED** | No prior research exists on this; pass 2 never discusses optical frames |
 | P1-4 | RQ-06 control path | **TEAM DECISION** | Brief to write; pass 2 recommends `gz_ros2_control` |
 | P1-5 | FollowPath aborts | **PLANNED, premise corrected** | The "four" is a saturating gauge (§0.1); corridor is a *hypothesis*, not a diagnosis (§9 C-3) |
-| P1-6 | `render_check.sh` on other machines | **OUT OF REACH** | Runbook only — no access to the 5080 or the Win10 machine |
-| P1-7 | Verify `igvc_gazebo_linux` | **OUT OF REACH** | Runbook only — no Linux host |
+| P1-6 | `render_check.sh` on other machines | **OUT OF REACH** | Runbook only, no access to the 5080 or the Win10 machine |
+| P1-7 | Verify `igvc_gazebo_linux` | **OUT OF REACH** | Runbook only, no Linux host |
 | P1-8 | RQ-11 barrel physics | **TEAM DECISION** | Brief to write |
 | P1-9 | Publish `/fix` | **PLANNED** | Blocked on a datum decision and a topic-name decision (§6) |
 | P2-10 | `/cmd_vel` timeout | **PLANNED** | Smoke test already reports "DiffDrive held the last command" across 4 s |
 | P2-11 | Four zero-normal meshes | **PLANNED** | Staging-directory repair + hash comparison |
 | P2-12 | `sim_cameras:=all` on the real course | **PLANNED** | Blocked by a launch-file gap (§6) |
-| P2-13 | YOLOPv2 at 640×360 | **PLANNED, premise corrected** | It will never crash — the frame is upscaled to 1280×720 first |
+| P2-13 | YOLOPv2 at 640×360 | **PLANNED, premise corrected** | It will never crash, the frame is upscaled to 1280×720 first |
 | P2-14 | `wheel_radius` | **DOCUMENT ONLY** | Sim corroborates 0.1016; ratio 0.9989 today |
-| ADD-15 | Obstacle detection inventory | **VERIFIED (inventory)** | §3 — 15 classes not 13, nothing consumes ZED detections, `best.pt` already on disk |
+| ADD-15 | Obstacle detection inventory | **VERIFIED (inventory)** | §3, 15 classes not 13, nothing consumes ZED detections, `best.pt` already on disk |
 
 ---
 
@@ -283,7 +283,7 @@ yet except the baseline, because Phase 0 stops before the work.
 
 Order, the test for each, the number I expect, and what would make it fail.
 
-### Phase 1 — P0
+### Phase 1, P0
 
 **1.1 Cross-container DDS (gate).** Run the sim in `igvc_gazebo`, run a counter
 in `igvc_humble_fused_drive`, count messages on the front image, depth,
@@ -299,17 +299,17 @@ override pattern that already exists twice in the repo
 (`lane_seg_zed2i_test.launch.py:70-86` puts the yaml first and the dict second).
 This is how `num_cameras` gets overridden **without touching
 `lane_detection_config.yaml`**, which is forbidden. `lane_follower.launch.py`
-has the dict *before* the yaml, so the yaml wins and nothing is overridable —
+has the dict *before* the yaml, so the yaml wins and nothing is overridable, 
 which is why a new file is cleaner than editing that one.
 
 **1.3 Point cloud orientation.** Barrel at a known world pose; transform the
 cloud into `base_link` through its own `header.frame_id`; assert the fitted
 floor normal is within 5° of +Z and the barrel clusters at the expected range.
 *Prove it can fail* by running once with a deliberately wrong frame.
-*Expect:* either clean pass, or a 90° error — `gz_frame_id` is the optical
+*Expect:* either clean pass, or a 90° error, `gz_frame_id` is the optical
 frame, which is right for the rasters and may be wrong for the cloud.
 
-**1.4 Lane output — and this one needs a decision.** As specified, it cannot
+**1.4 Lane output, and this one needs a decision.** As specified, it cannot
 work: §0.2 (two different courses) and §0.3 (complementary encodings). My
 proposal, all sim-side: a new `scripts/gazebo/lane_eval_sim.py` that renders
 lane-line ground truth from **the same `track_points.json` geometry
@@ -317,7 +317,7 @@ lane-line ground truth from **the same `track_points.json` geometry
 against that. It reuses the exact geometry the camera sees, which is the whole
 point. `lane_eval_node.py` is in `src/igvc_lane_detection/` and stays untouched.
 
-### Phase 2 — P1
+### Phase 2, P1
 
 **2.1 FollowPath aborts.** First *instrument* it: count `STATUS_ABORTED` results
 from the log rather than sampling a saturating gauge, and log pose + nearest
@@ -328,7 +328,7 @@ overlay; `nav2_lane_follow_config.yaml` is not edited.
 
 **2.2 `/fix`.** `<spherical_coordinates>` into the **generator**, plus a
 `navsat` sensor on `front_gps_antenna_link` (which is at `0.177 -0.133 0.218`
-relative to `base_link` — note the antenna is 13.3 cm right of centreline, a
+relative to `base_link`, note the antenna is 13.3 cm right of centreline, a
 real lever arm), plus a bridge row. *Test:* drive a known displacement, compare
 NavSatFix-derived local ENU against Gazebo ground truth including heading, so a
 rotated datum fails. **Trap:** `igvc_course.sdf` is *committed* and only
@@ -336,11 +336,11 @@ regenerated when `track_points.json` is newer (`start_sim.sh:70`), so the
 regenerated world must be committed in the same change or nobody's checkout
 changes.
 
-**2.3 and 2.4** — RQ-06 and RQ-11 briefs under `docs/decisions/`.
-**2.5** — runbooks under `docs/runbooks/` for the 5080 laptop, the Windows 10
+**2.3 and 2.4**, RQ-06 and RQ-11 briefs under `docs/decisions/`.
+**2.5**, runbooks under `docs/runbooks/` for the 5080 laptop, the Windows 10
 machine, and native Linux.
 
-### Phase 3 — P2
+### Phase 3, P2
 
 `/cmd_vel` timeout with ≥5 repeats reporting a distribution, judged on Gazebo
 **ground-truth pose** with an asserted on-slab precondition. Mesh repair into a
@@ -350,8 +350,8 @@ several resolutions. `wheel_radius` documented only.
 ### Three decisions I need from you before Phase 1
 
 1. **The lane-evaluation approach** (§0.3 / 1.4). My recommendation is the new
-   sim-side evaluator. The alternative — making `/lane_ground_truth` emit 100
-   for lane cells — is a forbidden edit *and* riskier, because
+   sim-side evaluator. The alternative, making `/lane_ground_truth` emit 100
+   for lane cells, is a forbidden edit *and* riskier, because
    `gt_nav_bridge_node` and Nav2's StaticLayer both read the 0/-1 convention.
 2. **Where the updated docs go.** The other agent moved `GAZEBO_TODO.md` and
    `DOCKER_CHANGES.md` into `docs/archive/`, whose README says archived docs
@@ -366,7 +366,7 @@ several resolutions. `wheel_radius` documented only.
 
 - **The lens question is the single highest-value unknown.** ZED X 2.2 mm gives
   104.63° HFOV; 4 mm gives 74.06°. The sim uses **100°**. So the sim is either
-  4.6° too narrow or **26° too wide** — the sign is unknown. Every sim-vs-real
+  4.6° too narrow or **26° too wide**, the sign is unknown. Every sim-vs-real
   camera claim depends on it. One `camera_info` echo from a bag settles it.
 - **YOLOPv2 will pass while degraded.** `yolopv2_infer.py:114,213` resizes every
   frame to **1280×720** before letterboxing, so a 640×360 Gazebo frame is
@@ -377,7 +377,7 @@ several resolutions. `wheel_radius` documented only.
   area threshold is effectively 5.76× stricter.
 - **`gazebo_nav_test.launch.py` cannot set camera resolution.** It forwards only
   `world, track_file, sim_cameras, headless, rviz, use_sim_time` (`:142-149`).
-  So the autonomy path is locked to 640×360 at 15 Hz — which blocks exactly the
+  So the autonomy path is locked to 640×360 at 15 Hz, which blocks exactly the
   experiment that answers P2-13. Sim-side launch-file fix, permitted.
 - **The camera budget was measured at the wrong FOV.** `three_camera_load.sdf`
   uses `1.7` rad (97.40°); the URDF uses `1.7453` (100.00°). The poses match
@@ -394,7 +394,7 @@ several resolutions. `wheel_radius` documented only.
 
 ## 7. Questions for Aidan, each answerable in one line
 
-1. **On the robot's Jetson, run `docker ps -a` — is there a container called
+1. **On the robot's Jetson, run `docker ps -a`, is there a container called
    `dazzling_easley`?** That name is hardcoded in all five of Nitin's
    competition scripts. Its existence settles the topology in thirty seconds
    and does not depend on anyone remembering June correctly.
@@ -402,7 +402,7 @@ several resolutions. `wheel_radius` documented only.
    have been built from `main` while the **code** bind-mounted into it was
    `more_diverging_changes`? That would reconcile your answer with the commit
    history rather than contradict it.
-3. **Which lens is fitted to the three ZED X units — 2.2 mm or 4 mm?** (Or: does
+3. **Which lens is fitted to the three ZED X units, 2.2 mm or 4 mm?** (Or: does
    anyone still have a competition bag with a `camera_info` in it?)
 4. Is `wheel_radius: 0.2032` correct on the real robot, or is it the diameter?
    The simulator corroborates 0.1016 to 0.11% again today.
@@ -419,16 +419,16 @@ several resolutions. `wheel_radius` documented only.
 
 Kept visible on purpose, per the project's working agreements.
 
-1. "Four FollowPath aborts in 143 s" — **withdrawn**, it is a saturating gauge.
-2. "The robot is 0.70 m wide" — **withdrawn**, that is the Nav2 footprint; the
+1. "Four FollowPath aborts in 143 s", **withdrawn**, it is a saturating gauge.
+2. "The robot is 0.70 m wide", **withdrawn**, that is the Nav2 footprint; the
    collision model is 0.810 m.
-3. "`lane_detection_node` cannot start without torch" — **withdrawn**, wrong
+3. "`lane_detection_node` cannot start without torch", **withdrawn**, wrong
    node; it imports no torch.
-4. "The synchroniser never fires and logs nothing" — **withdrawn**, one
+4. "The synchroniser never fires and logs nothing", **withdrawn**, one
    synchroniser per camera, and there is a watchdog that logs.
-5. "One ROS graph across two machines" (`CLAUDE.md`, `SIM_WORK_RESUMPTION.md`) —
+5. "One ROS graph across two machines" (`CLAUDE.md`, `SIM_WORK_RESUMPTION.md`), 
    **withdrawn**, the two compose files set different RMW implementations.
-6. "The design report describes a 13-class model" — the model has **15**.
+6. "The design report describes a 13-class model", the model has **15**.
 
 ---
 
@@ -1179,3 +1179,295 @@ meshes, or anything on the `CanInterface`/ODrive path. Confirmed by the diff.
 4. P1 and P2 as planned in §6, with the FollowPath item reframed by §9 C-3:
    instrument the abort count first, because the number everyone has been
    quoting is a saturating gauge.
+
+---
+
+## 16. Merging into `main`, and getting it clonable for the sub-team
+
+**Written 2026-09-17, after the Phase 1 work above and before the 6 to 8 pm
+software session.** The goal of this pass was narrow and it outranked the
+parity work: make `main` something a teammate can clone on an untested Windows
+laptop and end up with a robot driving the course.
+
+### 16.1 What merged, what did not, and the gate numbers on the merge result
+
+**`gazebo-phase1` merged into `main` as a fast-forward.** Confirmed first that
+`main` had not moved (`8a38fbc`, identical to `origin/main`) and that
+`git merge-base --is-ancestor main gazebo-phase1` held, so the merge result is
+byte-identical to the branch tip `a7cf7b9` and no merge commit exists. Nothing
+else was merged: `docs-trim` was not touched, and its five unpushed commits of
+unknown provenance are still sitting there untouched.
+
+Confirmed by diff that **nothing on the forbidden list is in the merge**: no
+`src/igvc_lane_detection/`, no `nav2_lane_follow_config.yaml` or siblings, no
+`controllers.yaml`, no `lane_detection_config.yaml`, no real robot URDF or
+meshes, nothing on the `CanInterface`/ODrive path.
+
+**All three gates pass on `main` itself**, run in `igvc_gazebo` against the
+merge result:
+
+| Gate | Result | Numbers |
+| --- | --- | --- |
+| `render_check.sh` | **PASS**, exit 0 | `GL_RENDERER = D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`, Mesa 25.2.8, camera and gpu_lidar both `PUBLISHING`. Run from a shell with nothing sourced |
+| `bringup_smoke_test.sh` | **PASS**, exit 0 | **18 passed, 0 failed.** Odometry 7.073 m against Gazebo ground truth 7.081 m, heading disagreement **0.13 deg**, distance ratio **0.9988** |
+| `autonomy_check.sh` | **PASS**, exit 0 | 893 samples at 9.5 Hz over 93.7 s. **83.0 m driven**, span 29.3 m, centreline deviation mean 0.67 m / **max 1.86 m**, yaw to lane mean 15.9 deg / max 48.0 deg, worst clearance **+0.040 m** (chassis) and +0.081 m (Nav2 footprint), **0.0% of samples over the paint**, on the slab throughout, `aborts=2`. MOVED, PROGRESS, IN LANE and ON THE SLAB all PASS |
+
+**The `IN LANE` coin flip did not bite this time, and that is luck rather than
+a result.** 1.86 m against a flat 2.00 m tolerance is a pass, but section 13A
+D-3 records 2.04 (FAIL), 1.95 (PASS), 1.98 (PASS) on three earlier runs. The
+gate is still measuring the wrong quantity and is still one run in three from
+failing. It was not changed, and `TOL` was not raised. Note also that this
+run's worst clearance, **+0.040 m**, is tighter than the +0.078 to +0.093 m of
+runs 4 to 6, which is the tightest margin yet recorded.
+
+**Twenty-six commits later, the gate results still stand**, and that is
+checked rather than assumed: `git diff --name-only a7cf7b9..HEAD` returns only
+documentation, the new `scripts/gazebo/bootstrap.sh` and
+`scripts/setup-windows.ps1`. Nothing under `src/`, `config/`, `docker/`, the
+compose files, or any of the gate scripts themselves changed after the gates
+ran. `render_check.sh` and `bringup_smoke_test.sh` were then re-run anyway,
+from a clean clone, in 16.3.
+
+### 16.2 The judgement call on P0-3, made explicitly
+
+**The P0-3 point-cloud frame fix does not exist on the branch, so the question
+answered itself.** The branch carries `scripts/gazebo/cloud_frame_check.py`,
+which is the diagnostic that proved the rotation, and no fix: no republisher,
+no bridge YAML change, no costmap override change. The diff is the evidence.
+
+**It would not have merged tonight even if it had existed**, and the reason is
+worth stating because it is the freeze rule doing its job. The fix only has a
+purpose if `obstacle_layer` is enabled, and
+`gazebo_nav_test_nav2_overrides.yaml:36-44` replaces `plugins` with
+`["lane_layer", "inflation_layer"]` in both costmaps, so that layer has never
+been instantiated and the clouds have never reached it. Enabling it connects a
+Nav2 consumer that has never once been connected. That is a new system under
+test, not a bug fix, it would need all three gates re-baselined afterwards,
+and it cannot clear that bar before 6 pm. It stays out, and `GAZEBO_TODO.md`
+records it as a fix with the re-baseline requirement attached.
+
+### 16.3 Verification from a clean clone
+
+Not from the working copy, and with nothing sourced in advance. The clone was
+taken from the local repository rather than from GitHub, because **the push
+has not happened**, so one thing this does not verify is the remote itself.
+Everything else is faithful: submodules were fetched from their real GitHub
+URLs, the compose project was isolated with `COMPOSE_PROJECT_NAME=freshtest`
+so it could not reuse the working copy's named volumes, the image was **removed
+from the daemon first** so it could not reuse a warm one, and the whole thing
+ran from a real WSL2 Ubuntu shell rather than Git Bash.
+
+| # | Step | Result | Elapsed | What a teammate sees |
+| --- | --- | --- | --- | --- |
+| 1 | `git clone --recurse-submodules` | **PASS** | **17.4 s** | nine `Submodule path ... checked out` lines |
+| 2 | `.sh` line endings and shebangs | **PASS** | under 1 s | 12 of 12 files LF, every shebang `#!/usr/bin/env bash` with no trailing CR |
+| 3 | bootstrap step 1, sanity | **PASS** | under 1 s | `PASS running from a WSL2 shell`, `PASS free disk: wanted 12 GB, found 107 GB` |
+| 4 | bootstrap step 2, submodules | **PASS** | 2 s | `PASS all 9 submodules populated`, `PASS track data and zed_description are on disk` |
+| 5 | bootstrap step 3, image from the tar | **PASS** | see below | `loading /mnt/c/.../igvc-gazebo-jazzy.tar (1.2G). No pull, no build.` then `Loaded image: igvc-gazebo-jazzy:latest` |
+| 6 | bootstrap step 4, container | **PASS** | 3 s | `Volume freshtest_igvc_gazebo_log Created`, `Container igvc_gazebo Started` |
+| 7 | bootstrap step 5, colcon | **PASS** | about 15 s | `PASS four packages built` |
+| 8 | bootstrap step 6, `render_check.sh` | **PASS** | about 25 s | `GL_RENDERER = D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)`, `RESULT: HARDWARE RENDERING (NVIDIA)` |
+| 9 | bootstrap step 7, `bringup_smoke_test.sh` | **PASS** | about 80 s | `topic checks passed: 18 failed: 0`, `DRIVE TEST : PASS robot moved 7.331 m`, `FRAME TEST : PASS`, ratio **0.9989**, heading **0.13 deg** |
+| | **whole bootstrap** | **exit 0** | **201 s** | `Bootstrap complete. The simulator is verified on this machine.` |
+
+**The written quickstart needed no corrections during the run**, which is the
+result that matters, but only because the clone-breaking defects had already
+been found by reading and were fixed before the run rather than during it. The
+defects themselves are listed in 16.5; the biggest was that the documented
+clone command had no `--recurse-submodules`.
+
+**Timings, and an honest caveat on one of them.** The offline path was measured
+separately and end to end:
+
+| Measurement | Result |
+| --- | --- |
+| `docker save igvc-gazebo-jazzy:latest` | **14.6 s**, producing **1,201,505,280 bytes (1.20 GB)** |
+| `docker load -i`, image **genuinely absent** | **1 m 17.0 s** |
+| the image unpacked, after the container has run | 5.57 GB |
+
+The 77 s figure is a true cold load: `docker image rm` was run first and
+`docker image ls` confirmed the image gone. **The load inside the 201 s
+bootstrap run was faster than that**, because the layer blobs had been in the
+content store moments earlier, so the honest end-to-end figure for a teammate
+whose machine has never seen this image is **201 s plus up to about a minute**.
+That is why the quickstart says "about 10 minutes" rather than quoting 201 s.
+
+**A finding worth more than the timings: the tar is 1.20 GB and the image is
+5.57 GB, and both numbers are right.** The containerd image store unpacks
+layers lazily. Immediately after `docker load`, `docker image ls` reported
+**1.2 GB**; after the container had run once, the same image reported
+**5.57 GB**. Observed today on the same image. Plan disk against 5.57 GB, and
+expect a teammate to quote the other number in good faith.
+
+**Disk high-water mark, and a trap that cost 14 GB.** Free space on C: went
+from **120.7 GB** at the start of the session to a low of **105.1 GB**, and
+after removing the test clone, the tar and the `freshtest` volumes it came back
+to only **106.5 GB**. So roughly **14 GB was consumed and not recovered.** The
+cause is the documented one: `docker_data.vhdx` never shrinks, is not sparse,
+and Windows 11 Home has no Hyper-V so `Optimize-VHD` is unavailable. Removing
+an image and reloading it allocates new blocks in the VHDX while the old ones
+stay allocated. **Do not tell teammates to remove and reload images casually**,
+and be aware that the 40 GB floor gets closer every time someone does.
+
+The test clone, the tar and the `freshtest` volumes were all removed, and the
+working `igvc_gazebo` container was brought back up against the real checkout.
+
+### 16.4 Everything changed in this pass, one line each
+
+Scripts:
+
+| File | Change |
+| --- | --- |
+| `scripts/gazebo/bootstrap.sh` | **New.** One command from a fresh clone to a verified simulator: submodules, image or tar, container, colcon, `render_check.sh`, `bringup_smoke_test.sh`, PASS or FAIL per step, stops at the first failure |
+| `scripts/setup-windows.ps1` | Builds nothing now; was building a 14.1 GB image the simulator does not use. Measured disk threshold printing both wanted and found. Windows 10's three build thresholds separated. Weights made opt-in. One real bug fixed, below |
+
+Documents:
+
+| File | Change |
+| --- | --- |
+| `docs/GAZEBO_QUICKSTART.md` | Rewritten end to end. `--recurse-submodules`, the offline USB path, derived disk numbers, four packages not three, today's reference numbers, the `IN LANE` coin flip, and a section 10 that says what does not work without hedging |
+| `docs/GAZEBO_SETUP.md` | 10.2a and 10.4 retract the lane width, the abort count and the corridor arithmetic. New 10.7 to 10.10 record the Phase 1 changes. 10.6's point-cloud item moves from unverified to measured |
+| `docs/GAZEBO_TODO.md` | The update held pending the branch question. P0-1, P0-3 and P0-4 results, the `IN LANE` decision as a TEAM item, the corrected clearance margin, and one false retraction corrected |
+| `docs/DOCKER_CHANGES.md` | New section 15: the images and which one you need, the two sizes 4.6x apart, the measured offline path, volumes, every environment variable, the `FASTDDS_DEFAULT_PROFILES_FILE` asymmetry, amended outstanding list |
+| `README.md` | Opens with what the project is, that it is the team repo as of September 2026, three commands to a driving robot, and what works and does not with numbers |
+| `docs/IGVC_2027_Gazebo_Setup_Guide.docx` | Regenerated from the quickstart so the Word copy cannot disagree with the Markdown |
+| `docs/runbooks/SOFTWARE_SESSION_2026-09-17.md` | **New.** Pre-flight, a timed two-hour plan, five likeliest failures, the no-GPU fallback, the demo order, eight known-not-working items to read aloud, four questions for Aidan |
+| `CLAUDE.md` (in-repo) | Said "ROS 2 **Humble**" at the top. Corrected, with what is still Humble and why |
+
+**One bug found by running a script rather than reading it.** The new
+`-Weights` switch on `setup-windows.ps1` collided with its own local
+`$weights` variable, because PowerShell pre-declares parameter variables and is
+case-insensitive, so assigning a string threw
+`ConvertToFinalInvalidCastException` at the end of an otherwise clean run.
+Renamed to `$weightsPath`. This is the fourth time on this project that running
+the thing found something reading it did not.
+
+**Both new failure paths in `bootstrap.sh` were shown to fail**, per the rule
+that every new check must be demonstrated on a deliberately broken input. From
+the wrong directory it stops at step 1 naming the directory it wanted; with a
+nonexistent `IMAGE_TAR` it stops at step 3 with the `/mnt/d` hint. Both exit 1.
+
+### 16.5 Documentation that was wrong before this pass
+
+Listed as corrections because a teammate would have hit each one.
+
+**C-10. The documented clone command had no `--recurse-submodules`, and it
+breaks the build.** `GAZEBO_QUICKSTART.md` section 2 said
+`git clone https://github.com/...`. There are nine submodules and two are
+load-bearing: `zed_description` is one of the four packages colcon builds **by
+name**, so the workspace build fails outright on a package the user never
+touched, and `IGVC_track_generator` holds `track_points.json` and `track.png`,
+which every navigation node and the world generator read. **This is the single
+most likely way tonight could have failed for everyone at once**, and it would
+have presented as a confusing colcon error. Fixed, with the expected count, how
+to check, and how to repair an existing bad clone; `bootstrap.sh` also refuses
+to continue if any submodule is empty and checks two specific files exist
+rather than trusting the submodule pointer.
+
+**C-11. `GAZEBO_TODO.md` claimed a retraction that had not happened.** It said
+"`GAZEBO_SETUP.md` 10.4 already retracts its own 0.87 m gap". Section 10.4
+still asserted both the 0.87 m gap and the 0.70 m robot, at lines 1106 to 1107,
+until today. The Phase 0 text in section 4 above repeated the same claim. Both
+are corrected, and the new 10.4 says explicitly that the forward reference was
+false, because a pointer to a retraction that does not exist is worse than no
+pointer.
+
+**C-12. `GAZEBO_SETUP.md` 10.2 rested on "the lane is about 3 m wide".** That
+was the load-bearing assumption under the whole section's reasoning about
+whether the robot stayed in the lane. The corridor Nav2 actually plans in
+measures 2.766 to 6.068 m.
+
+**C-13. The quickstart's autonomy reference numbers came from a 2 Hz pose
+log.** It quoted 122.9 m driven and 1.79 m maximum deviation. Downsampling a
+dense run shows that rate reports a worst clearance of +0.227 m where honest
+sampling reports +0.093 m, so those numbers understated the risk by at least
+2.4x. Replaced with today's, and `GAZEBO_TODO.md`'s milestone line replaced
+too.
+
+**C-14. The quickstart made `render_check.sh` the first command on a new
+machine and told you to source ROS by hand, while `GAZEBO_TODO.md` listed the
+script under "Done, and verified".** It failed on a clean container until
+`d005781`. Anyone following the written setup would have seen `RESULT: UNKNOWN`
+and read it as a broken GPU. Already retracted in Phase 1; recorded here again
+because it is a documentation failure and not only a script failure.
+
+**C-15. `setup-windows.ps1` ended by building a 14.1 GB image the simulator
+does not use, then told the user to open it with `docker compose run`.** On
+shared campus wifi with several people at once, the first is the entire
+meeting. The second is the documented trap that once produced six simultaneous
+`gz sim` processes. Both removed.
+
+**C-16. Its disk threshold was a flat 30 GB, neither measured nor right.** The
+Gazebo-only path measures 7.4 GB. The threshold is now 12 GB for the offline
+path, derived line by line in the quickstart, and the check prints both the
+number it wants and the number it found. The 25 GB build figure is labelled a
+margin rather than a measurement, because 21.86 GB of this machine's 29.06 GB
+of build cache is shared across four images and no single image's share is
+cleanly attributable.
+
+**C-17. The colcon build is four packages and the documentation said three.**
+Both the quickstart and the comment at the top of `start_sim.sh` said three.
+The code selects four and the code is right; `zed_description` is the one
+people leave out. The quickstart now says four and flags the stale comment.
+
+**C-18. There was no offline path documented at all**, despite the image being
+carried on a USB drive. Now measured and written down at both ends, including
+how to spot a truncated tar and the exFAT limit.
+
+**C-19. The in-repo `CLAUDE.md` said "ROS 2 Humble" in its second line.** The
+simulator is Jazzy and has been since `fac55cb`. Corrected, with what genuinely
+is still Humble.
+
+**C-20. `docs/GAZEBO_QUICKSTART.md` claimed "Verified 2026-09-15" while
+describing behaviour that was fixed on 2026-09-17.** Dates and the machine
+specification are now stated together at the top, with the explicit warning
+that the numbers are x86 laptop numbers and not AGX numbers.
+
+Also, 111 em dashes were replaced with commas across `GAZEBO_SETUP.md`,
+`GAZEBO_TODO.md`, `DOCKER_CHANGES.md`, `README.md` and `CLAUDE.md`, per the
+project convention. Mechanical, no change of meaning.
+
+### 16.6 What this pass deliberately did not do
+
+- **No perception work.** P0-1's deserialization defect, P0-3's fix and P0-4's
+  YOLOPv2 scoring are all untouched, and P1 and P2 were not started.
+- **The `IN LANE` gate was not changed**, and `TOL` was not raised. It needs a
+  team decision and it is a one-line change once made.
+- **`docs-trim` was not touched.**
+- **Nothing was pushed.** See 16.7.
+- **No image was rebuilt**, so the 40 GB disk floor was never approached,
+  although 16.3 records 14 GB lost to the VHDX anyway.
+
+### 16.7 The push commands, in order
+
+PowerShell, which is where these actually get run:
+
+```powershell
+cd "C:\IGVC 2027\IGVC_robot_2027"
+git push origin main
+```
+
+Git Bash, if that is the shell in hand:
+
+```bash
+cd "/c/IGVC 2027/IGVC_robot_2027"
+git push origin main
+```
+
+Optionally, to put the branch pointer on GitHub as well. It is already merged
+into `main` as a fast-forward, so this is for provenance only and is not needed
+for anyone to clone:
+
+```powershell
+git push origin gazebo-phase1
+```
+
+**Do not hand a `/c/...` path to PowerShell.** It resolves it as a relative
+path, tries `C:\c\IGVC 2027\...`, fails, and the `git push` on the next line
+then runs in whatever directory you were already in and reports "not a git
+repository". PowerShell 5.1 has no `&&`, which is why these stay two lines.
+
+`main` is **26 commits ahead of `origin/main`** at the time of writing. Nothing
+in tonight's session works until this push lands, because the whole session is
+people cloning it. Confirm it by opening the repository on GitHub and checking
+that `scripts/gazebo/bootstrap.sh` appears in the web view.
