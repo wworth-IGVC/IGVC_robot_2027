@@ -48,12 +48,67 @@ LINE_WIDTH_M = 3.0 * 0.0254   # IGVC painted lines are about 3 inches
 LINE_THICK_M = 0.005          # just proud of the ground so it never z-fights
 BARREL_HEIGHT_M = 0.9
 
+# ---------------------------------------------------------------------------
+# The course width is NOT constant, and getting this wrong put the camera and
+# the planner on two different courses.
+#
+# IGVC 2026 rules II.2: "Track width will vary from ten to twenty feet wide."
+# IGVC_track_generator/constants.py:116-117 encodes exactly that, and
+# IGVC_track_generator/main.py:503 paints track.png with a sinusoid sweeping
+# between them twice per lap. track_ground_truth_node reads track.png contours,
+# so that sinusoid IS the corridor Nav2 plans in.
+#
+# This generator previously painted a CONSTANT 12 ft lane, which appears
+# nowhere in the rules or the track generator. Measured against the intended
+# profile, only 8.0% of straight-section samples were within 5% of 3.658 m;
+# the median disagreement was 0.83 m and the maximum 2.41 m, and in about a
+# third of samples the planner's corridor was NARROWER than the lane painted in
+# Gazebo. The robot could be visually outside the painted line while the grid
+# said it was inside the corridor, and vice versa.
+#
+# These four constants mirror IGVC_track_generator/constants.py so the two
+# stay comparable. The integer truncation is deliberate: it reproduces what
+# main.py actually rasterises into track.png, which is what the planner reads.
+PIXELS_PER_FOOT = 10.8                       # constants.py:102-106
+PIXELS_PER_METER = PIXELS_PER_FOOT / FT      # = 35.43307...
+TRACK_WIDTH_MIN_PX = int(10 * PIXELS_PER_FOOT)   # 108 px, 10 ft
+TRACK_WIDTH_MAX_PX = int(20 * PIXELS_PER_FOOT)   # 216 px, 20 ft
+TRACK_BORDER_PX = int(0.5 * PIXELS_PER_FOOT)     # 5 px, constants.py:48
+
+
+def track_inner_edge_m(progress):
+    """Distance from the centreline to the INNER edge of the painted line.
+
+    Mirrors IGVC_track_generator/main.py:502-516. `progress` is INDEX progress
+    i/N along the centreline, not arc length: draw_track uses index progress,
+    while sample_track_pose uses arc length, and the two disagree.
+
+    The inner edge is the number that matters. track_ground_truth_node fills
+    the corridor between the inner edges of the two painted lines, so matching
+    the inner edge is what puts the Gazebo paint and the Nav2 corridor in the
+    same place. Matching the line's centre instead would leave them offset by
+    half a line width.
+    """
+    span = TRACK_WIDTH_MAX_PX - TRACK_WIDTH_MIN_PX
+    width_px = TRACK_WIDTH_MIN_PX + span * (
+        0.5 + 0.5 * math.sin(progress * 4.0 * math.pi))
+    inner_px = int((width_px // 2) - TRACK_BORDER_PX)
+    return inner_px / PIXELS_PER_METER
+
 
 def resample(points, step_m):
-    """Walk the polyline and emit a point every step_m along it."""
+    """Walk the polyline and emit a point every step_m along it.
+
+    Returns (resampled_points, progress), where progress[k] is the INDEX
+    progress i/N of the original vertex that produced resampled point k. The
+    width profile has to be evaluated at the original index, because that is
+    what main.py:502 uses when it paints track.png.
+    """
+    n_in = len(points)
     out = [points[0]]
+    prog = [0.0]
     acc = 0.0
-    for i in range(len(points) - 1):
+    for i in range(n_in - 1):
         ax, ay = points[i]
         bx, by = points[i + 1]
         seg = math.hypot(bx - ax, by - ay)
@@ -62,13 +117,19 @@ def resample(points, step_m):
         acc += seg
         if acc >= step_m:
             out.append((bx, by))
+            prog.append((i + 1) / float(n_in))
             acc = 0.0
-    return out
+    return out, prog
 
 
 def offset_polyline(points, dist, closed):
-    """Offset a polyline sideways by dist, using the averaged vertex normal."""
+    """Offset a polyline sideways, using the averaged vertex normal.
+
+    `dist` is either a scalar, or a per-vertex sequence the same length as
+    `points` so the offset can vary along the course.
+    """
     n = len(points)
+    per_vertex = not isinstance(dist, (int, float))
     out = []
     for i in range(n):
         if closed:
@@ -83,7 +144,8 @@ def offset_polyline(points, dist, closed):
             continue
         # Left normal of the tangent.
         ox, oy = -ty / mag, tx / mag
-        out.append((points[i][0] + ox * dist, points[i][1] + oy * dist))
+        d = dist[i] if per_vertex else dist
+        out.append((points[i][0] + ox * d, points[i][1] + oy * d))
     return out
 
 
@@ -134,8 +196,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", default=DEFAULT_JSON)
     ap.add_argument("--out", default=DEFAULT_OUT)
-    ap.add_argument("--lane-width-ft", type=float, default=12.0,
-                    help="IGVC rules allow 10 to 20 ft (default: 12)")
+    ap.add_argument("--lane-width-ft", type=float, default=None,
+                    help="Force a CONSTANT lane width in feet. The default is "
+                         "the variable 10-to-20 ft profile the track generator "
+                         "paints into track.png, which is the corridor Nav2 "
+                         "plans in; pass this only for a constant-width debug "
+                         "course, and expect it to disagree with the grid")
     ap.add_argument("--step-m", type=float, default=0.6,
                     help="lane segment length; smaller is smoother and slower")
     ap.add_argument("--lane-emissive", type=float, default=0.55,
@@ -165,10 +231,27 @@ def main():
     if closed:
         centerline = centerline[:-1]
 
-    coarse = resample(centerline, args.step_m)
-    half = (args.lane_width_ft * FT) / 2.0
-    left = offset_polyline(coarse, half, closed)
-    right = offset_polyline(coarse, -half, closed)
+    coarse, prog = resample(centerline, args.step_m)
+    if args.lane_width_ft is None:
+        # Default: the variable 10-to-20 ft profile the track generator paints
+        # into track.png, which is the corridor Nav2 actually plans in.
+        # Offset to the line's CENTRE = inner edge + half a line width, so the
+        # painted inner edge lands exactly on track.png's inner edge.
+        offs = [track_inner_edge_m(p) + LINE_WIDTH_M / 2.0 for p in prog]
+    else:
+        # Explicit override: a constant-width debug course.
+        offs = [(args.lane_width_ft * FT) / 2.0] * len(coarse)
+    left = offset_polyline(coarse, offs, closed)
+    right = offset_polyline(coarse, [-o for o in offs], closed)
+
+    corridor = [2.0 * o - LINE_WIDTH_M for o in offs]
+    width_note = (
+        "variable %.3f to %.3f m inner-edge corridor (10 to 20 ft track, "
+        "IGVC rules II.2)" % (min(corridor), max(corridor))
+        if args.lane_width_ft is None else
+        "CONSTANT %.1f ft (%.3f m), explicit override"
+        % (args.lane_width_ft, args.lane_width_ft * FT)
+    )
 
     xs = [p[0] for p in centerline]
     ys = [p[1] for p in centerline]
@@ -231,7 +314,7 @@ def main():
   Frame       : {d.get('frame')}, identical to centerline_m, so this world and
                 igvc_lane_detection's ground-truth navigator share coordinates.
   Centerline  : {len(centerline)} points, {'closed loop' if closed else 'open path'}
-  Lane width  : {args.lane_width_ft:.1f} ft ({args.lane_width_ft * FT:.3f} m)
+  Lane width  : {width_note}
   Lane segs   : {len(left)} left + {len(right)} right at {args.step_m} m
   Lane paint  : emissive {args.lane_emissive:.2f} - RQ-08. Isaac binds track.png to
                 BOTH diffuseColor and emissiveColor so lane lines stay visible
