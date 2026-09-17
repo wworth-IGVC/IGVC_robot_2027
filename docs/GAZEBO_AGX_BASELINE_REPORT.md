@@ -1220,7 +1220,7 @@ failing. It was not changed, and `TOL` was not raised. Note also that this
 run's worst clearance, **+0.040 m**, is tighter than the +0.078 to +0.093 m of
 runs 4 to 6, which is the tightest margin yet recorded.
 
-**Twenty-six commits later, the gate results still stand**, and that is
+**Twenty-eight commits later, the gate results still stand**, and that is
 checked rather than assumed: `git diff --name-only a7cf7b9..HEAD` returns only
 documentation, the new `scripts/gazebo/bootstrap.sh` and
 `scripts/setup-windows.ps1`. Nothing under `src/`, `config/`, `docker/`, the
@@ -1477,7 +1477,7 @@ path, tries `C:\c\IGVC 2027\...`, fails, and the `git push` on the next line
 then runs in whatever directory you were already in and reports "not a git
 repository". PowerShell 5.1 has no `&&`, which is why these stay two lines.
 
-`main` is **26 commits ahead of `origin/main`** at the time of writing. Nothing
+`main` is **28 commits ahead of `origin/main`**. Nothing
 in tonight's session works until this push lands, because the whole session is
 people cloning it. Confirm it by opening the repository on GitHub and checking
 that `scripts/gazebo/bootstrap.sh` appears in the web view.
