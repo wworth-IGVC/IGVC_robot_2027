@@ -34,6 +34,7 @@ import io
 import json
 import math
 import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -66,14 +67,33 @@ BARREL_HEIGHT_M = 0.9
 # Gazebo. The robot could be visually outside the painted line while the grid
 # said it was inside the corridor, and vice versa.
 #
-# These four constants mirror IGVC_track_generator/constants.py so the two
-# stay comparable. The integer truncation is deliberate: it reproduces what
-# main.py actually rasterises into track.png, which is what the planner reads.
-PIXELS_PER_FOOT = 10.8                       # constants.py:102-106
-PIXELS_PER_METER = PIXELS_PER_FOOT / FT      # = 35.43307...
-TRACK_WIDTH_MIN_PX = int(10 * PIXELS_PER_FOOT)   # 108 px, 10 ft
-TRACK_WIDTH_MAX_PX = int(20 * PIXELS_PER_FOOT)   # 216 px, 20 ft
-TRACK_BORDER_PX = int(0.5 * PIXELS_PER_FOOT)     # 5 px, constants.py:48
+# The constants come FROM the track generator, not from a copy of it.
+#
+# An earlier version of this file mirrored the five numbers below by hand,
+# including their integer truncation. That is the drift this project's own
+# guidance warns about: IGVC_track_generator is a submodule, so it can move
+# under us, and a rotating team would not notice that the world and the grid
+# had quietly stopped agreeing. constants.py is a pure constants module with no
+# imports and no side effects, so importing it is safe and there is now exactly
+# one definition.
+#
+# A missing submodule is a hard error on purpose. Falling back to a guessed
+# width would regenerate a world that silently disagrees with the course the
+# planner uses, which is the bug this whole change exists to remove.
+sys.path.insert(0, os.path.join(REPO, "IGVC_track_generator"))
+try:
+    import constants as _tc
+except ImportError as _exc:      # pragma: no cover
+    raise SystemExit(
+        "cannot import IGVC_track_generator/constants.py (%s).\n"
+        "The lane width profile lives there and is not duplicated here.\n"
+        "Run: git submodule update --init --recursive" % _exc)
+
+PIXELS_PER_FOOT = _tc.PIXELS_PER_FOOT
+PIXELS_PER_METER = _tc.PIXELS_PER_METER
+TRACK_WIDTH_MIN_PX = _tc.TRACK_WIDTH_MIN      # already int px in constants.py
+TRACK_WIDTH_MAX_PX = _tc.TRACK_WIDTH_MAX
+TRACK_BORDER_PX = int(_tc.TRACK_BORDER_FT * PIXELS_PER_FOOT)
 
 
 def track_inner_edge_m(progress):
