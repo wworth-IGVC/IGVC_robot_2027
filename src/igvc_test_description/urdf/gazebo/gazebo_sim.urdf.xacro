@@ -29,6 +29,24 @@
 
   <xacro:property name="cams" value="$(arg sim_cameras)" />
 
+  <!-- Reject an unrecognised sim_cameras here, not silently.
+       The camera dispatch below used to be two xacro:if blocks comparing cams
+       to string literals, with no else, so a typo like "fron" or "front,left"
+       produced a robot with NO cameras that converted to valid SDF and spawned
+       without a single warning.
+
+       list.index() raises a ValueError naming the offending value, which is
+       the loudest thing xacro offers. It has to be USED to fire: xacro
+       evaluates properties lazily, so a validation property nothing reads is
+       never evaluated (found the hard way, 2026-09-17). cams_idx is therefore
+       what the dispatch itself switches on: none=0, front=1, all=2.
+
+       gazebo_sim.launch.py checks the same set and raises a friendlier message
+       before xacro is ever invoked; this guard is for anyone running xacro by
+       hand. -->
+  <xacro:property name="cams_idx"
+                  value="${['none','front','all'].index(cams)}" />
+
   <!-- Geometry measured from the model, not copied from controllers.yaml.
        Both values there are wrong for simulation, and one of them looks wrong
        for the real robot too. Flagged for the team lead; not changed here.
@@ -206,10 +224,10 @@
     </gazebo>
   </xacro:macro>
 
-  <xacro:if value="${cams == 'front' or cams == 'all'}">
+  <xacro:if value="${cams_idx >= 1}">   <!-- front or all -->
     <xacro:sim_rgbd prefix="front" />
   </xacro:if>
-  <xacro:if value="${cams == 'all'}">
+  <xacro:if value="${cams_idx == 2}">   <!-- all -->
     <xacro:sim_rgbd prefix="left" />
     <xacro:sim_rgbd prefix="right" />
   </xacro:if>

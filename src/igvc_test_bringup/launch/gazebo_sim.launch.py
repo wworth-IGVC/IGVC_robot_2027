@@ -126,6 +126,20 @@ def _setup(context, *args, **kwargs):
     use_sim_time = cfg("use_sim_time").lower() in ("true", "1", "yes")
     cams = cfg("sim_cameras")
 
+    # sim_cameras is dispatched by two xacro:if blocks with no else branch, so
+    # any value that is not one of these three silently produces a robot with
+    # ZERO cameras that launches cleanly, passes every topic-name check, and
+    # fails only as "the lane detector sees nothing". Catch it here instead.
+    # Verified 2026-09-17: before this guard, sim_cameras:=fron spawned a
+    # cameraless robot and reported no error anywhere.
+    if cams not in ("none", "front", "all"):
+        raise RuntimeError(
+            "sim_cameras must be one of none|front|all, got %r. "
+            "An unrecognised value builds a robot with no cameras at all, "
+            "which looks like a broken perception stack rather than a typo."
+            % cams
+        )
+
     # ── spawn pose: json unless explicitly overridden ────────────────────────
     sx, sy, syaw = -11.8816, 0.4516, 2.356194490192345
     if os.path.exists(track_file):
