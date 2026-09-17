@@ -49,7 +49,8 @@ param(
     [switch]$CheckOnly,
     [switch]$WithPerception,
     [switch]$WithZed,
-    [switch]$Weights
+    [switch]$Weights,
+    [switch]$BuildImage
 )
 
 $ErrorActionPreference = "Stop"
@@ -133,9 +134,55 @@ try {
     Write-Bad "WSL does not appear to be installed."
 }
 if (-not $wslOk) {
-    Write-Info "Install it from an Administrator PowerShell:"
+    Write-Info "Install it from an Administrator PowerShell. Use wsl --install,"
+    Write-Info "NOT winget: the winget package (Microsoft.WSL) does not enable"
+    Write-Info "the Windows optional features that WSL2 needs."
     Write-Info "    wsl --install"
-    Write-Info "Then reboot."
+    Write-Info ">>> THEN REBOOT. Do it now, not at minute seventy. <<<"
+    Write-Info "After the reboot Ubuntu asks for a new UNIX username and"
+    Write-Info "password. That is a Linux account, unrelated to your Windows"
+    Write-Info "login, and the password does not echo as you type."
+    Write-Info "Then:  wsl --update     (this is where WSLg fixes ship)"
+}
+
+# -----------------------------------------------------------------------------
+# 2A. Git, and the line-ending setting
+#
+# This script never checked for git at all, which is odd for a script whose
+# whole purpose is getting a clone onto a blank machine. CRLF line endings
+# break every .sh in this repo inside the container with
+# "bad interpreter: /usr/bin/env bash^M", which reads as a broken script
+# rather than a broken checkout.
+# -----------------------------------------------------------------------------
+Write-Step "Checking Git"
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if ($null -eq $gitCmd) {
+    Write-Bad "The 'git' command was not found."
+    Write-Info "Install it, verified package Id:"
+    Write-Info "    winget install --id Git.Git --exact --source winget"
+    Write-Info "Manual download: https://gitforwindows.org/"
+    Write-Info "Do NOT install Microsoft.Git. That Id is real but it is"
+    Write-Info "Microsoft's fork build, not the standard Git for Windows."
+} else {
+    $gv = (git --version) 2>&1 | Out-String
+    Write-Ok $gv.Trim()
+
+    $crlf = (git config --global core.autocrlf) 2>&1 | Out-String
+    $crlf = $crlf.Trim()
+    if ($crlf -eq "true") {
+        Write-Bad "core.autocrlf is 'true', which rewrites .sh files to CRLF."
+        Write-Info "Every script in this repo then fails inside the container."
+        Write-Info "Fix it:"
+        Write-Info "    git config --global core.autocrlf input"
+        Write-Info "If you already cloned, repair the checkout:"
+        Write-Info "    git rm --cached -r . ; git reset --hard"
+    } elseif ($crlf -eq "") {
+        Write-Warn2 "core.autocrlf is unset. This repo's .gitattributes forces"
+        Write-Info "eol=lf for *.sh so a normal clone is fine, but set it anyway:"
+        Write-Info "    git config --global core.autocrlf input"
+    } else {
+        Write-Ok "core.autocrlf is '$crlf', which keeps .sh files LF"
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -146,8 +193,17 @@ $dockerOk = $false
 $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
 if ($null -eq $dockerCmd) {
     Write-Bad "The 'docker' command was not found."
-    Write-Info "Install Docker Desktop: https://docker.com/products/docker-desktop"
-    Write-Info "During install, keep 'Use WSL 2 instead of Hyper-V' checked."
+    Write-Info "Install it, verified package Id:"
+    Write-Info "    winget install --id Docker.DockerDesktop --exact --source winget"
+    Write-Info "Manual download: https://www.docker.com/products/docker-desktop"
+    Write-Info ">>> THEN REBOOT, then LAUNCH Docker Desktop from the Start menu."
+    Write-Info "It does not start by itself after installation. <<<"
+    Write-Info "Then the UI step that cannot be scripted, and that this project"
+    Write-Info "has already been bitten by:"
+    Write-Info "    Settings > Resources > WSL Integration > enable your distro"
+    Write-Info "    > Apply and Restart"
+    Write-Info "Without it, docker exists in PowerShell and does NOT exist in"
+    Write-Info "the WSL2 shell, which is where every later command runs."
 } else {
     $dv = (docker --version) 2>&1 | Out-String
     Write-Ok $dv.Trim()
@@ -214,33 +270,37 @@ if ($dockerOk) {
 Write-Step "Checking disk space"
 
 # Measured on this project 2026-09-17, not guessed. For the Gazebo-only path,
-# which is what the simulator needs and all tonight's work needs:
+# which is what the simulator needs and all of tonight's work needs:
 #
 #   igvc-gazebo-jazzy unpacked on disk   5.57 GB   (docker image ls)
-#   the same image as a saved tar        1.20 GB   (docker save, 14.6 s)
 #   the clone plus its nine submodules   0.60 GB   (du, including .git)
 #   the colcon workspace in-container    0.003 GB  (build + install)
+#   Docker Desktop plus WSL2 Ubuntu      ~4 GB     (blank Windows install)
 #   ------------------------------------------------------------------
-#   offline path, load the tar           7.4 GB measured
+#   blank-slate total                    ~10.2 GB
 #
-# The threshold is set above that, not at it, because the WSL2 VM's own
-# docker_data.vhdx grows and never shrinks, and one image version usually
-# lingers. Building from source instead of loading a tar also leaves build
-# cache behind: this machine is carrying 29.06 GB of it across four images,
-# 21.86 GB of which is shared, so the share belonging to any one image is NOT
-# cleanly attributable and the build figure below is a margin, not a
-# measurement. That is stated rather than dressed up as precision.
-$needed = 12                                  # offline load, or an image already present
-if ($WithPerception) { $needed = $needed + 20 }   # igvc-humble-fused-drive is 14.1 GB
-if ($WithZed)        { $needed = $needed + 40 }   # igvc-zed-humble is 28.6 GB
+# The threshold is set above that, not at it, because docker_data.vhdx grows
+# and never shrinks and Windows 11 Home has no Hyper-V to compact it, so space
+# given to Docker does not come back. Attendees were asked to clear 60 GB,
+# which is comfortable headroom on purpose.
+#
+# Building the image instead of pulling it leaves build cache behind. That
+# share is NOT cleanly attributable, because this machine carries 29.06 GB of
+# build cache across four images with 21.86 GB of it shared, so the build
+# figure is a margin rather than a measurement. Stated rather than dressed up.
+$needed = 20                                      # pull the image from GHCR
+if ($BuildImage)      { $needed = 30 }            # build it from the Dockerfile
+if ($WithPerception)  { $needed = $needed + 20 }  # igvc-humble-fused-drive is 14.1 GB
+if ($WithZed)         { $needed = $needed + 40 }  # igvc-zed-humble is 28.6 GB
 
 $drive = (Get-Location).Drive.Name
 $free  = [math]::Round((Get-PSDrive $drive).Free / 1GB, 1)
 
 Write-Info ("WANTS : {0} GB free on {1}:" -f $needed, $drive)
 Write-Info ("FOUND : {0} GB free on {1}:" -f $free, $drive)
-Write-Info "Building the image rather than loading a saved one wants about 25 GB,"
-Write-Info "because of the build cache it leaves behind."
+Write-Info "Building the image instead of pulling it wants about 30 GB,"
+Write-Info "because of the build cache it leaves behind. Pass -BuildImage to"
+Write-Info "check against that number instead."
 
 if ($free -lt $needed) {
     Write-Bad ("Not enough free space: wants {0} GB, found {1} GB." -f $needed, $free)
@@ -355,10 +415,13 @@ Write-Host "  That one command updates the submodules, gets the image, builds" -
 Write-Host "  the workspace, and runs the GPU check and the smoke test," -ForegroundColor DarkGray
 Write-Host "  printing PASS or FAIL for each step." -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "  If someone handed you the image on a USB drive, use it and skip" -ForegroundColor White
-Write-Host "  the download entirely (D: is /mnt/d from WSL2):" -ForegroundColor White
+Write-Host "  The image is pulled from GitHub Container Registry. It is a" -ForegroundColor DarkGray
+Write-Host "  public package, so no docker login is needed: about 1.2 GB over" -ForegroundColor DarkGray
+Write-Host "  the wire, unpacking to 5.57 GB on disk." -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "    IMAGE_TAR=/mnt/d/igvc-gazebo-jazzy.tar bash scripts/gazebo/bootstrap.sh"
+Write-Host "  If GHCR is unreachable, build from the Dockerfile instead:" -ForegroundColor White
+Write-Host ""
+Write-Host "    BUILD_IMAGE=1 bash scripts/gazebo/bootstrap.sh"
 Write-Host ""
 Write-Host "  Full instructions: docs/GAZEBO_QUICKSTART.md" -ForegroundColor DarkGray
 Write-Host ""
