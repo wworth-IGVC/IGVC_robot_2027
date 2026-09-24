@@ -26,3 +26,10 @@ __pycache__/
 # logistics, which is not public-repo material.
 docs/runbooks/
 docs/SESSION_HANDOFF.md
+
+# The native (pixi / RoboStack) route, see pixi.toml and SETUP.md. .pixi holds
+# the installed environment (several GB) and .ws the colcon workspace that
+# route builds into. pixi.lock is NOT ignored: it pins every package version
+# so every Mac gets the same environment, and it must be committed.
+.pixi/
+.ws/

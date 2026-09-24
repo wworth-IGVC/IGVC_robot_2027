@@ -1,0 +1,78 @@
+# pixi.toml
+# The native (no Docker) environment for the Gazebo simulator, built from
+# RoboStack: ROS 2 Jazzy, Gazebo Harmonic and Nav2 as conda packages.
+#
+# THIS IS THE macOS ROUTE. On Apple Silicon it runs natively, renders on the
+# GPU through Metal, and can show a Gazebo window, none of which Docker Desktop
+# on macOS can do. See docs/setup/MACOS.md, which says plainly what has and has
+# not been verified on a real Mac.
+#
+# linux-64 is listed too, for two reasons: it is how this environment is
+# tested without a Mac (same recipes, same versions, on a machine this project
+# has), and it gives a native Linux user a route that needs no Docker.
+#
+# Windows users: keep using Docker and scripts/gazebo/bootstrap.sh. This file
+# does not change that path in any way.
+#
+#   pixi install                       # once, a few GB
+#   pixi run bootstrap                 # build, render check, smoke test
+#   pixi shell                         # a shell with ROS 2 Jazzy on PATH
+
+[workspace]
+name = "igvc-gazebo"
+channels = ["robostack-jazzy", "conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[dependencies]
+python = "3.12.*"
+ros-jazzy-ros-base = "*"
+ros-jazzy-ros-gz = "*"
+ros-jazzy-xacro = "*"
+ros-jazzy-robot-state-publisher = "*"
+ros-jazzy-rviz2 = "*"
+ros-jazzy-teleop-twist-keyboard = "*"
+ros-jazzy-navigation2 = "*"
+ros-jazzy-nav2-bringup = "*"
+ros-jazzy-image-geometry = "*"
+# ros-jazzy-twist-stamper is in the Docker image but deliberately NOT here:
+# RoboStack does not package it, and nothing in the Gazebo path uses it. Only
+# igvc_fused_drive.launch.py (the real robot) and isaac_nav_test.launch.py do.
+ros-jazzy-cv-bridge = "*"
+ros-jazzy-message-filters = "*"
+ros-jazzy-tf2-ros-py = "*"
+ros-jazzy-rmw-fastrtps-cpp = "*"
+colcon-common-extensions = "*"
+numpy = "*"
+opencv = "*"
+# The check scripts use GNU `timeout`, which macOS does not ship.
+coreutils = "*"
+# ament_cmake packages call project(), which probes for C and C++ compilers
+# even though none of ours compiles anything. Without these CMake fails on a
+# machine with no system toolchain.
+compilers = "*"
+cmake = "*"
+ninja = "*"
+make = "*"
+pkg-config = "*"
+
+[activation.env]
+# Where the scripts in scripts/gazebo/ look for things. Unset, they default to
+# the Docker container's layout, which is why Windows is unaffected.
+IGVC_RUNTIME = "pixi"
+IGVC_REPO = "$PIXI_PROJECT_ROOT"
+IGVC_WORKSPACE_ROOT = "$PIXI_PROJECT_ROOT"
+IGVC_WS = "$PIXI_PROJECT_ROOT/.ws"
+IGVC_ROS_PREFIX = "$CONDA_PREFIX"
+RMW_IMPLEMENTATION = "rmw_fastrtps_cpp"
+# Same reason as the compose files: DDS shared memory fails quietly (discovery
+# works, large messages never arrive), so use UDP only.
+FASTDDS_BUILTIN_TRANSPORTS = "UDPv4"
+GZ_VERSION = "harmonic"
+
+[tasks]
+bootstrap = "bash scripts/gazebo/bootstrap_native.sh"
+build = "bash scripts/gazebo/bootstrap_native.sh --build-only"
+render-check = "bash scripts/gazebo/render_check.sh"
+smoke = "bash scripts/gazebo/bringup_smoke_test.sh"
+autonomy = "bash scripts/gazebo/autonomy_check.sh"
+sim = "bash scripts/gazebo/start_sim.sh"
