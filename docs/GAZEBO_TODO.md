@@ -1,6 +1,6 @@
 # Gazebo simulator: what is done, and what is next
 
-**Updated 2026-09-17.** A single page for "where is the simulator up to".
+**Updated 2026-09-24.** A single page for "where is the simulator up to".
 `GAZEBO_SETUP.md` is the detail behind every line here.
 
 Priorities: **P0** blocks other work · **P1** needed before competition ·
@@ -101,7 +101,7 @@ Verified means a command was run and a number came back. Nothing below is
 
 ### Documentation
 
-- [x] `GAZEBO_QUICKSTART.md` + `IGVC_2027_Gazebo_Setup_Guide.docx`, zero to a
+- [x] `docs/setup/WINDOWS.md` + `docs/setup/IGVC_2027_Windows_Setup_Guide.docx`, zero to a
       driving robot, including a section for machines unlike the one this was
       built on.
 - [x] `GAZEBO_SETUP.md` sections 9 and 10; `DOCKER_CHANGES.md` section 13.
@@ -122,6 +122,39 @@ Verified means a command was run and a number came back. Nothing below is
       `generate_igvc_world.py` reads `constants.py` directly and fails loudly
       if the submodule is missing. Verified: the imported values regenerate a
       byte-identical world.
+
+### Every machine, and a native Mac route  *(2026-09-24)*
+
+- [x] **The checks no longer depend on how fast the machine is.** Fixed
+      `sleep 35` / `sleep 50` became readiness waits (`wait_ready.py`), the
+      autonomy watch window is 100 s of **simulation** time, and the smoke
+      test's drive runs on simulation time in one process
+      (`drive_probe.py`). Before this, the same code drove 83.0 m one day and
+      47.4 m the next because the simulator ran at half real time; now
+      89.9 m on tier A and 89.2 m on software rendering at 0.29x, each over
+      exactly 100.0 s of sim time. **Autonomy distances from before
+      2026-09-24 are not comparable with later ones.**
+- [x] **The smoke test no longer drives off the slab.** It did 2 runs in 2 on
+      2026-09-24, because the robot drove on a held command for as long as
+      four CLI pose samples took to start. Travel is now bounded at 3.2 m by
+      construction; measured 2.759 and 2.761 m.
+- [x] **`ON THE SLAB` no longer passes unmeasured.** A failed height read
+      used to default to the spawn height.
+- [x] **A native macOS route: pixi + RoboStack**, no Docker, Metal rendering
+      and a Gazebo window expected. Resolves for Apple Silicon (969
+      packages); passes bootstrap 18/18 and autonomy in a clean Linux
+      container on the same recipes; peak memory 3.5 GB.
+      `scripts/gazebo/native_dryrun.sh` reruns that proof in one command.
+- [x] **The repo says which path is yours.** `SETUP.md` at the root,
+      platform guides in `docs/setup/`, maintainer steps in
+      `docs/MAINTAINING_ENVIRONMENTS.md`.
+- [ ] **A Mac owner runs `docs/setup/MACOS_CHECKLIST.md`.** Nothing has run
+      on a Mac. Steps 7 (Metal, tier M) and 10 (the Gazebo window) are the two
+      only a Mac can answer.
+- [ ] **Does the simulator clock stall recur?** Seen once on tier A on
+      2026-09-24: `/clock` stopped about 2 s in, every camera topic silent.
+      Hypothesis: a first render that never completes, holding the
+      sensors-gated physics step. See the report, section 19.6.
 
 ### Retracted, on purpose
 
@@ -205,6 +238,19 @@ Verified means a command was run and a number came back. Nothing below is
       The first run reported `inf` extents and 45% inliers. Filter with
       `np.isfinite` explicitly. Also, `read_points` returns a **structured**
       array on Jazzy; index by field name.
+- [x] **The 2D lidar sees the barrels, in Nav2's frame, today.**
+      *(2026-09-24)* Robot parked 2.77 m from a barrel at a 45 degree yaw:
+      100.0% of 480 returns beyond the footprint land on a barrel through TF
+      in `odom`, barrels at 2.77, 5.80 and 8.89 m all hit, and both negative
+      controls (no transform; spawn yaw applied twice) score 0%. The scan
+      plane is about 0.69 m up and the barrels are 0.9 m tall.
+      `scripts/gazebo/measurements/lidar_barrel_check.py`. **So obstacle
+      perception does not have to wait for the point-cloud fix below:**
+      `obstacle_layer` with `lidar_scan` as its only source is the smaller
+      first step. It is still a consumer that has never been connected, so
+      re-baseline all three gates when it is. The lidar cannot see paint, so
+      lanes stay a camera problem; 80 own-body returns at 0.10 to 0.13 m are
+      inside the footprint the layer clears.
 - [ ] **Fix the point-cloud frame, and expect it to change behaviour.** Three
       options are written up in the report; a republisher is the only one that
       does not disturb the perception path. **This is not a bug fix, it is a
@@ -327,7 +373,12 @@ Verified means a command was run and a number came back. Nothing below is
 
 ### P2, worth doing
 
-- [ ] **Settle the `/cmd_vel` timeout properly.** Asserted and withdrawn
+- [x] **`/cmd_vel` timeout: SETTLED 2026-09-24. DiffDrive holds the last
+      command indefinitely**, 1.605 m in 4.01 s of sim time with no command,
+      still at 0.400 m/s, measured between stamped odometry messages by
+      `drive_probe.py`. The real robot's controller times out, so sim is the
+      less safe of the two. The text below is the history.
+- [x] ~~Settle the `/cmd_vel` timeout properly.~~ Asserted and withdrawn
       twice. Needs a test that timestamps the last command against the last
       odometry change rather than inferring a window from `ros2 topic echo`
       latency. `diff_drive_controller` does time out, so a difference runs in

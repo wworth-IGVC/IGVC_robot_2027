@@ -1592,8 +1592,8 @@ drop `runtime: nvidia` and the `NVIDIA_*` variables and keep `/dev/dri`.
 
 ### 13.5 Documentation for people who are not us
 
-`docs/GAZEBO_QUICKSTART.md` and the Word file generated from it by
-`docs/make_gazebo_docx.py` take someone from a fresh machine to a robot driving
+`docs/setup/WINDOWS.md` and the Word file generated from it by
+`docs/setup/make_setup_docx.py` take someone from a fresh machine to a robot driving
 the course. The part worth keeping current is section 1A, which covers machines
 unlike the one everything was verified on: Windows 10 and its WSLg build floor,
 native Linux, AMD and Intel GPUs, no usable GPU at all, macOS, and Docker
@@ -1912,7 +1912,7 @@ it is no longer the way anyone gets the image.
 | Size | about 1.2 GB over the wire, 5.57 GB unpacked |
 
 **amd64 only is deliberate and it is why macOS and arm64 remain unsupported**,
-exactly as `GAZEBO_QUICKSTART.md` section 5 describes. A multi-arch build is a
+exactly as `docs/setup/WINDOWS.md` section 5 describes. A multi-arch build is a
 backlog item, not a gap.
 
 **The package is user-scoped, owned by `wworth-IGVC`**, the charlotte.edu
@@ -2018,3 +2018,48 @@ has to be physically passed around, and it cannot be updated after the fact.
 - **Publishing from Actions rather than a local Docker** would link the
   package automatically and remove the "only the namespace owner can push"
   constraint in 16.3. Not started.
+
+---
+
+## 17. A second delivery route, and the compose files learn their own names
+
+**2026-09-24.** No image changed. The published image is the one recorded in
+section 16, re-verified today as still public by an anonymous
+`docker manifest inspect` returning the same amd64 digest.
+
+### 17.1 The native route
+
+The simulator now reaches Macs and native Linux without Docker: `pixi.toml`
+and `pixi.lock` install ROS 2 Jazzy, Gazebo Harmonic and Nav2 from RoboStack.
+How the two routes are kept carrying the same packages, and how each is
+updated and published, is `docs/MAINTAINING_ENVIRONMENTS.md`. The evidence is
+report section 19.4.
+
+### 17.2 Compose changes
+
+| File | Change | Why |
+| --- | --- | --- |
+| `docker-compose.mac.yml` | Header reframed: this is the Mac **fallback**, the route is native. Adds `IGVC_COMPOSE_FILE`, `IGVC_SERVICE`, `IGVC_CONTAINER` | The recovery hints the scripts print used to name the Windows file and container on every platform |
+| `docker-compose.yml`, `igvc_gazebo_linux` | Adds the same three variables | Same reason |
+| `docker-compose.windows.yml` | **Unchanged** | The scripts' defaults are the Windows values |
+
+### 17.3 Two corrections for the Mac fallback
+
+- **`--platform linux/amd64` is required on Apple Silicon.** Verified today:
+  asking the registry for arm64 returns `no matching manifest for linux/arm64
+  in the manifest list entries`. The attestation entry makes the published
+  artefact an index, and an index with no matching platform fails rather than
+  falling back to emulation.
+- **Docker Desktop's default amd64 emulator on Apple Silicon is Rosetta**, on
+  the Apple Virtualization framework backend that has been the default since
+  4.44.0, when QEMU was removed as a backend. The "Docker VMM" backend has no
+  Rosetta and emulates much more slowly.
+
+### 17.4 Still not done
+
+- **A native arm64 image.** A local build under QEMU was attempted and blocked
+  by the session's permission classifier. It would only remove emulation from
+  the Mac fallback; the Mac route itself is native.
+- **`igvc_gazebo_linux` has still never run on a Linux machine**, and it sets
+  `runtime: nvidia`, so as written it is NVIDIA-only. `docs/setup/LINUX.md`
+  recommends pixi for that reason.

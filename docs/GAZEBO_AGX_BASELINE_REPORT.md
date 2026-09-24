@@ -1325,12 +1325,12 @@ Documents:
 
 | File | Change |
 | --- | --- |
-| `docs/GAZEBO_QUICKSTART.md` | Rewritten end to end. `--recurse-submodules`, the offline USB path, derived disk numbers, four packages not three, today's reference numbers, the `IN LANE` coin flip, and a section 10 that says what does not work without hedging |
+| `docs/setup/WINDOWS.md` | Rewritten end to end. `--recurse-submodules`, the offline USB path, derived disk numbers, four packages not three, today's reference numbers, the `IN LANE` coin flip, and a section 10 that says what does not work without hedging |
 | `docs/GAZEBO_SETUP.md` | 10.2a and 10.4 retract the lane width, the abort count and the corridor arithmetic. New 10.7 to 10.10 record the Phase 1 changes. 10.6's point-cloud item moves from unverified to measured |
 | `docs/GAZEBO_TODO.md` | The update held pending the branch question. P0-1, P0-3 and P0-4 results, the `IN LANE` decision as a TEAM item, the corrected clearance margin, and one false retraction corrected |
 | `docs/DOCKER_CHANGES.md` | New section 15: the images and which one you need, the two sizes 4.6x apart, the measured offline path, volumes, every environment variable, the `FASTDDS_DEFAULT_PROFILES_FILE` asymmetry, amended outstanding list |
 | `README.md` | Opens with what the project is, that it is the team repo as of September 2026, three commands to a driving robot, and what works and does not with numbers |
-| `docs/IGVC_2027_Gazebo_Setup_Guide.docx` | Regenerated from the quickstart so the Word copy cannot disagree with the Markdown |
+| `docs/setup/IGVC_2027_Windows_Setup_Guide.docx` | Regenerated from the quickstart so the Word copy cannot disagree with the Markdown |
 | `SOFTWARE_SESSION_2026-09-17.md` | **New**, and **no longer in this repo**, see 16.8. Pre-flight, a timed two-hour plan, five likeliest failures, the no-GPU fallback, the demo order, eight known-not-working items to read aloud, four questions for Aidan |
 | `CLAUDE.md` (in-repo) | Said "ROS 2 **Humble**" at the top. Corrected, but the file is excluded in `.git/info/exclude` and has never been tracked, so the change is local-only. See C-19 |
 
@@ -1352,7 +1352,7 @@ nonexistent `IMAGE_TAR` it stops at step 3 with the `/mnt/d` hint. Both exit 1.
 Listed as corrections because a teammate would have hit each one.
 
 **C-10. The documented clone command had no `--recurse-submodules`, and it
-breaks the build.** `GAZEBO_QUICKSTART.md` section 2 said
+breaks the build.** `docs/setup/WINDOWS.md` section 2 said
 `git clone https://github.com/...`. There are nine submodules and two are
 load-bearing: `zed_description` is one of the four packages colcon builds **by
 name**, so the workspace build fails outright on a package the user never
@@ -1428,7 +1428,7 @@ commit the file so the orientation it provides is shared, or delete it so
 nobody edits a file that goes nowhere. Same question as the session-root
 documents, which also exist only on one disk.
 
-**C-20. `docs/GAZEBO_QUICKSTART.md` claimed "Verified 2026-09-15" while
+**C-20. `docs/setup/WINDOWS.md` claimed "Verified 2026-09-15" while
 describing behaviour that was fixed on 2026-09-17.** Dates and the machine
 specification are now stated together at the top, with the explicit warning
 that the numbers are x86 laptop numbers and not AGX numbers.
@@ -1840,7 +1840,7 @@ rendering**, which is a strictly harder condition than the gate requires.
 
 **C-21. Every USB and offline-transfer instruction is now wrong.** A sweep of
 all 225 tracked files found **56 hits** across 8 files. The instructions are
-removed from `GAZEBO_QUICKSTART.md` (an entire section 5 titled "Making the USB
+removed from `docs/setup/WINDOWS.md` (an entire section 5 titled "Making the USB
 drive", plus the recommended fast path, the timing table, the disk budget, the
 sample output and the cheat sheet), `bootstrap.sh`, `setup-windows.ps1` (where
 it was **runtime output**, not a comment), `README.md`, `GAZEBO_TODO.md`,
@@ -2027,8 +2027,8 @@ project has lost time before.
 | File | What it does |
 | --- | --- |
 | `docker-compose.mac.yml` | **New.** The Gazebo service with every Windows assumption removed: no `gpus`, no `/dev/dxg`, no `/usr/lib/wsl`, no WSLg mounts, no `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` or `PULSE_SERVER`, no `GALLIUM_DRIVER`. Adds `platform: linux/amd64` and `LIBGL_ALWAYS_SOFTWARE=1`. Keeps `shm_size: "2gb"`. Container `igvc_gazebo_mac` and volumes `igvc_gazebo_mac_*`, distinct from the Windows ones |
-| `docs/MAC_SETUP.md` | **New.** What works and what cannot, the install steps, the commands in order with expected output, where to record a failure, and the arm64 scoping note. Opens by stating that no Mac has run it |
-| `docs/MAC_VERIFICATION_CHECKLIST.md` | **New.** A tear-off list for the Mac owner: command, what good looks like, and a blank for what actually happened, for twelve steps |
+| `docs/setup/MACOS.md` | **New.** What works and what cannot, the install steps, the commands in order with expected output, where to record a failure, and the arm64 scoping note. Opens by stating that no Mac has run it |
+| `docs/setup/MACOS_CHECKLIST.md` | **New.** A tear-off list for the Mac owner: command, what good looks like, and a blank for what actually happened, for twelve steps |
 | `scripts/gazebo/bootstrap.sh` | **Extended, Windows behaviour unchanged.** `COMPOSE_FILE`, `SERVICE` and `CONTAINER` become `${VAR:-<the same default>}`, and a new `PULL_PLATFORM` defaults to empty so the Windows `docker pull` is invoked exactly as before. Verified: with nothing set, the three resolve to `docker-compose.windows.yml`, `igvc_gazebo`, `igvc_gazebo`, and `PULL_PLATFORM` is empty |
 
 **The launch route, worked out from the scripts rather than assumed.**
@@ -2192,7 +2192,7 @@ after finding it would be worse. Both are small and reversible if you disagree.
 
 ### 18.7 The arm64 question, written only
 
-Not started, per instruction. Full scoping is in `docs/MAC_SETUP.md` section 7.
+Not started, per instruction. Full scoping is in `docs/setup/MACOS.md` section 7.
 In brief: a native arm64 image **removes the emulation layer and nothing
 else**. Rendering stays on the CPU, because the GPU limitation is about Docker
 on macOS rather than about architecture, **so there is still no window on a
@@ -2232,3 +2232,227 @@ git push -u origin mac-support
 `main` is untouched by this work. Nothing here changes any Windows behaviour,
 and that claim is backed by the default-resolution check in 18.2 rather than
 by inspection alone.
+
+---
+
+## 19. The Mac route goes native, and the checks stop depending on machine speed
+
+**Written 2026-09-24, on `mac-support`.** Section 18 built a headless Docker
+path for Macs. This pass re-checked its premises against current vendor
+documentation, found two of them wrong, and changed the Mac route entirely:
+**Liam's decision is that the Mac route is native, pixi plus RoboStack, with
+Docker kept only as a fallback. Intel Macs are not supported.** Along the way,
+running the check scripts rather than reading them found four defects that hit
+every machine, and hit slow machines hardest.
+
+### 19.1 Corrections to sections 17 and 18
+
+| Claim | Where | Now |
+| --- | --- | --- |
+| Rosetta is off by default in Docker Desktop; the default amd64 emulator is QEMU | 17.3, C-26, the Windows guide | **Wrong for current Docker Desktop.** QEMU was removed as a VM backend in 4.44.0 (2025-08-07); the default Apple Virtualization framework backend uses Rosetta, and the 4.25 release notes and the settings-management reference both give it as on by default. The user-facing settings table still says "Disabled", so Docker's own documents conflict; two of three say on. The "Docker VMM" backend has no Rosetta at all |
+| `--platform linux/amd64` is good practice, not a gate | 17.3 | **Wrong.** Verified by asking the registry for arm64: `no matching manifest for linux/arm64 in the manifest list entries`. Because the published index carries an attestation entry, it is a list, and a list with no match fails outright rather than falling back to emulation |
+| A Mac cannot show the Gazebo window, and there is no workaround | 17.3, README, the Windows guide | **True of Docker only.** Natively, RoboStack's Gazebo renders through Metal and has a GUI; so do VMware Fusion (free since 2024-11, OpenGL 4.3 claimed for arm64 Linux guests, untested with ogre2) and Parallels or UTM (OpenGL 2.1, reportedly needing `--render-engine ogre`) |
+| The emulated colcon build is the likeliest failure | 18.6 | **Wrong reason.** The four packages compile no C++: zero `add_executable` or `add_library` targets and zero `.cpp` files in the three `ament_cmake` packages, and the fourth is `ament_python`. Starved to 2 of 24 CPUs the build went from 13 s to 18 s |
+| Fixed waits too short on slow machines, fixed by a `SLOW_FACTOR` multiplier | an uncommitted draft of this section | **Refuted by measurement, and never committed.** With a 2 s startup wait on tier A the smoke test's topic checks still passed 18 of 18, because each has its own timeout. The real slow-machine failure was the drive, 19.3. `SLOW_FACTOR` was replaced by readiness waits and simulation-time windows, which need no knob |
+
+### 19.2 Why RoboStack
+
+| Route for a modern MacBook | Window | GPU | Needs from the team | Evidence |
+| --- | --- | --- | --- | --- |
+| **pixi + RoboStack, native** | yes | **Metal** | a `pixi.toml`, done | packages verified for osx-arm64; runtime unverified on a Mac |
+| VM (VMware Fusion) + arm64 Ubuntu | yes | OpenGL 4.3 claimed | nothing | ogre2 untested; one Parallels report needed `--render-engine ogre` |
+| Docker, native arm64 image | no | no | an arm64 build | not built, see 19.8 |
+| Docker, amd64 under Rosetta | no | no | nothing | the section 18 path, verified on Windows only |
+| Podman + krunkit | no | Vulkan compute only | a patched Mesa | unsuitable: Podman's docs say compute, not rendering |
+
+Upstream caveats, stated in the Mac guide rather than hidden: ROS 2 Jazzy on
+macOS is **Tier 3**, Gazebo calls its macOS GUI "currently known to be
+unstable", the macOS `gz` CLI refuses to run server and GUI in one process, and
+RoboStack's Gazebo is **gz-sim 8.10.0** against the Docker image's **8.15.0**.
+
+Current hardware, from Apple's comparison page: the base MacBook (A18 Pro) has
+**8 GB**, MacBook Air and Pro start at 16 GB. The whole stack peaked at
+**3506 MB** resident in the dry run, 19.4, so 8 GB is tight rather than
+impossible.
+
+### 19.3 Four defects the checks had on every machine
+
+**1. The smoke test drove the robot off the ground slab, 2 runs in 2 this
+morning.** The burst was `ros2 topic pub` for 3 s at 0.4 m/s, then four pose
+samples through `ros2 topic echo --once` and `gz model -p` before the stop was
+published. Each CLI call spends seconds starting, and DiffDrive holds the last
+command throughout, so the robot drove for as long as the sampling took. A
+"4 s" coast window measured 4.69 m, which at 0.4 m/s is about 11.7 s; total
+travel was 9.53 and 9.92 m against a slab edge 9.44 m away. **The excursion
+scaled with how slowly the machine starts a Python process**, so an emulated
+Mac would have been worse. `scripts/gazebo/drive_probe.py` now runs burst,
+coast and stop in one process on simulation time, bounding travel at 3.2 m on
+any machine. Measured: **2.759 m** on tier A at 0.70x real time, **2.761 m**
+on software rendering at 0.29x.
+
+**2. The autonomy check measured the machine as much as the robot.** Its watch
+window was 100 wall-clock seconds, so the same code drove **83.0 m** on
+2026-09-17 and **47.4 m** this morning, when the simulator ran at about half
+real time. `pose_logger.py` now stops on simulation time, and the window opens
+when the robot starts driving itself rather than after a fixed `sleep 50`.
+Measured: **89.9 m** on tier A and **89.2 m** on software rendering, each over
+exactly 100.0 s of simulation time.
+
+**3. `ON THE SLAB` passed when nothing had been measured.** If `gz model -p`
+returned no pose, the final height fell back to the spawn height, 0.2311 m. It
+now reports `FAIL  NOT MEASURED` instead.
+
+**4. Fixed startup sleeps** (`sleep 35`, `sleep 50`) are replaced by
+`scripts/gazebo/wait_ready.py`, which returns when `/clock` is advancing and
+`/odom` is live, or when the robot is moving, under a 300 s ceiling. Tier A
+readiness: 11 to 13 s for the smoke test, 18 s for autonomy.
+
+Every new failure path was shown to fail on a broken input: the probe
+commanding a topic nothing subscribes to (`FAIL`, exit 1), readiness with no
+simulator (`NOT READY`, exit 1), a check script run outside pixi, and the
+native bootstrap run outside pixi (each exits 1 naming the fix).
+
+### 19.4 The native route, verified as far as possible without a Mac
+
+- **`pixi lock` resolves `pixi.toml` for osx-arm64 (969 packages) and
+  linux-64 (1033)** without installing either. It caught one gap before any
+  Mac owner could: `ros-jazzy-twist-stamper` is not in RoboStack, and nothing
+  in the Gazebo path uses it, so it is omitted with a note.
+- **conda-forge's osx-arm64 `ogre-next` 2.3.3 ships `RenderSystem_Metal`**,
+  read from the package's file list.
+- **A clean Ubuntu 24.04 container with no ROS**, the repo at a home-directory
+  path, pixi installing the linux-64 build of the same recipes: `pixi install
+  --locked` 118 s and 5.8 GB; `pixi run bootstrap` exit 0 in 161 s, 18 of 18,
+  heading 0.13 deg, ratio 0.9970, tier C; `pixi run autonomy` PASS, 89.2 m,
+  worst clearance +0.108 m, peak resident memory **3506 MB**, at 0.29x real
+  time. `scripts/gazebo/native_dryrun.sh` packages this as one command and was
+  itself run from a WSL2 shell: **NATIVE DRY RUN: PASS** in 764 s (install 87 s,
+  bootstrap 150 s, autonomy PASS 88.8 m), container removed afterwards. Its
+  first run failed silently when Docker Desktop had stopped during a pause;
+  it now checks `docker info` first and says why.
+
+**Not verifiable without a Mac**, and asked for in
+`docs/setup/MACOS_CHECKLIST.md`: Metal rendering of the camera and lidar and
+the new tier M detection; the separate `gz sim -g` GUI process the launch file
+now starts on macOS; headless sensor rendering without `--headless-rendering`,
+which is EGL and Linux-only; the BSD userland; every timing on Apple hardware.
+
+### 19.5 The `/cmd_vel` timeout question, settled
+
+Asserted and withdrawn three times since 2026-09-15, because every attempt
+measured the coast between CLI samples an unknown number of seconds apart. The
+drive probe measures it between two odometry messages whose stamps it
+records, starting at the last command actually sent. **Gazebo's DiffDrive
+holds the last command indefinitely**: 1.605 m in 4.01 s of simulation time
+with no command at all, still at exactly 0.400 m/s, on tier A; 1.591 m in
+3.98 s at 0.400 m/s on software rendering. The real robot's
+`diff_drive_controller` times out, so **the simulator is the less safe of the
+two**, and anything relying on a stale command stopping the robot will pass in
+simulation and fail on hardware.
+
+### 19.6 A simulator clock stall, seen once
+
+One smoke run this morning on tier A: `/clock` advanced about 2 s, then
+stopped, with every camera topic silent and the robot's ground-truth pose
+frozen. The next run, same code, passed 18 of 18. **Hypothesis, not a
+finding:** gz-sim's sensors system holds the physics step until a render
+completes, so a render thread that never finishes freezes simulation time
+exactly like this. The drive probe now names the condition ("the simulation
+clock is not advancing") so it cannot be read as a drive failure. Recurrence: **none in the four
+later smoke runs** on the final tree, so 1 stall in 5 runs today. Not
+reproduced, not explained, recorded so the next one is recognised.
+
+### 19.6a A perception finding: the lidar sees the barrels in Nav2's frame
+
+Asked because it decides where obstacle perception starts. Robot parked with a
+spawn override 2.77 m from barrel 2 at a 45 degree yaw, nav2 off, 20 scans,
+every return transformed through TF into `odom` and compared with the barrel
+positions predicted from `track_points.json`:
+
+| | Explained by a barrel | Barrels hit |
+| --- | --- | --- |
+| **Real transform** | **100.0% of 480 returns** beyond the footprint | 3 of the 3 in range, at 2.77, 5.80, 8.89 m |
+| NEG-A, no transform | 0.0% | 0 |
+| NEG-B, spawn yaw applied twice | 0.0% | 0 |
+
+80 more returns sit 0.10 to 0.13 m from the lidar at 161 to 164 degrees: the
+robot's own structure, inside the footprint Nav2 clears. Two mistakes were made
+and caught in getting here: the first run parked the robot at the default
+spawn, where every barrel is beyond the lidar's 12 m range (nearest 12.92 m);
+the second used yaw 0, where the doubled-yaw control equals the real transform
+and proves nothing.
+
+**Consequence:** `obstacle_layer` fed by `/scan` alone would mark the barrels
+correctly with no code change, so obstacle perception can start before the
+point-cloud frame fix (P0-3). It remains a consumer that has never been
+connected, with the same re-baselining requirement. The lidar cannot see
+paint; lanes stay a camera problem.
+
+### 19.7 The repository, organised by platform
+
+A newcomer can now see which path is theirs from the root:
+
+| Change | Why |
+| --- | --- |
+| **`SETUP.md`** at the root | one table, machine to path to guide to command; the daily commands for both paths side by side; which files belong to which path |
+| **`docs/setup/`**: `WINDOWS.md` (was `GAZEBO_QUICKSTART.md`), `MACOS.md` (rewritten, native first), `MACOS_CHECKLIST.md` (rewritten for pixi), `LINUX.md` (new), `SESSION_COMMANDS.md`/`.docx`, the Windows `.docx`, `make_setup_docx.py` | setup guides named by platform, in one place; 16 files repointed, both `.docx` regenerated |
+| **`docs/MAINTAINING_ENVIRONMENTS.md`** | the deployment side: how the image and the lock are changed, verified and published, and the rule that keeps the two routes carrying the same packages |
+| **`scripts/gazebo/igvc_env.sh`** | one place that knows the container layout and the pixi layout, so every check script runs unchanged in both; the duplicated colcon block becomes one `igvc_build` |
+| **`pixi.toml`, `pixi.lock`, `bootstrap_native.sh`, `native_dryrun.sh`** | the native route and its maintainer check |
+| README entry, `docs/README.md`, compose headers | route by platform; `docker-compose.mac.yml` now says it is the fallback |
+
+Compose files stay at the root: their `.` bind mounts depend on it.
+
+### 19.8 What was not done
+
+- **A native arm64 Docker image.** The local build under QEMU was blocked by
+  the session's permission classifier. It is not needed for the Mac route,
+  which is native; it would only take the emulation out of the Docker
+  fallback. The QEMU `binfmt` handler registered for the attempt cleared when
+  Docker Desktop restarted.
+- **Nothing ran on a Mac.** Everything in 19.4 is Linux evidence for a macOS
+  claim, labelled as such.
+- **The `IN LANE` gate is still the flat 2.00 m tolerance.** Today's runs
+  reached 1.92 and 1.80 m, both passes, both close.
+
+### 19.9 Gates on the final tree, and commits
+
+Windows tier A, final script tree, after every change above:
+
+| Gate | Result |
+| --- | --- |
+| `render_check.sh` | PASS, tier A, exit 0 |
+| `bringup_smoke_test.sh`, three runs | **18 of 18 each**, drive 2.759, 2.761, 2.767 m, heading 0.13 deg, ratio 0.9970 every time |
+| `autonomy_check.sh` | **PASS**, 89.8 m over 100.0 s of sim time, worst clearance +0.087 m, IN LANE 1.95 m |
+| native dry run, `native_dryrun.sh` | PASS, 764 s |
+
+Branch `mac-support`, on top of section 18's six commits. One topic each:
+
+| Commit | What |
+| --- | --- |
+| `ab87fd5` | Run every simulator script in the container or a pixi environment |
+| `7c183a4` | Make the checks independent of machine speed, and stop driving off the slab |
+| `da25553` | Add the native macOS route: pixi and RoboStack, no Docker |
+| `975fe1d` | Let the Mac and Linux compose files name themselves in recovery hints |
+| `f0d7506` | Organise setup by platform: SETUP.md, docs/setup/, and a maintainer guide |
+| `0c7f680` | Prove the lidar sees the barrels in Nav2's frame, and ship the check |
+
+plus the commit carrying this section, the to-do list and the change record.
+After the final gates ran, the only script edits were two printed cross-
+references (`bootstrap.sh` section 9 to 10, `bootstrap_native.sh` step 5 to 7),
+neither in any gate's path.
+
+**`main` is NOT updated; that is Liam's decision.** The freeze rule is met, all
+three gates pass on this tree, and `main` (`f513273`) is an ancestor of this
+branch, so it is a clean fast-forward with no merge commit. Members only see
+the reorganisation once it is on `main`. PowerShell:
+
+```powershell
+cd "C:\IGVC 2027\IGVC_robot_2027"
+git push -u origin mac-support
+git checkout main
+git merge --ff-only mac-support
+git push origin main
+```
+
+`--ff-only` refuses rather than creating a merge commit if `main` has moved.
