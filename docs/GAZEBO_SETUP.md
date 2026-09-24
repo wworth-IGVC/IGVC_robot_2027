@@ -32,7 +32,7 @@ GPU, with nothing ROS-version-specific in them.
 | A robot that drives ITSELF | **Yes.** 122.9 m of autonomous driving, max 1.79 m off the lane centreline, no `/cmd_vel` from the test. Section 10 |
 | Perception | **No, and do not imply otherwise.** Lanes and barrels come from `track_points.json`; nothing plans on the camera or lidar. Section 10.3 |
 
-**New here? Read `GAZEBO_QUICKSTART.md` instead**, or the Word version of it.
+**New here? Read `docs/setup/WINDOWS.md` instead**, or the Word version of it.
 This file is the reference and explains why; that one gets you to a driving
 robot in about 45 minutes without assuming you have read this.
 
@@ -589,7 +589,7 @@ rather than adding `tr -d '\r'` calls.
 - **The other two team machines.** The RTX 5080 Laptop and the Windows 10
   machine have still not been tested, and **native Linux has no verified path
   either** - `igvc_gazebo_linux` is written but unrun (`DOCKER_CHANGES.md`
-  13.4). `GAZEBO_QUICKSTART.md` section 1A is written for exactly this gap. The Intel-adapter crash in particular depends
+  13.4). `docs/setup/WINDOWS.md` section 1A is written for exactly this gap. The Intel-adapter crash in particular depends
   on the iGPU, so it will differ per machine. `render_check.sh` exists so each
   member can settle it in one command.
 ## 8. The world and the launch file: a robot that drives

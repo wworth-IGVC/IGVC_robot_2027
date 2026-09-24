@@ -40,7 +40,7 @@ set -o pipefail   # NOT set -u: it breaks /opt/ros/*/setup.bash, which reads
 
 # These three default to the Windows values, so the Windows path is byte for
 # byte what it was. They are overridable only so the macOS path can reuse this
-# script instead of duplicating it; see docs/MAC_SETUP.md. Nothing that does
+# script instead of duplicating it; see docs/setup/MACOS.md. Nothing that does
 # not set them can behave differently.
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.windows.yml}"
 SERVICE="${SERVICE:-igvc_gazebo}"
@@ -54,7 +54,7 @@ REGISTRY_IMAGE="${IMAGE_REF:-ghcr.io/wworth-igvc/igvc-gazebo-jazzy:latest}"
 REPO_IN_CONTAINER=/root/ros2_ws/src/IGVC_robot_2026
 
 # Free disk the Gazebo path needs, measured on this project. See
-# docs/GAZEBO_QUICKSTART.md section 1 for the derivation:
+# docs/setup/WINDOWS.md section 1 for the derivation:
 #   5.57 GB  the image, unpacked on disk
 #   0.60 GB  the clone and its nine submodules, including .git
 #   ~4 GB    Docker Desktop itself plus the WSL2 Ubuntu distro, on a blank
@@ -75,7 +75,7 @@ fail() {
     printf '\n  FAIL  %s\n' "$*"
     printf '\n  Stopped at step %s. Nothing after this point has run.\n' "$STEP"
     if [ -n "$FAILED" ]; then printf '  %s\n' "$FAILED"; fi
-    printf '\n  docs/GAZEBO_QUICKSTART.md section 9 lists the usual causes.\n\n'
+    printf '\n  docs/setup/WINDOWS.md section 10 lists the usual causes.\n\n'
     exit 1
 }
 step() { STEP=$((STEP + 1)); printf '\n==> step %s: %s\n' "$STEP" "$*"; }
@@ -97,7 +97,7 @@ case "$(pwd)" in
     /mnt/*) pass "running from a WSL2 shell, so GUI windows will work later" ;;
     *) warn "cwd is not under /mnt, so this may not be a WSL2 shell."
        info "Headless checks still work. A Gazebo window will not."
-       info "See docs/GAZEBO_QUICKSTART.md section 0." ;;
+       info "See docs/setup/WINDOWS.md section 0." ;;
 esac
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -280,7 +280,7 @@ case "$TIER" in
     info "runs on the CPU either way. Cameras are the part that suffers."
     info ""
     info "This script will NOT claim your GPU works. Follow the TIER C path in"
-    info "docs/GAZEBO_QUICKSTART.md: headless plus RViz, front camera only,"
+    info "docs/setup/WINDOWS.md: headless plus RViz, front camera only,"
     info "and do not take camera or timing measurements."
     if [ "$ALLOW_TIER_C" != "1" ]; then
         info ""

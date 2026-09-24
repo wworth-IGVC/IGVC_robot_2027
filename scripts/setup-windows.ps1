@@ -17,7 +17,7 @@
 
     That is deliberate. Docker Desktop's own Linux VM has no display, so a
     container started from PowerShell can never open a Gazebo or RViz window,
-    and the failure is silent. See docs/GAZEBO_QUICKSTART.md section 0.
+    and the failure is silent. See docs/setup/WINDOWS.md section 0.
 
     Run this from the repository root:
 
@@ -423,7 +423,7 @@ Write-Host "  If GHCR is unreachable, build from the Dockerfile instead:" -Foreg
 Write-Host ""
 Write-Host "    BUILD_IMAGE=1 bash scripts/gazebo/bootstrap.sh"
 Write-Host ""
-Write-Host "  Full instructions: docs/GAZEBO_QUICKSTART.md" -ForegroundColor DarkGray
+Write-Host "  Full instructions: docs/setup/WINDOWS.md" -ForegroundColor DarkGray
 Write-Host ""
 
 if ($CheckOnly) {

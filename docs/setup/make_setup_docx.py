@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-make_gazebo_docx.py
+make_setup_docx.py
 
-Generate docs/IGVC_2027_Gazebo_Setup_Guide.docx from GAZEBO_QUICKSTART.md.
+Generate docs/setup/IGVC_2027_Windows_Setup_Guide.docx from docs/setup/WINDOWS.md.
+Set MD_IN (and DOCX_OUT) to render another guide in this directory the same way,
+e.g. MD_IN=SESSION_COMMANDS.md DOCX_OUT=SESSION_COMMANDS.docx.
 
-The Markdown is the source of truth. Edit GAZEBO_QUICKSTART.md and re-run this;
+The Markdown is the source of truth. Edit WINDOWS.md and re-run this;
 do not edit the .docx, because the next run overwrites it.
 
-    python3 docs/make_gazebo_docx.py
+    python3 docs/setup/make_setup_docx.py
 
 Word LOCKS the file while it is open, and the write then fails with a
 permission error. Close Word first, or write somewhere else and copy it in:
 
-    DOCX_OUT=/tmp/guide.docx python3 docs/make_gazebo_docx.py
+    DOCX_OUT=/tmp/guide.docx python3 docs/setup/make_setup_docx.py
 
 Needs python-docx. On this project that lives in the Git Bash python3, not the
 PowerShell one:
@@ -32,9 +34,9 @@ except ImportError:
     sys.exit("python-docx is not installed:  python3 -m pip install python-docx")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "GAZEBO_QUICKSTART.md")
+SRC = os.path.join(HERE, os.environ.get("MD_IN") or "WINDOWS.md")
 OUT = os.environ.get("DOCX_OUT") or os.path.join(
-    HERE, "IGVC_2027_Gazebo_Setup_Guide.docx")
+    HERE, "IGVC_2027_Windows_Setup_Guide.docx")
 
 MONO = "Consolas"
 CODE_BG = RGBColor(0x1E, 0x1E, 0x1E)

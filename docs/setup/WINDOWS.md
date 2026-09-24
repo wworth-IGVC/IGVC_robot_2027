@@ -1,4 +1,7 @@
-# Gazebo simulator: from a blank Windows install to driving the course
+# Gazebo simulator on Windows: from a blank install to driving the course
+
+**This is the Windows guide.** On a Mac or Linux machine, go back to
+[`SETUP.md`](../../SETUP.md) and take the path for your platform instead.
 
 **Assumes nothing is installed.** No Git, no Docker, no WSL2, no Python. If you
 have a fresh Windows laptop and about 60 GB free on C:, this file is everything
@@ -20,12 +23,10 @@ This file is the *how*.
 You do not need to read three paths to find yours. Read this, then jump.
 
 ```text
-  1. Do you have a Mac?
-        yes -> section 5. Short answer: tonight you pair with a Windows
-               laptop. A Mac can run the headless checks under emulation,
-               but it CANNOT show the Gazebo window at all: XQuartz's GL
-               is too old for gz-sim's renderer. Do not spend tonight on it.
-        no  -> continue
+  1. Is this a Windows machine?
+        no  -> wrong guide. SETUP.md: Macs and Linux use the native
+               pixi path, docs/setup/MACOS.md or docs/setup/LINUX.md.
+        yes -> continue
 
   2. Do you have Administrator rights on this laptop?
         no  -> you cannot install Docker Desktop. Pair with someone.
@@ -471,8 +472,8 @@ option.
 The published index carries **amd64 only**, plus a second entry whose platform
 reads `unknown/unknown`. **That entry is the buildx attestation, not a broken
 or missing architecture**, so do not read it as a partial publish. There is no
-arm64 entry, which is why macOS and Apple Silicon remain unsupported, exactly
-as section 5 describes.
+arm64 entry, which is why the Docker route on Apple Silicon runs under
+emulation and why Macs use the native path instead; see section 5.
 
 The public package page, if you want to look at it in a browser, is
 
@@ -594,79 +595,17 @@ Two fallbacks, in order:
 
 ## 5. macOS
 
-**Short answer: pair with a Windows laptop for anything visual. For headless
-work there is now a documented path: see `MAC_SETUP.md` and
-`docker-compose.mac.yml`, which run the automated checks with no display at
-all. No Mac has run it yet, so please fill in
-`MAC_VERIFICATION_CHECKLIST.md` if you try.**
+**Not this guide.** Macs have their own path, native and without Docker, in
+[`MACOS.md`](MACOS.md). It runs on Apple Silicon directly, renders on the
+Mac's GPU through Metal and can show a Gazebo window, none of which Docker
+Desktop on macOS can do.
 
-A Mac is not excluded in principle, and the headless checks should run. But
-the one thing people assume will work does not, so read the third point before
-you spend the evening on it. Each finding is labelled with how well it is
-established.
-
-**1. Docker Desktop on macOS does not expose the GPU to Linux containers.
-VERIFIED.** Docker's own GPU documentation says flatly that "GPU support in
-Docker Desktop is only available on Windows with the WSL2 backend". The cause
-is architectural, not a setting: containers run inside a Linux VM on Apple's
-Virtualization framework, which gives Linux guests no 3D-capable virtual GPU.
-There is no `--gpus` equivalent to try. **Consequence: a Mac is tier C at
-best**, on hardware that is otherwise very capable.
-
-**2. On Apple Silicon this amd64 image runs under emulation. VERIFIED, but
-"Rosetta" is wrong. REFUTED.** Our image is amd64 only, and Docker's docs
-confirm you cannot run a `linux/amd64` container on an arm64 host without
-emulation. However **Rosetta is optional and off by default**: Docker's
-settings reference lists "Use Rosetta for x86_64/amd64 emulation on Apple
-Silicon" as *Disabled* by default. The default path is QEMU via
-`binfmt_misc`, which Docker's own docs warn "can be much slower than native
-builds, especially for compute-heavy tasks", and CPU rasterisation is exactly
-compute-heavy. Also **`--platform linux/amd64` is good practice rather than a
-hard requirement**: with only an amd64 manifest there is nothing for Docker to
-choose, so it starts the container under emulation and prints a
-platform-mismatch warning. Set `platform: linux/amd64` in compose anyway so
-the behaviour is predictable instead of warning-driven.
-
-**3. XQuartz cannot show you the Gazebo GUI. REFUTED, and this is the finding
-that decides tonight.** The usual advice is "install XQuartz, set `DISPLAY`,
-run `xhost`". For most Linux GUI apps that works. **For Gazebo it does not.**
-XQuartz's GLX caps out at roughly **OpenGL 1.4**, and gz-sim's default `ogre2`
-render engine requires **OpenGL above 3.3, preferably 4.3+**. Enabling indirect
-GLX runs the GL calls against that 1.4 stack, so `gz sim` fails with an ogre2
-OpenGL error rather than rendering slowly. There is no WSLg equivalent on macOS
-either (ASSUMED: it is an absence claim, so no single document asserts it).
-
-If someone does want a visual path on a Mac later, the route that works is
-**not** XQuartz but an X server plus VNC or noVNC *inside* the container,
-viewed in a browser: that rasterises client-side with llvmpipe and never
-touches XQuartz's GL at all. Nobody has done it here.
-
-**So what a Mac can actually do, ASSUMED because nobody on this team has
-tested it on a Mac:** the headless checks. `bringup_smoke_test.sh` and
-`autonomy_check.sh` should both run under emulation, because the autonomy path
-takes its lane lines and barrels from `track_points.json` rather than from the
-camera, so software rendering does not invalidate the result. What will not
-work is the Gazebo GUI and any camera-based perception number. Two cautions:
-an emulated run may miss timing-sensitive checks, and **the open DiffDrive
-`/cmd_vel` timeout question must not be investigated on a Mac**, because that
-measurement has already been retracted three times for less.
-
-**Backlog, scoped and deliberately not started: a native arm64 image is
-feasible, and more so than expected.** Verified today by downloading the real
-apt indexes rather than reading documentation:
-
-- REP-2000 lists Ubuntu Noble 24.04 **arm64 as a Tier 1 platform for Jazzy**.
-- `packages.ros.org/ros2/ubuntu/dists/noble/Release` declares
-  `Architectures: i386 amd64 arm64 armhf`.
-- The arm64 package index carries **3667 `ros-jazzy-*` packages**, including
-  every one this image installs: `ros-jazzy-ros-gz`, `ros-jazzy-ros-gz-sim`,
-  `ros-jazzy-ros-gz-bridge` and the rest.
-- This image needs **no ZED SDK**, which is the usual arm64 blocker.
-
-A multi-arch build would give Macs a hardware-native, software-rendered path
-with no emulation layer underneath it. **Estimate: half a day**, mostly a
-`docker buildx` multi-arch pipeline plus one round of verification on an actual
-Mac. Do not start it before the meeting.
+This section used to explain why a Mac could only run headless checks under
+emulation. That was true of the Docker route and it still is, which is why
+Docker is now only the Mac *fallback*. Two of its claims were also wrong and
+are corrected in `docs/GAZEBO_AGX_BASELINE_REPORT.md` section 19: Docker
+Desktop's default amd64 emulator on Apple Silicon is Rosetta, not QEMU, and
+`--platform linux/amd64` is required, not optional.
 
 ---
 
@@ -813,7 +752,6 @@ Turning the cameras off entirely returns real time factor to 0.996, which
 tells you plainly where the cost is: **the camera is the whole problem, and
 the physics and lidar are fine.** That is also why navigation, odometry and
 control work stay valid on tier C.
-
 
 ---
 

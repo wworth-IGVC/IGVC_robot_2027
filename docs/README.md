@@ -1,28 +1,35 @@
-# docs/ — what is in here and which file answers what
+# docs/: what is in here and which file answers what
 
 A map of this folder. Every file below is verified work, not notes: if something
 here says a thing was measured, there is a command and a number behind it.
 
-**If you are new, read a `.docx` setup guide.** They are the only documents
-written for someone who has not used Docker before. Everything else assumes you
-have the container running.
+**Setting up a machine? Start at [`SETUP.md`](../SETUP.md) in the repo root.**
+It picks your path by platform and sends you to one guide in `setup/`.
 
-**If you just want the simulator running tonight**, read
-`IGVC_2027_Gazebo_Setup_Guide.docx`, or `GAZEBO_QUICKSTART.md` which is the same
-content in Markdown. It ends with a robot driving the IGVC course by itself and
-takes about 45 minutes, most of it one image build you can walk away from.
+## `setup/`: one guide per platform
+
+| File | For | One line |
+| --- | --- | --- |
+| `setup/WINDOWS.md` | Windows 10 / 11 | From a blank install to a robot driving the course, Docker Desktop + WSL2 |
+| `setup/IGVC_2027_Windows_Setup_Guide.docx` | Windows | The same guide in Word, generated from `WINDOWS.md` |
+| `setup/SESSION_COMMANDS.md` / `.docx` | Windows, in a meeting | Every command and link in session order, to copy and paste |
+| `setup/MACOS.md` | Mac, Apple Silicon | The native path, pixi + RoboStack, plus the Docker fallback |
+| `setup/MACOS_CHECKLIST.md` | Mac owners | The tear-off list that turns "untested on a Mac" into data. Please fill it in |
+| `setup/LINUX.md` | Linux | pixi (recommended) or Docker on NVIDIA |
+| `setup/make_setup_docx.py` | Maintainers | Builds a `.docx` from a guide in `setup/`; edit the Markdown, never the Word file |
+
+## Everything else
 
 | File | One line | Read it when |
 | --- | --- | --- |
-| `IGVC_2027_Gazebo_Setup_Guide.docx` | **Zero to a robot driving the course, on your own machine** | You want the simulator running |
-| `GAZEBO_QUICKSTART.md` | The same guide, in Markdown, and the source the .docx is built from | Same, but you prefer the terminal |
-| `IGVC_2027_Docker_Setup_Guide.docx` | Install-to-running walkthrough for a new team member | You are setting up a machine from scratch |
+| `MAINTAINING_ENVIRONMENTS.md` | **How the Docker image and the pixi environment are updated, verified and published** | You own setup this year, or you are changing a dependency |
 | `GAZEBO_TODO.md` | **What is done and what is next, one page** | Picking up simulator work, or reporting status |
 | `GAZEBO_SETUP.md` | The simulator: which version, the GPU, the course, the robot, the interface contract, autonomy | Any Gazebo work |
+| `GAZEBO_AGX_BASELINE_REPORT.md` | The running engineering report: every pass, its evidence and its corrections | You want the reasoning behind a decision |
 | `DOCKER_CHANGES.md` | Every image and compose change, with evidence | You are changing an image, or wondering why one looks like that |
 | `BRANCHES.md` | The 15 upstream branches, the submodule pin, what ran at competition | Choosing a baseline, or cloning |
 | `RQ03_AUDIT.md` | Audit of what the downstream stack actually subscribes to | Wiring Gazebo to lane detection or Nav2 |
-| `make_gazebo_docx.py` | Builds the Word guide from the Markdown one | You edited `GAZEBO_QUICKSTART.md` |
+| `IGVC_2027_Docker_Setup_Guide.docx` | **Legacy.** The 2026-09-10 guide to the Humble perception images, not the simulator | Only for the Humble `igvc-humble-fused-drive` or ZED images |
 
 ---
 
@@ -41,15 +48,15 @@ people; Part 6 known limitations; and a quick reference of every command.
 **Careful:** Word locks the file. `make_docx.py` honours a `DOCX_OUT`
 environment variable so it can be generated elsewhere and copied in.
 
-## `IGVC_2027_Gazebo_Setup_Guide.docx` and `GAZEBO_QUICKSTART.md`
+## `docs/setup/IGVC_2027_Windows_Setup_Guide.docx` and `docs/setup/WINDOWS.md`
 
 **For:** anyone who wants the simulator running and has not done it before. The
 Markdown is the source of truth; the Word file is generated from it by
-`make_gazebo_docx.py` and is overwritten on every run, so edit the Markdown.
+`docs/setup/make_setup_docx.py` and is overwritten on every run, so edit the Markdown.
 
 ```bash
-python3 docs/make_gazebo_docx.py
-DOCX_OUT=/tmp/guide.docx python3 docs/make_gazebo_docx.py   # if Word has it open
+python3 docs/setup/make_setup_docx.py
+DOCX_OUT=/tmp/guide.docx python3 docs/setup/make_setup_docx.py   # if Word has it open
 ```
 
 **Contains:** the WSL2-not-PowerShell rule and why it is absolute; the
@@ -92,7 +99,7 @@ worthless (section 10.5).
 
 ## `DOCKER_CHANGES.md`
 
-**For:** the change record. It is long on purpose — it exists so nobody has to
+**For:** the change record. It is long on purpose: it exists so nobody has to
 re-derive a decision, and so a wrong turn is visible rather than quietly
 deleted.
 
@@ -115,7 +122,7 @@ launch file, and a robot that drives.
 **For:** anything to do with which code is the baseline, and with cloning.
 
 **Contains:** why there are 15 `2026/` mirror branches and how they were made; a
-table of all 15 with their `isaac/exts` pin, commits ahead, and date — that pin
+table of all 15 with their `isaac/exts` pin, commits ahead, and date; that pin
 is the single most useful thing to know before checking one out; why the pin is
 fragile, since ten branches reference a commit that exists only in the
 organisation's fork and therefore breaks under `--depth 1`, breaks if that fork
@@ -127,7 +134,7 @@ confirming no other repository hides competition work.
 
 **The subsection people most need:** what a clone without `--recursive` gets
 you. Nine submodules go missing, `colcon build` succeeds on exactly seven
-packages, and it looks like a clean build while being an unusable robot — no
+packages, and it looks like a clean build while being an unusable robot: no
 hardware interface, no perception, no lidar, no GPS.
 
 ## `RQ03_AUDIT.md`
@@ -135,7 +142,7 @@ hardware interface, no perception, no lidar, no GPS.
 **For:** connecting Gazebo to the rest of the stack. RQ-03 is the gap between "a
 robot drives in simulation" and "lane detection and Nav2 run against it".
 
-**Contains:** the output of a nine-agent audit — five parallel readers over
+**Contains:** the output of a nine-agent audit: five parallel readers over
 `igvc_lane_detection`, the Nav2 and navigator configuration, the real ZED
 pipeline, the Isaac shim precedent and the `grr_hardware` control path, then a
 design synthesis and three adversarial critics. It records a real frame-name bug
@@ -144,7 +151,7 @@ error at all; which renames a launch remapping cannot reach and why; and the
 design conclusions that survived all three critics.
 
 **It also contains its own biggest error, kept rather than deleted.** Its
-headline claim — that the container could not run any downstream node — was
+headline claim, that the container could not run any downstream node, was
 four-fifths wrong, and section 1 now explains both the correction and the method
 mistake that produced it: a `grep` of a Dockerfile can only prove *not
 explicitly listed*, which is not the same as *not present*. That is worth more
@@ -159,7 +166,7 @@ code is newer.
 
 | Thing | Where |
 | --- | --- |
-| Diagnostic and bringup scripts | `../scripts/gazebo/` — start with `render_check.sh`, always |
+| Diagnostic and bringup scripts | `../scripts/gazebo/`: start with `render_check.sh`, always |
 | Image definitions | `../docker/`, retired ones in `../docker/deprecated/` with their own README |
 | The generated course | `../src/igvc_test_description/worlds/` |
 | How to run any of it | `../README.md` |
@@ -183,12 +190,12 @@ code is newer.
 
 ## Keeping these current
 
-`GAZEBO_QUICKSTART.md` is the source; the `.docx` is generated from it and
+`docs/setup/WINDOWS.md` is the source; the `.docx` is generated from it and
 overwritten on every run, so **edit the Markdown**:
 
 ```bash
-python3 docs/make_gazebo_docx.py
-DOCX_OUT=/tmp/g.docx python3 docs/make_gazebo_docx.py    # if Word has it open
+python3 docs/setup/make_setup_docx.py
+DOCX_OUT=/tmp/g.docx python3 docs/setup/make_setup_docx.py    # if Word has it open
 ```
 
 Two things in the quickstart go stale fastest and are worth checking whenever
@@ -196,7 +203,7 @@ someone new sets up:
 
 1. **Section 1A, the machine matrix.** The native-Linux service is written but
    unverified, and says so. When someone runs it successfully, delete that
-   caveat in both `GAZEBO_QUICKSTART.md` and `DOCKER_CHANGES.md` 13.4.
+   caveat in both `docs/setup/WINDOWS.md` and `DOCKER_CHANGES.md` 13.4.
 2. **Section 9, troubleshooting.** Every entry there came from a failure that
    actually happened. When you lose an hour to something new, add it - that is
    what has made the list worth reading.

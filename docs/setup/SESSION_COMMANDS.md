@@ -1,7 +1,7 @@
 # Command and link sheet
 
 **Every command and link from the software session, in the order they come up,
-with no explanation.** The explanations live in `GAZEBO_QUICKSTART.md` and
+with no explanation.** The explanations live in `docs/setup/WINDOWS.md` and
 `GAZEBO_SETUP.md`. This sheet exists so nobody has to type anything.
 
 **PS** means a PowerShell window. **PS-Admin** means PowerShell started with
@@ -421,7 +421,7 @@ https://learn.microsoft.com/windows/wsl/install-manual
 The full setup guide, in the repo:
 
 ```text
-docs/GAZEBO_QUICKSTART.md
+docs/setup/WINDOWS.md
 ```
 
 The reference, why everything is the way it is:

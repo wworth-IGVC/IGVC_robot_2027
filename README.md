@@ -2,8 +2,8 @@
 
 **This is the software team's repository for IGVC 2027, current as of
 September 2026.** Competition is 4 to 8 June 2027. If you are new to the team,
-this file is the right place to start, and "Where to start, in one command"
-below is the next thing to read.
+this file is the right place to start, and **[`SETUP.md`](SETUP.md) is the
+next thing to read**: it tells you which setup path is yours.
 
 It is a ROS 2 workspace forked from
 [Gold-Rush-Robotics/IGVC_Robot_2026](https://github.com/Gold-Rush-Robotics/IGVC_Robot_2026),
@@ -24,33 +24,28 @@ That goal sets the standard for changes here. With roughly four hours a week
 each and annual turnover, **a better answer that only one member can reproduce
 is the wrong answer.** That is the lesson the 2026 Isaac setup taught.
 
-## Where to start, in one command
+## Where to start: pick your machine
 
 ```bash
-# from a WSL2 Ubuntu shell, never PowerShell, or there is no GUI window
 git clone --recurse-submodules https://github.com/wworth-IGVC/IGVC_robot_2027.git
 cd IGVC_robot_2027
-bash scripts/gazebo/bootstrap.sh
 ```
 
-That pulls the image from GitHub Container Registry, builds the workspace, and
-runs the GPU check and the smoke test, printing PASS or FAIL for each step and
-naming your GPU tier. The package is public, so no `docker login` is needed.
-About 10 minutes. Then:
+| Your machine | Path | Guide | Then, one command |
+| --- | --- | --- | --- |
+| **Windows 10 (22H2) or 11** | Docker Desktop + WSL2 | [docs/setup/WINDOWS.md](docs/setup/WINDOWS.md) | `bash scripts/gazebo/bootstrap.sh`, from a **WSL2** shell |
+| **Mac, Apple Silicon** | pixi + RoboStack, native, no Docker | [docs/setup/MACOS.md](docs/setup/MACOS.md) | `pixi run bootstrap` |
+| **Linux** | pixi, or Docker on NVIDIA | [docs/setup/LINUX.md](docs/setup/LINUX.md) | `pixi run bootstrap` |
 
-```bash
-docker exec -it igvc_gazebo bash -c "NAV=1 bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh"
-```
-
-and the robot drives the course by itself.
+Each bootstrap builds the workspace and runs the GPU check and the smoke test,
+printing PASS or FAIL for each step and naming your rendering tier.
+[SETUP.md](SETUP.md) has the daily commands for every path side by side, and
+which files belong to which path.
 
 **`--recurse-submodules` is not optional.** There are nine submodules, and two
 of them are load-bearing: `zed_description` is built by name so the workspace
 build fails outright without it, and `IGVC_track_generator` holds the track
 data that every navigation node reads.
-
-[docs/GAZEBO_QUICKSTART.md](docs/GAZEBO_QUICKSTART.md) is the full version,
-including what to do when your machine is not the one this was built on.
 
 ## What works today, and what does not
 
@@ -100,9 +95,11 @@ Verified means a command was run and a number came back. Measured on Windows
   (tier B) is unverified anywhere. Software rendering (tier C) is measured only
   on one laptop with its GPU switched off, where it still passed the smoke test
   at 18 of 18 with the simulation at 0.85x real time and cameras at 4.27 Hz.
-  **macOS cannot show the Gazebo window at all**: XQuartz's OpenGL is too old
-  for gz-sim's renderer. Nothing has run on the RTX 5080 laptop, the Windows 10
-  machine or native Linux.
+  **No Mac has run anything yet.** The native macOS path (pixi + RoboStack)
+  resolves for Apple Silicon and passes every check in a clean Linux container
+  built from the same recipes, but Metal rendering and the Gazebo window on a
+  real Mac are unverified. Nothing has run on the RTX 5080 laptop or the
+  Windows 10 machine.
 
 [docs/GAZEBO_TODO.md](docs/GAZEBO_TODO.md) is the maintained list, with the
 evidence for each line and the retractions kept visible on purpose.
@@ -134,16 +131,17 @@ Every change, its root cause, and how it was verified is recorded in
 
 | You want to | Read |
 | --- | --- |
-| **Run the simulator and watch the robot drive the course** | [docs/IGVC_2027_Gazebo_Setup_Guide.docx](docs/IGVC_2027_Gazebo_Setup_Guide.docx), or [docs/GAZEBO_QUICKSTART.md](docs/GAZEBO_QUICKSTART.md) |
-| Set up a machine from scratch, new to Docker | [docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx) |
+| **Set up the simulator on your machine** | [SETUP.md](SETUP.md), then the guide for your platform in [docs/setup/](docs/setup/) |
+| Maintain the Docker image or the pixi environment | [docs/MAINTAINING_ENVIRONMENTS.md](docs/MAINTAINING_ENVIRONMENTS.md) |
+| The older Humble perception image (not the simulator) | [docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx) |
 | Understand how the simulator works, or change it | [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) |
 | **See what is done and what is left on the simulator** | [docs/GAZEBO_TODO.md](docs/GAZEBO_TODO.md) |
 | Know what is in each image and why | [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) |
 | Find the right branch | [docs/BRANCHES.md](docs/BRANCHES.md) |
 
-The Gazebo quickstart has a section for machines unlike the one it was built
-on - Windows 10, native Linux, AMD/Intel GPUs, and no GPU at all - because most
-"it works for you and not for me" reports trace back to one of those.
+The Windows guide has a section for machines unlike the one it was built on,
+Windows 10, AMD/Intel GPUs and no GPU at all, because most "it works for you
+and not for me" reports trace back to one of those.
 
 ## Repository layout
 
