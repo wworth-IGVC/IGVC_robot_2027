@@ -29,7 +29,13 @@ because odometry keeps counting while the wheels spin in mid-air. The caller
 still takes one `gz model -p` reading at the end for that.
 
 Usage:
-    pose_logger.py OUT_FILE DURATION_S SPAWN_X SPAWN_Y [RATE_HZ]
+    pose_logger.py OUT_FILE DURATION_S SPAWN_X SPAWN_Y [RATE_HZ] [wall|sim]
+
+With `sim` (what autonomy_check.sh passes since 2026-09-24) DURATION_S is
+SIMULATION time, measured from the odometry stamps, so a slow machine watches
+the same stretch of driving as a fast one. A wall-clock ceiling of ten times
+the duration, at least ten minutes, stops a stalled simulator hanging it. The
+default stays `wall` so any older caller behaves as before.
 
 Each line: world_x world_y sim_time yaw_rad
 """
@@ -62,6 +68,8 @@ def main():
     out, dur = sys.argv[1], float(sys.argv[2])
     sx, sy = float(sys.argv[3]), float(sys.argv[4])
     rate = float(sys.argv[5]) if len(sys.argv) > 5 else 2.0
+    clock = sys.argv[6] if len(sys.argv) > 6 else 'wall'
+    wall_cap = max(600.0, 10.0 * dur) if clock == 'sim' else dur
 
     rclpy.init()
     node = PoseLogger()
@@ -75,8 +83,9 @@ def main():
     # CADENCE does not need to be simulation time - only the timestamp written
     # into each row does, and that is taken from the message header.
     written = 0
-    deadline = time.time() + dur
+    deadline = time.time() + wall_cap
     next_write = time.time()
+    first_stamp = None
     with open(out, 'w') as fh:
         while time.time() < deadline and rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.05)
@@ -101,7 +110,14 @@ def main():
             fh.write('%.6f %.6f %.3f %.6f\n' % (p.x + sx, p.y + sy, t, yaw))
             fh.flush()
             written += 1
+            if first_stamp is None:
+                first_stamp = t
+            if clock == 'sim' and t - first_stamp >= dur:
+                break
 
+    if clock == 'sim' and first_stamp is not None and time.time() >= deadline:
+        print('pose_logger: WALL CEILING of %.0f s hit before %.0f s of sim time'
+              % (wall_cap, dur))
     print('pose_logger: %d samples' % written)
     node.destroy_node()
     rclpy.try_shutdown()

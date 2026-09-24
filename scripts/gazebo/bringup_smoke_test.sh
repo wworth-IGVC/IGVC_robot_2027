@@ -17,19 +17,22 @@
 #           odom frame and a wrong wheel radius, and it is new.
 #   PART 4  real igvc_lane_detection nodes consume it and produce a costmap
 #
-# Run this INSIDE the Gazebo container.
+# Docker: run this INSIDE the Gazebo container. pixi: `pixi run smoke`.
 #
-#   RVIZ=1        also start RViz and check the node comes up (needs WSL2)
+#   RVIZ=1        also start RViz and check the node comes up (needs a display)
+#   STARTUP_LIMIT=300  ceiling, in wall seconds, on waiting for the stack to
+#                 come up. It is a ceiling, not a wait: the script proceeds
+#                 the moment Gazebo, the bridge and odometry are live, so a
+#                 fast machine does not pay for a slow one.
 #   NAV=0         skip PART 4 and launch the simulator alone
 #   CAMERAS=all   exercise all three cameras instead of just the front one
 # ---------------------------------------------------------------------------
 set -o pipefail
-source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+. "$(dirname "$0")/igvc_env.sh" || exit 1
 
 . "$(dirname "$0")/sim_preflight.sh"
 FORCE=1 sim_preflight || exit 1
 
-REPO=/root/ros2_ws/src/IGVC_robot_2026
 NAV="${NAV:-1}"
 CAMERAS="${CAMERAS:-front}"
 
@@ -39,20 +42,7 @@ CAMERAS="${CAMERAS:-front}"
 # igvc_lane_detection carries the ground-truth nodes PART 4 runs. All are
 # install-only, so this is seconds rather than a real build.
 echo "--- building the four packages the bringup needs ---"
-cd /root/ros2_ws || exit 1
-colcon build --symlink-install \
-    --base-paths "$REPO/src" \
-    --packages-select zed_description igvc_test_description \
-                      igvc_test_bringup \
-                      igvc_lane_detection \
-    > /tmp/colcon.log 2>&1
-RC=$?
-if [ "$RC" -ne 0 ]; then
-    echo "FAIL: colcon build exited $RC"
-    tail -30 /tmp/colcon.log
-    exit 1
-fi
-source /root/ros2_ws/install/setup.bash
+igvc_build || exit 1
 echo "  installed at: $(ros2 pkg prefix igvc_test_description 2>/dev/null)"
 
 echo
@@ -87,8 +77,18 @@ ros2 launch igvc_test_bringup "$LAUNCH_FILE" $LAUNCH_ARGS \
     > /tmp/bringup.log 2>&1 &
 LAUNCH_PID=$!
 
-echo "waiting for the stack to come up..."
-sleep 35
+# Wait for the stack to be READY, not for a fixed number of seconds.
+#
+# This was `sleep 35` until 2026-09-24. A fixed wall-clock wait is wrong in
+# both directions: wasted time on a fast machine, and on a slow one (tier C,
+# or a Mac) a stack that is not up yet. wait_ready.py returns the moment
+# /clock is advancing and /odom is publishing, which proves Gazebo, the
+# robot, DiffDrive, the bridge and gazebo_odom_shim are all live. The
+# ground-truth nodes PART 4 needs come up with them and PART 4's own topic
+# timeouts cover the last few seconds.
+STARTUP_LIMIT="${STARTUP_LIMIT:-300}"
+echo "waiting for the stack to come up (ceiling ${STARTUP_LIMIT}s)..."
+python3 "$(dirname "$0")/wait_ready.py" odom "$STARTUP_LIMIT"
 
 if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
     echo "FAIL: launch died during startup. Last 40 lines:"
@@ -251,67 +251,66 @@ echo "=============================================================="
 echo " PART 2 and 3: does it drive, and does it know where it is?"
 echo "=============================================================="
 
-# DRIVE SLOWLY AND BRIEFLY, ON PURPOSE.
+# DRIVE SLOWLY AND BRIEFLY, AND ON SIMULATION TIME.
 #
-# The ground is a finite 39.54 x 33.62 m slab and the robot spawns 9.5 m from
-# its -x edge on the spawn heading of 134.87 deg. An earlier version of this
-# test drove 0.6 m/s for 8 s and then waited, which ran the robot clean off
-# the edge; it then fell, wheels still spinning, while the odometry kept
-# counting. Everything measured after that point was nonsense. Keep the total
-# excursion well under the distance to the edge.
+# The ground is a finite 39.54 x 33.62 m slab and the robot spawns 9.44 m from
+# its -x edge on the spawn heading of 134.87 deg. Gazebo's DiffDrive holds the
+# last /cmd_vel it received, so the robot keeps driving until something tells
+# it to stop.
+#
+# The previous version of this part published the burst with `ros2 topic pub`
+# and then took four pose samples with `ros2 topic echo --once` and
+# `gz model -p` BEFORE publishing the stop. Each CLI call spends seconds just
+# starting, and the robot drove on the held command the whole time, so the
+# excursion depended on how fast the machine starts a Python process rather
+# than on anything in this script. Measured 2026-09-24 on the reference
+# laptop: a "4 s" coast window that really spanned about 11.7 s, 9.5 m of
+# travel against 9.44 m to the edge, and a robot that drove off the slab. On a
+# slower machine, a Mac under emulation in particular, it could only be worse.
+#
+# drive_probe.py runs burst, coast and stop inside ONE process on simulation
+# time, so the excursion is bounded by arithmetic: at most 0.4 m/s x (3 s
+# burst + 4 s coast + 1 s stop) = 3.2 m, on any machine at any speed. The
+# pose samples that are slow to take are taken only at rest, before and
+# after, where their latency cannot move the robot.
 O_BEFORE=$(odom_xy)
 W_BEFORE=$(world_xyz)
 echo "  odom  before : $O_BEFORE"
 echo "  world before : $W_BEFORE"
+echo
 
-timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-    '{linear: {x: 0.4}, angular: {z: 0.0}}' > /dev/null 2>&1
+python3 "$(dirname "$0")/drive_probe.py" > /tmp/smoke_probe.txt 2>&1
+PROBE_RC=$?
+grep -v '^PROBE_' /tmp/smoke_probe.txt
+probe () { sed -n "s/^$1=//p" /tmp/smoke_probe.txt | tail -1; }
+PROBE_RESULT=$(probe PROBE_RESULT)
+if [ "$PROBE_RESULT" = "HARNESS_FAIL" ] || [ -z "$PROBE_RESULT" ]; then
+    echo "  FAIL: the drive probe could not run (exit $PROBE_RC). Its output:"
+    sed 's/^/    /' /tmp/smoke_probe.txt | tail -20
+    FAIL=$((FAIL + 1))
+fi
 
 # ── the /cmd_vel timeout question ───────────────────────────────────────────
 #
-# docs/GAZEBO_SETUP.md 8.6 left this open. Measure it directly: sample the
-# moment the burst ends, publish nothing at all, and sample again COAST_WAIT
-# seconds later. diff_drive_controller on the real robot times out and stops.
+# docs/GAZEBO_SETUP.md 8.6 left this open and three attempts failed to settle
+# it, because the coast was measured between CLI samples taken an unknown
+# number of seconds apart. The probe measures it between two odometry
+# messages whose stamps it records, starting at the last command it actually
+# sent. diff_drive_controller on the real robot times out and stops.
 #
-# The result is only meaningful while the wheels are ON THE GROUND, which is
-# why both samples are guarded by a height check. Free-spinning wheels in
-# mid-air produce exactly the same odometry as a held command.
-COAST_WAIT=4
-O_BURST_END=$(odom_xy)
-W_BURST_END=$(world_xyz)
-sleep "$COAST_WAIT"
-O_COAST=$(odom_xy)
-W_COAST=$(world_xyz)
-
-COAST=$(python3 -c "
-import math
-a = [float(v) for v in '$O_BURST_END'.split()]
-b = [float(v) for v in '$O_COAST'.split()]
-print('%.3f' % math.hypot(b[0]-a[0], b[1]-a[1]))
-")
+# Whether the wheels stayed on the ground during the coast is settled by the
+# on-ground check on the final pose below: the path is a straight line of at
+# most 3.2 m, so a robot that ends on the slab never left it.
 echo
-if ! on_ground "$W_BURST_END" || ! on_ground "$W_COAST"; then
-    echo "  /cmd_vel timeout: NOT MEASURED - the robot left the ground slab"
-    echo "  ($W_COAST). Odometry from free-spinning wheels means nothing."
-else
-    echo "  moved $COAST m in the $COAST_WAIT s AFTER /cmd_vel stopped,"
-    echo "  with the wheels on the ground throughout"
-    if python3 -c "import sys; sys.exit(0 if float('$COAST') > 0.4 else 1)"; then
-        echo "  -> DiffDrive held the last command. diff_drive_controller on the"
-        echo "     real robot times out instead, so sim is the less safe of the"
-        echo "     two. Confirm across runs before treating this as settled."
-    else
-        echo "  -> the robot stopped on its own; a timeout appears to be in effect."
-    fi
+if [ "$(probe PROBE_COAST_HELD)" = "yes" ]; then
+    echo "  /cmd_vel timeout: DiffDrive HELD the last command, $(probe PROBE_COAST_M) m"
+    echo "  in $(probe PROBE_COAST_WINDOW_S) s of sim time with no command at all."
+    echo "  diff_drive_controller on the real robot times out instead, so sim"
+    echo "  is the less safe of the two."
+elif [ "$(probe PROBE_COAST_HELD)" = "no" ]; then
+    echo "  /cmd_vel timeout: the robot stopped on its own, $(probe PROBE_COAST_M) m in"
+    echo "  $(probe PROBE_COAST_WINDOW_S) s of sim time after the last command."
 fi
-
-# Now stop it deliberately, so PART 3 compares two poses taken genuinely at
-# rest. Sampling odometry and the world pose seconds apart while the robot is
-# still moving measures the sampling gap, not the odometry - which is exactly
-# what made the two runs in docs/GAZEBO_SETUP.md 8.6 disagree.
-timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-    '{linear: {x: 0.0}, angular: {z: 0.0}}' > /dev/null 2>&1
-sleep 3
 
 O_AFTER=$(odom_xy)
 W_AFTER=$(world_xyz)

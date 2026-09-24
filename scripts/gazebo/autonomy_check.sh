@@ -18,51 +18,68 @@
 #   * it leaves the ground slab                  -> drove off the world
 #   * it moves but covers no NEW course          -> spinning or stuck in place
 #
-# Run INSIDE the Gazebo container.
+# Docker: run INSIDE the Gazebo container. pixi: `pixi run autonomy`.
 #
-#   DURATION=120   how long to watch, seconds (default 100)
+# Nothing here depends on how fast the machine is. The watch window is
+# SIMULATION time and the start is a readiness check, so a slow machine (tier
+# C, or a Mac) runs the same test for longer in wall-clock terms rather than a
+# shorter, easier one. Until 2026-09-24 both were wall-clock: the same code
+# drove 83.0 m on one day and 47.4 m on another, because the simulator ran at
+# about half real time on the second.
+#
+#   DURATION=100   how long to watch, in SIMULATION seconds (default 100)
 #   TOL=2.0        max allowed distance from the lane centreline, metres
+#   STARTUP_LIMIT=300  wall-clock ceiling on waiting for the robot to start
+#                  driving itself. A ceiling, not a wait.
+#   NAV2_DELAY=25  delay Nav2's own bringup, if it loses the race with
+#                  Gazebo on a loaded machine
 # ---------------------------------------------------------------------------
 set -o pipefail
-source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+. "$(dirname "$0")/igvc_env.sh" || exit 1
 
 # Refuse to run on top of an existing simulator. A run with two of them looks
 # plausible and means nothing - see sim_preflight.sh.
 . "$(dirname "$0")/sim_preflight.sh"
 FORCE=1 sim_preflight || exit 1
 
-REPO=/root/ros2_ws/src/IGVC_robot_2026
 DURATION="${DURATION:-100}"
 TOL="${TOL:-2.0}"
+STARTUP_LIMIT="${STARTUP_LIMIT:-300}"
+# Passed through to the launch file, which delays Nav2 to stop it racing
+# Gazebo. Its own default is 15.0 and neither check script could reach it
+# before, so the documented fix for a lost race was unreachable from here.
+NAV2_DELAY="${NAV2_DELAY:-}"
 TRACK="$REPO/IGVC_track_generator/track_points.json"
 
-cd /root/ros2_ws || exit 1
 echo "--- building ---"
-colcon build --symlink-install --base-paths "$REPO/src" \
-    --packages-select zed_description igvc_test_description igvc_test_bringup \
-                      igvc_lane_detection \
-    > /tmp/colcon.log 2>&1 || { echo "FAIL: build"; tail -30 /tmp/colcon.log; exit 1; }
-source /root/ros2_ws/install/setup.bash
+igvc_build || exit 1
 echo "    ok"
 
 echo
 echo "=============================================================="
 echo " Gazebo autonomy check: does it drive the course itself?"
 echo "=============================================================="
-echo "watching for ${DURATION}s, centreline tolerance ${TOL} m"
+echo "watching for ${DURATION} s of SIMULATION time, centreline tolerance ${TOL} m"
 echo "this script never publishes /cmd_vel"
 echo
 
 ARGS="headless:=true"
 [ "${RVIZ:-0}" = "1" ] && ARGS="headless:=false rviz:=true"
+[ -n "$NAV2_DELAY" ] && ARGS="$ARGS nav2_delay:=$NAV2_DELAY"
 
 ros2 launch igvc_test_bringup gazebo_nav_test.launch.py $ARGS \
     > /tmp/autonomy.log 2>&1 &
 LP=$!
 
-# Nav2 lifecycle bringup plus the navigator's first plan takes a while.
-echo "waiting 50s for Gazebo, Nav2 lifecycle activation and the first plan..."
-sleep 50
+# Open the watch window when the robot is DRIVING ITSELF, not after a guess.
+#
+# This was `sleep 50` until 2026-09-24: Gazebo, ten Nav2 lifecycle nodes in
+# sequence, then the navigator's first plan. How long that takes is a property
+# of the machine. The thing the window is meant to watch starts when the robot
+# moves, so wait for exactly that. If it never moves, the ceiling expires, the
+# window runs anyway, and MOVED fails loudly, which is the right outcome.
+echo "waiting for the robot to start driving itself (ceiling ${STARTUP_LIMIT}s)..."
+python3 "$(dirname "$0")/wait_ready.py" moving "$STARTUP_LIMIT" 0.3
 
 if ! kill -0 "$LP" 2>/dev/null; then
     echo "FAIL: launch died during startup."
@@ -79,18 +96,22 @@ import json
 p = json.load(open('$TRACK', encoding='utf-8'))['robot_start_pose']['position_m']
 print('%.6f %.6f' % (p['x'], p['y']))
 ")
-echo "watching for ${DURATION}s..."
-python3 "$(dirname "$0")/pose_logger.py" /tmp/track_log.txt "$DURATION" $SPAWN "${POSE_HZ:-10.0}"
+echo "watching for ${DURATION} s of simulation time..."
+python3 "$(dirname "$0")/pose_logger.py" /tmp/track_log.txt "$DURATION" $SPAWN "${POSE_HZ:-10.0}" sim
 
 # One ground-truth reading, for the one thing odometry cannot tell us: whether
 # the robot is still on the ground slab. Wheels spinning in mid-air produce
 # perfectly healthy odometry.
-gz model -m igvc_robot -p 2>/dev/null > /tmp/gzpose.txt
+#
+# If the read fails, say so. It used to fall back to the spawn height, which
+# made ON THE SLAB pass without anything having been measured, and on a slow
+# machine this gz-transport call is exactly the one that times out.
+timeout 60 gz model -m igvc_robot -p 2>/dev/null > /tmp/gzpose.txt
 FINAL_Z=$(python3 -c "
 import re
 t = open('/tmp/gzpose.txt').read()
 m = re.search(r'\[\s*-?[0-9.]+\s+-?[0-9.]+\s+(-?[0-9.]+)\s*\]', t)
-print(m.group(1) if m else '0.2311')
+print(m.group(1) if m else 'nan')
 ")
 echo "  final height: $FINAL_Z m (spawn was 0.2311)"
 
@@ -288,7 +309,10 @@ else:
     print('  IN LANE     : PASS  never more than %.2f m off the centreline'
           % max(devs))
 
-if worst_z > 0.10:
+if worst_z != worst_z:   # NaN: the ground-truth height could not be read
+    print('  ON THE SLAB : FAIL  NOT MEASURED, gz model -p returned no pose')
+    ok = False
+elif worst_z > 0.10:
     print('  ON THE SLAB : FAIL  ended off the ground; readings above are void')
     ok = False
 else:
