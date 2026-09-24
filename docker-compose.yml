@@ -297,6 +297,11 @@ services:
       - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
       - ROS_DISTRO=jazzy
       - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      # So the recovery hints the scripts print name THIS file and service,
+      # not the Windows ones. Read by scripts/gazebo/igvc_env.sh.
+      - IGVC_COMPOSE_FILE=docker-compose.yml
+      - IGVC_SERVICE=igvc_gazebo_linux
+      - IGVC_CONTAINER=igvc_gazebo_linux
     command: ["bash"]
 
 volumes:

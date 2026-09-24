@@ -1,10 +1,14 @@
 # docker-compose.mac.yml
-# macOS variant of the Gazebo simulator service. HEADLESS ONLY.
+# THE macOS FALLBACK, not the macOS route. HEADLESS ONLY.
 #
-# NO MAC HAS RUN THIS. It was written by reading docker-compose.windows.yml and
-# verified by running it on Windows in an isolated project, where it behaves
-# like a Mac in every respect except processor architecture. See
-# docs/MAC_SETUP.md and docs/MAC_VERIFICATION_CHECKLIST.md.
+# On a Mac, use the native path first: `pixi run bootstrap`, see SETUP.md and
+# docs/setup/MACOS.md. It runs natively on Apple Silicon, renders on the GPU
+# and can show a Gazebo window. This file exists for when that path fails.
+#
+# NO MAC HAS RUN THIS EITHER. It was verified by running it on Windows in an
+# isolated project, where it behaves like a Mac in every respect except
+# processor architecture: the published image is amd64 only, so on Apple
+# Silicon it runs under Rosetta (Docker Desktop's default emulator since 4.44).
 #
 # Use it explicitly, never as an override:
 #   docker compose -f docker-compose.mac.yml up -d igvc_gazebo_mac
@@ -20,10 +24,10 @@
 #     OpenGL 3.3 that gz-sim's ogre2 render engine requires, so `gz sim` fails
 #     with a render-engine error rather than running slowly.
 #
-# So a Gazebo or RViz window on a Mac is out of scope. Every automated check
-# in scripts/gazebo/ already runs headless by default, which is why the
-# headless path is the whole path here. Do NOT add DISPLAY, /tmp/.X11-unix or
-# any X11 mount to this file: it cannot work and it would imply that it can.
+# So a window through THIS file is out of scope; the native path is how a Mac
+# gets one. Every automated check in scripts/gazebo/ runs headless by default.
+# Do NOT add DISPLAY, /tmp/.X11-unix or any X11 mount to this file: it cannot
+# work and it would imply that it can.
 #
 # Dropped relative to docker-compose.windows.yml, all Windows-specific:
 #   gpus: all                      Docker Desktop on macOS has no GPU to give
@@ -108,6 +112,12 @@ services:
       - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
       - ROS_DISTRO=jazzy
       - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      # So the recovery hints the scripts print ("restart the container",
+      # "open a second shell") name THIS file and container rather than the
+      # Windows ones. Read by scripts/gazebo/igvc_env.sh.
+      - IGVC_COMPOSE_FILE=docker-compose.mac.yml
+      - IGVC_SERVICE=igvc_gazebo_mac
+      - IGVC_CONTAINER=igvc_gazebo_mac
       # NOTE: QT_QPA_PLATFORM is deliberately NOT set to "offscreen" here.
       # Nothing in the default path starts a Qt application: all three check
       # scripts run headless unless RVIZ=1 is passed explicitly. Setting
