@@ -10,6 +10,10 @@
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <!-- ping_location_node.py imports requests at module level. setup.py's
+       install_requires is read by neither rosdep nor colcon, so without this
+       the node fails to import on a clean Jazzy install. -->
+  <exec_depend>python3-requests</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
