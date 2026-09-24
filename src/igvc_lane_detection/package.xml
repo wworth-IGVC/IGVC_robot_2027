@@ -21,6 +21,10 @@
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>message_filters</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <!-- The nodes import the Python tf2_ros module, which is the tf2_ros_py
+       package. On Jazzy tf2_ros (C++) does not depend on it; it arrived only
+       through tf2_geometry_msgs. Declared so nothing relies on that. -->
+  <exec_depend>tf2_ros_py</exec_depend>
   <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>navigation2</exec_depend>
@@ -40,6 +44,8 @@
   <depend>python3-numpy</depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-pip</exec_depend>
+  <!-- track_ground_truth_node.py imports yaml for .yaml track files. -->
+  <exec_depend>python3-yaml</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
