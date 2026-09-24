@@ -41,17 +41,21 @@
 # exists to prevent. Killing `ros2 launch` does NOT reap its children: they are
 # reparented to init and carry on happily.
 #
-# Every node in this stack is executed from /opt/ros/jazzy/lib or from
-# /root/ros2_ws/install, and nothing else in this container runs from either,
-# so matching the path catches all of them and needs no maintenance when a
-# node is added.
+# Every node in this stack is executed from ROS's own lib directory or from
+# the workspace's install tree, and nothing else runs from either, so matching
+# the path catches all of them and needs no maintenance when a node is added.
+# In the container those are /opt/ros/jazzy/lib and /root/ros2_ws/install; in
+# a pixi environment they are $CONDA_PREFIX/lib and $IGVC_WS/install.
+# igvc_env.sh resolves both; the fallbacks keep this file usable on its own.
+_SIM_ROS_LIB="${IGVC_ROS_PREFIX:-/opt/ros/jazzy}/lib/"
+_SIM_WS_INSTALL="${WS:-/root/ros2_ws}/install/"
 _sim_procs () {
     # -f matches the full command line. Safe from self-matching here because a
     # script's own command line is "bash /path/to/script.sh", which contains
     # none of these patterns. It is NOT safe from an inline `bash -c` whose
     # command string happens to contain them.
-    pgrep -f '/opt/ros/jazzy/lib/'     2>/dev/null
-    pgrep -f '/root/ros2_ws/install/'  2>/dev/null
+    pgrep -f "$_SIM_ROS_LIB"           2>/dev/null
+    pgrep -f "$_SIM_WS_INSTALL"        2>/dev/null
     pgrep -f 'gz sim'                  2>/dev/null
     pgrep -f 'ros2 launch'             2>/dev/null
 }
@@ -66,7 +70,7 @@ sim_preflight () {
     echo "=============================================================="
     echo " A simulator is ALREADY RUNNING in this container: $found processes"
     echo "=============================================================="
-    ps -eo pid,etime,cmd 2>/dev/null \
+    ps -eo pid,etime,command 2>/dev/null \
         | grep -E 'gz sim|rviz2|parameter_bridge|ros2 launch' \
         | grep -v grep | head -12 | sed 's/^/  /'
     echo
@@ -83,22 +87,23 @@ sim_preflight () {
         # both ignore SIGTERM often enough to matter.
         pkill -f 'ros2 launch' 2>/dev/null
         sleep 1
-        pkill -f '/opt/ros/jazzy/lib/'    2>/dev/null
-        pkill -f '/root/ros2_ws/install/' 2>/dev/null
+        pkill -f "$_SIM_ROS_LIB"          2>/dev/null
+        pkill -f "$_SIM_WS_INSTALL"       2>/dev/null
         pkill -f 'gz sim'                 2>/dev/null
         sleep 4
-        pkill -9 -f '/opt/ros/jazzy/lib/'    2>/dev/null
-        pkill -9 -f '/root/ros2_ws/install/' 2>/dev/null
+        pkill -9 -f "$_SIM_ROS_LIB"          2>/dev/null
+        pkill -9 -f "$_SIM_WS_INSTALL"       2>/dev/null
         pkill -9 -f 'gz sim'                 2>/dev/null
         sleep 2
         local left
         left=$(_sim_procs | sort -u | wc -l)
         if [ "$left" -ne 0 ]; then
             echo " STILL $left processes after cleanup:"
-            ps -eo pid,cmd 2>/dev/null | grep -E '/opt/ros/jazzy/lib/|/root/ros2_ws/install/|gz sim' \
+            ps -eo pid,command 2>/dev/null | grep -E "$_SIM_ROS_LIB|$_SIM_WS_INSTALL|gz sim" \
                 | grep -v grep | head -8 | sed 's/^/   /'
-            echo " Restart the container:"
-            echo "   docker compose -f docker-compose.windows.yml restart igvc_gazebo"
+            echo " Get a clean simulator:"
+            if command -v igvc_restart_hint >/dev/null 2>&1; then igvc_restart_hint
+            else echo "   docker compose -f docker-compose.windows.yml restart igvc_gazebo"; fi
             return 1
         fi
         echo " Clean."
@@ -106,7 +111,8 @@ sim_preflight () {
     fi
 
     echo
-    echo " Re-run with FORCE=1 to kill it, or restart the container:"
-    echo "   docker compose -f docker-compose.windows.yml restart igvc_gazebo"
+    echo " Re-run with FORCE=1 to kill it, or get a clean simulator:"
+    if command -v igvc_restart_hint >/dev/null 2>&1; then igvc_restart_hint
+    else echo "   docker compose -f docker-compose.windows.yml restart igvc_gazebo"; fi
     return 1
 }

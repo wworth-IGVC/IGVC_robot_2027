@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# One command to bring up the simulation. Run this INSIDE the Gazebo container.
+# One command to bring up the simulation.
+#
+#   Docker (Windows, Linux):  run it INSIDE the Gazebo container, see below.
+#   pixi   (macOS, native):   pixi run sim     from the repo root.
 #
 # Builds the three packages the launch file needs, sources the workspace, and
 # starts Gazebo, the robot, the ros_gz bridge and RViz.
@@ -32,12 +35,11 @@
 # WSL2, not PowerShell, or there is no window. See docs/GAZEBO_SETUP.md 3A.
 # ---------------------------------------------------------------------------
 set -o pipefail
-source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+. "$(dirname "$0")/igvc_env.sh" || exit 1
 
 . "$(dirname "$0")/sim_preflight.sh"
 sim_preflight || exit 1
 
-REPO=/root/ros2_ws/src/IGVC_robot_2026
 RVIZ="${RVIZ:-1}"
 HEADLESS="${HEADLESS:-0}"
 CAMERAS="${CAMERAS:-front}"
@@ -47,20 +49,7 @@ echo " IGVC Gazebo simulation"
 echo "=============================================================="
 
 echo "--- building the four packages the bringup needs ---"
-cd /root/ros2_ws || exit 1
-colcon build --symlink-install \
-    --base-paths "$REPO/src" \
-    --packages-select zed_description igvc_test_description \
-                      igvc_test_bringup \
-                      igvc_lane_detection \
-    > /tmp/colcon.log 2>&1
-RC=$?
-if [ "$RC" -ne 0 ]; then
-    echo "FAIL: colcon build exited $RC"
-    tail -30 /tmp/colcon.log
-    exit 1
-fi
-source /root/ros2_ws/install/setup.bash
+igvc_build || exit 1
 echo "    ok"
 
 # Regenerate the world if the track data is newer than the world file, so a
@@ -70,20 +59,19 @@ TRACK="$REPO/IGVC_track_generator/track_points.json"
 if [ -f "$TRACK" ] && { [ ! -f "$WORLD" ] || [ "$TRACK" -nt "$WORLD" ]; }; then
     echo "--- track data is newer than the world; regenerating ---"
     python3 "$REPO/scripts/gazebo/generate_igvc_world.py" || exit 1
-    colcon build --symlink-install --base-paths "$REPO/src" \
-        --packages-select igvc_test_description > /dev/null 2>&1
-    source /root/ros2_ws/install/setup.bash
+    igvc_build igvc_test_description || exit 1
 fi
 
 echo
-echo "  drive it from a SECOND shell in this same container:"
-echo "    docker exec -it igvc_gazebo bash"
-echo "    source /root/ros2_ws/install/setup.bash"
+echo "  drive it from a SECOND shell:"
+igvc_shell_hint
 echo "    ros2 run teleop_twist_keyboard teleop_twist_keyboard"
 echo
-echo "  if that container name does not exist, you started this with"
-echo "  'compose run' instead of 'compose up -d'. See the header of this file."
-echo
+if [ "$IGVC_RUNTIME" = "docker" ]; then
+    echo "  if that container name does not exist, you started this with"
+    echo "  'compose run' instead of 'compose up -d'. See the header of this file."
+    echo
+fi
 
 LAUNCH_FILE="gazebo_sim.launch.py"
 [ "${NAV:-0}" = "1" ] && LAUNCH_FILE="gazebo_nav_test.launch.py"

@@ -72,11 +72,13 @@ while cameras lag badly.
 import io
 import json
 import os
+import platform
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
     SetEnvironmentVariable,
@@ -183,9 +185,26 @@ def _setup(context, *args, **kwargs):
         " sim_camera_hz:=", cfg("sim_camera_hz"),
     ])
 
-    gz_args = world if headless else world + " -r"
+    # macOS is different in two ways, and both are handled here so that no
+    # script or document has to know about them.
+    #
+    # 1. The gz CLI on macOS REFUSES to run the server and the GUI in one
+    #    process ("you cannot run both server and gui in one terminal"), so
+    #    `gz sim -r world` fails outright. There the server runs with -s and
+    #    the GUI is started below as its own `gz sim -g` process.
+    # 2. --headless-rendering selects EGL, which is a Linux mechanism. On
+    #    macOS ogre2 renders through Metal and needs no display for sensors,
+    #    so the flag is left off. NOT VERIFIED ON A MAC as of 2026-09-24:
+    #    render_check.sh is the first thing the Mac checklist runs for this.
+    #
+    # Off macOS nothing changes: the arguments are exactly what they were.
+    on_macos = platform.system() == "Darwin"
     if headless:
-        gz_args = world + " -r -s --headless-rendering"
+        gz_args = world + " -r -s" + ("" if on_macos else " --headless-rendering")
+    elif on_macos:
+        gz_args = world + " -r -s"
+    else:
+        gz_args = world + " -r"
 
     gz = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
@@ -279,6 +298,10 @@ def _setup(context, *args, **kwargs):
     # the world slides past. gazebo_sim.rviz is fixed to odom and adds the
     # laser, camera and odometry displays.
     actions = [gz, rsp, spawn, bridge, odom_shim]
+    if on_macos and not headless:
+        # The GUI half of point 1 above. It connects to the server over
+        # gz-transport, so it can start at the same time.
+        actions.append(ExecuteProcess(cmd=["gz", "sim", "-g"], output="screen"))
 
     use_rviz = cfg("rviz").lower() in ("true", "1", "yes")
     if use_rviz:

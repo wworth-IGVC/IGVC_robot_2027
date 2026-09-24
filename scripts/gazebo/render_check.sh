@@ -25,12 +25,17 @@ set -o pipefail
 # used to die with "gz: No such file or directory" and report RESULT: UNKNOWN,
 # which reads as a broken GPU rather than a missing PATH entry. The other
 # scripts here source it at the top; this one did not. Verified 2026-09-17.
-source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+. "$(dirname "$0")/igvc_env.sh" || exit 1
 
 WORLD="${1:-$(dirname "$0")/render_check.sdf}"
 ITERATIONS="${ITERATIONS:-400}"
 OGRE_LOG="$HOME/.gz/rendering/ogre2.log"
 RUN_LOG="/tmp/render_check_gzsim.log"
+
+# --headless-rendering selects EGL, which exists only on Linux. On macOS ogre2
+# renders through Metal and the flag is left off. See gazebo_sim.launch.py.
+HEADLESS_FLAG="--headless-rendering"
+[ "$(uname -s)" = "Darwin" ] && HEADLESS_FLAG=""
 
 echo "=============================================================="
 echo " Gazebo render check"
@@ -49,7 +54,7 @@ fi
 rm -f "$OGRE_LOG"
 
 echo "--- running headless server with camera + gpu_lidar ---"
-timeout 120 gz sim -v 4 -s -r --headless-rendering \
+timeout 120 gz sim -v 4 -s -r $HEADLESS_FLAG \
     --iterations "$ITERATIONS" "$WORLD" > "$RUN_LOG" 2>&1
 GZ_STATUS=$?
 echo "gz sim exit status: $GZ_STATUS"
@@ -81,13 +86,27 @@ SOFTWARE_HIT=$(grep -ciE "llvmpipe|softpipe|swrast|kms_swrast|software rasteri" 
 NVIDIA_HIT=$(printf '%s' "$ADAPTER" | grep -ciE "nvidia|geforce|rtx|quadro|tesla")
 INTEL_AMD_HIT=$(printf '%s' "$ADAPTER" | grep -ciE "intel|amd|radeon|arc\(tm\)|iris|uhd graphics|vega")
 
+# macOS: ogre2 runs on Metal, so there is no GL_RENDERER line at all. The
+# device name is taken from whatever line in the log names an Apple GPU. The
+# exact log wording on a Mac is NOT VERIFIED as of 2026-09-24, so this falls
+# through to tier "unknown" rather than guessing if it does not match.
+METAL_HIT=0
+if [ "$(uname -s)" = "Darwin" ]; then
+    METAL_HIT=$(grep -ciE "metal" "$OGRE_LOG")
+    if [ "$ADAPTER" = "unknown" ]; then
+        APPLE_LINE=$(grep -m1 -iE "apple (m[0-9]|a[0-9]+)" "$OGRE_LOG")
+        [ -n "$APPLE_LINE" ] && ADAPTER="Metal: $(printf '%s' "$APPLE_LINE" | sed 's/^[[:space:]]*//' | cut -c1-80)"
+        [ -z "$APPLE_LINE" ] && [ "$METAL_HIT" -gt 0 ] && ADAPTER="Metal (device name not found in the log)"
+    fi
+fi
+
 # TIER is written to a file so bootstrap.sh can read the verdict rather than
 # re-deriving it, and cannot mistake a software machine for tier A.
 TIER_FILE="${TIER_FILE:-/tmp/render_tier}"
 
 echo "--- sensor data actually produced? ---"
 # A render engine can initialise and still publish nothing. Check the topics.
-timeout 20 gz sim -v 1 -s -r --headless-rendering "$WORLD" > /dev/null 2>&1 &
+timeout 20 gz sim -v 1 -s -r $HEADLESS_FLAG "$WORLD" > /dev/null 2>&1 &
 GZ_PID=$!
 sleep 8
 CAM_MSG=$(timeout 10 gz topic -e -n 1 -t /render_check/camera 2>/dev/null | head -5)
@@ -112,13 +131,24 @@ if [ "$SOFTWARE_HIT" -gt 0 ]; then
     echo " and control work, because gpu_lidar falls back too and the"
     echo " physics runs on the CPU either way."
     echo
-    echo " WHAT TO DO NEXT: follow the TIER C path in GAZEBO_QUICKSTART.md."
+    echo " WHAT TO DO NEXT: follow the TIER C path in docs/setup/WINDOWS.md."
     echo " Run headless with RViz, keep the front camera only and keep it"
     echo " small. Do NOT take camera or timing measurements on this"
     echo " configuration and do not compare them with anyone else's."
     echo "=============================================================="
     echo "C" > "$TIER_FILE" 2>/dev/null
     exit 1
+elif [ "$METAL_HIT" -gt 0 ] && [ -n "$CAM_MSG" ] && [ -n "$SCAN_MSG" ]; then
+    echo " RESULT: HARDWARE RENDERING (Apple GPU, Metal)"
+    echo " YOUR TIER: M"
+    echo
+    echo " This is the native macOS route (pixi / RoboStack) rendering on the"
+    echo " Mac's own GPU, and both sensors produced data. Tier M is NEW and was"
+    echo " not measured on any Mac before this script shipped, so please record"
+    echo " this output in docs/setup/MACOS_CHECKLIST.md."
+    echo "=============================================================="
+    echo "M" > "$TIER_FILE" 2>/dev/null
+    exit 0
 elif [ "$NVIDIA_HIT" -gt 0 ]; then
     echo " RESULT: HARDWARE RENDERING (NVIDIA)"
     echo " YOUR TIER: A"
@@ -143,7 +173,7 @@ elif [ "$INTEL_AMD_HIT" -gt 0 ]; then
     echo " gz sim crashes rather than running slowly, you are hitting the"
     echo " known Intel-adapter crash on machines that have BOTH an Intel"
     echo " iGPU and a discrete card: see MESA_D3D12_DEFAULT_ADAPTER_NAME in"
-    echo " docker-compose.windows.yml, and GAZEBO_QUICKSTART.md tier B."
+    echo " docker-compose.windows.yml, and docs/setup/WINDOWS.md tier B."
     echo " Please report your numbers back so this tier stops being"
     echo " unmeasured."
     echo "=============================================================="
