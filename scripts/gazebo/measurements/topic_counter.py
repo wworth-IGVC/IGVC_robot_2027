@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # Count messages on the topics lane_segmentation_node consumes, for the
 # cross-container DDS gate. Run the SAME script in both containers at once and
-# compare: the Jazzy one is the reference, the Humble one is the thing under
-# test. Counting beats `ros2 topic hz` because hz plus `timeout` plus pipefail
-# reports a false failure when the timeout kills the producer.
-#   docker exec igvc_gazebo             bash -lc "source /opt/ros/jazzy/setup.bash  && python3 topic_counter.py 30 JAZZY"
-#   docker exec igvc_humble_fused_drive bash -lc "source /opt/ros/humble/setup.bash && python3 topic_counter.py 30 HUMBLE"
+# compare: the simulator's container is the reference, the other container is
+# the thing under test. Counting beats `ros2 topic hz` because hz plus
+# `timeout` plus pipefail reports a false failure when the timeout kills the
+# producer.
+#   docker exec igvc_gazebo    bash -lc "source /opt/ros/jazzy/setup.bash && python3 topic_counter.py 30 SIM"
+#   docker exec igvc_dev_jazzy bash -lc "source /opt/ros/jazzy/setup.bash && python3 topic_counter.py 30 DEV"
+# Written in 2026-09 for a Humble perception container, retired on
+# 2026-09-29 (P0-1 in docs/GAZEBO_TODO.md); both sides are Jazzy now.
 """Count messages on the topics lane_segmentation_node consumes.
 
 Counting, not `ros2 topic hz`: hz reports a rate computed from whatever it
