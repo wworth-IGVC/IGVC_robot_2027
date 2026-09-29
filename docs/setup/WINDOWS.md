@@ -939,7 +939,11 @@ avoided in this simulator came from the JSON.
 `HoughLinesP`, no torch. It produced 253 occupied cells in `/lane_map` over a
 90 s self-driven run. Nothing plans on its output. **YOLOPv2
 (`lane_segmentation_node`) does not run here**: it needs torch, which this
-image does not have, and weights that are not in the repo.
+image does not have, and weights that are not in the repo. It does run in the
+optional dev image `igvc-dev-jazzy` (NVIDIA only; `docker compose -f
+docker-compose.windows.yml build igvc_dev_jazzy`, 14.9 GB), and scored a hit
+rate of 0.166 against a ground-truth ceiling of 0.676 on 2026-09-29: running,
+not yet good enough to steer by.
 
 **The camera point cloud is rotated 90 degrees.** Measured, not suspected, and
 deliberately not fixed, because fixing it connects a Nav2 consumer that has

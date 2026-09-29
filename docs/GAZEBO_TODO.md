@@ -1,6 +1,6 @@
 # Gazebo simulator: what is done, and what is next
 
-**Updated 2026-09-24.** A single page for "where is the simulator up to".
+**Updated 2026-09-29.** A single page for "where is the simulator up to".
 `GAZEBO_SETUP.md` is the detail behind every line here.
 
 Priorities: **P0** blocks other work · **P1** needed before competition ·
@@ -30,6 +30,31 @@ Verified means a command was run and a number came back. Nothing below is
 - [x] **Four zero-normal collision meshes worked around** for simulation with
       primitive colliders under `sim:=true`. The real robot's description is
       untouched.
+
+### ROS 2 Jazzy only, no Humble in the simulator path  *(2026-09-29)*
+
+- [x] **Every package and robot component classified for Jazzy**,
+      [`JAZZY_MIGRATION.md`](JAZZY_MIGRATION.md): 22 of 22 packages build,
+      nothing needs rewriting because of Jazzy; the robot-side work (JetPack,
+      the ZED stack, torch on the Orin) is laid out with the decisions it
+      needs. `scripts/check_jazzy_inventory.py` fails if a package is missing
+      from it.
+- [x] **Every package declares what it uses.** A clean `rosdep install` now
+      brings in `twist_stamper`, `joy` and `teleop_twist_joy`, and
+      `rosdep check` exits 0; `igvc_test_bringup`'s scripts install where
+      `ros2 run` finds them without `--symlink-install`.
+- [x] **`igvc-dev-jazzy` replaced the Humble torch image**: the Gazebo image
+      plus torch (CUDA 13.0, `sm_120`) and every workspace dependency. It
+      runs as the simulator container with both gates passing, and YOLOPv2
+      runs in it.
+- [x] **Humble is out of the simulator path.** The Humble Gazebo image is
+      deleted, the Humble torch image is in `docker/deprecated/` for one
+      season with no compose service, and what remains Humble is robot side
+      (the ZED images).
+- [x] **The 2026 competition code runs in a container with a ROS 2 terminal
+      on it**, from PowerShell: [`COMPETITION_STACK.md`](COMPETITION_STACK.md).
+      34 nodes, the graph measured on 2026-09-24, Nav2 active, YOLOPv2 on the
+      GPU.
 
 ### RQ-03, the interface contract  *(closed 2026-09-15)*
 
@@ -202,14 +227,28 @@ Verified means a command was run and a number came back. Nothing below is
       for 90 s on the front camera alone: **`/lane_map` 253 occupied cells of
       102400, `/lane_costmap` 800 of 160000**, one startup watchdog warning,
       no errors. This is the cheap half of perception and it needed nothing.
-- [ ] **Get YOLOPv2 running.** Only `lane_segmentation_node` needs torch, and
-      the Gazebo image has none. `igvc-humble-fused-drive` has torch 2.14.0+cu130
-      with `sm_120` in its arch list, and a real convolution runs on the
-      Blackwell GPU (verified 2026-09-17), so the remaining question is whether
-      a Humble container and a Jazzy container share a ROS graph. That is now
-      the *only* thing the cross-container DDS gate has to prove. `models/`
-      does not exist locally and `fetch_yolopv2_weights.sh` verifies no
-      checksum.
+- [x] **YOLOPv2 runs against the simulator, on Jazzy, and has a number.**
+      *(2026-09-29)* In the Jazzy dev image `igvc-dev-jazzy`, torch 2.14.0 on
+      `cuda:0` in half precision, weights checked against a recorded SHA256
+      by `fetch_yolopv2_weights.sh`. Scored by `lane_eval_sim.py` in one
+      self-driving run, 100 s, front camera, 640x360, with Hough and the
+      ground truth scored in the same drive:
+
+      | Producer | Hit rate @ 0.25 m | Occupied cells | Coverage near observed cells |
+      | --- | --- | --- | --- |
+      | **YOLOPv2** | **0.166** | 2721 | 0.762 |
+      | Hough, same drive | 0.389 | 18 | 0.273 |
+      | ground truth (the ceiling) | 0.676 | 2946 | 0.996 |
+
+      **Not good enough to steer by yet**: it finds most of the paint it can
+      see but places it with a median error of 0.77 m. No pass threshold was
+      set; this is the baseline. Causes not yet separated: the 640x360
+      resolution (its thresholds were tuned at 2.4x that), the unknown lens,
+      and its depth projection. **This Hough number is not a re-baseline:**
+      in this run Hough found no TF from the camera's optical frame at startup
+      and fell back to pinhole projection for the whole run (13 to 16 points a
+      frame, 18 cells), so compare YOLOPv2 with the 2026-09-17 Hough figure,
+      0.491, instead.
 - [x] **`num_cameras: 3` against one camera is a startup warning, not a
       failure.** *(2026-09-17)* Two separate claims were wrong: the node builds
       one synchroniser **per camera**, so camera 0 is unaffected, and it does
@@ -263,7 +302,23 @@ Verified means a command was run and a number came back. Nothing below is
       **Re-baseline all three gates afterwards** and do not attribute the
       change to the frame fix alone. Deliberately **not** merged for the
       2026-09-17 sub-team meeting for exactly this reason.
-- [ ] **Close P0-1 properly: a partial pass with an open defect.** The
+- [x] **P0-1 closed by removal, 2026-09-29.** Perception now runs in the
+      Jazzy dev image `igvc-dev-jazzy`, so no Humble participant is left on
+      the simulator's graph. `scripts/gazebo/measurements/dds_idle_probe.py`,
+      a node that subscribes to nothing, 60 s beside the running simulator:
+      **0 lines from the Jazzy dev container** (with and without the Fast DDS
+      profile), **3 lines from the Humble container** (with and without), and
+      0 from the Humble container with no simulator up, so the test still
+      fails where it should. A new clue settles most of the mechanism: the
+      Humble probe **discovered no nodes at all** while the Jazzy one found 4,
+      and `rmw_dds_common`'s `Gid` is `char[24]` on Humble against `char[16]`
+      on Jazzy (read from both images). Node names travel in
+      `/ros_discovery_info` messages made of Gids, so a Humble reader
+      misparses Jazzy's, prints the line, and never learns a node name, while
+      topic data still flows because DDS endpoint discovery does not use that
+      topic. That link is inferred; the sizes and the zero are measured. The
+      original entry follows, unchanged.
+- [x] ~~**Close P0-1 properly: a partial pass with an open defect.**~~ The
       cross-container DDS gate passed on counts. Over 30 s, counting in both
       containers simultaneously, Jazzy and Humble agreed within 1% on every
       topic YOLOPv2 consumes: rgb 354/356, depth 353/355, camera_info 357/357,
@@ -391,6 +446,9 @@ Verified means a command was run and a number came back. Nothing below is
 - [ ] **Does YOLOPv2 tolerate 640x360?** The camera budget forces that
       resolution. If perception needs 720p, three cameras are not viable on
       this hardware - which is also the AGX-versus-Orin-Nano argument.
+      *(2026-09-29: it runs at 640x360 and scores 0.166 against a 0.676
+      ceiling; whether resolution is the cause is not separated yet. A run at
+      1280x720 on the same drive would answer it.)*
 - [ ] **`wheel_radius`, for the real robot.** The simulator now corroborates
       0.1016 rather than the 0.2032 in `controllers.yaml` - odometry matched
       ground truth to 0.3% across four runs, and 0.2032 would give a ratio near
@@ -415,11 +473,13 @@ left is narrower and harder than the original list implied.
 2. ~~Verify the point cloud orientation.~~ **Done, and it is rotated 90
    degrees.** Fixing it is now its own item above, because it connects a Nav2
    consumer that has never been connected.
-3. **Close the `sequence size exceeds remaining buffer` defect**, then run
-   `lane_segmentation_node` out of `igvc-humble-fused-drive` against the
-   Gazebo topics rather than putting torch in the simulator image. Needs
-   `fetch_yolopv2_weights.sh` run, which verifies **no checksum**; note that
-   when you do.
+3. ~~Close the `sequence size exceeds remaining buffer` defect, then run
+   `lane_segmentation_node` out of `igvc-humble-fused-drive`.~~ **Done the
+   other way round, 2026-09-29:** perception moved to the Jazzy dev image, so
+   there is no Humble participant left to hit the defect, and YOLOPv2 ran
+   against the simulator from there, weights checksummed. Hit rate 0.166
+   against a 0.676 ceiling (the P0 item above). The next step is making that
+   number better, not getting it.
 4. ~~Compare its lane output against `/lane_ground_truth`.~~ **That comparison
    does not work as stated** and the reason is worth keeping: the two grids
    are complementary encodings of different things, a filled corridor against

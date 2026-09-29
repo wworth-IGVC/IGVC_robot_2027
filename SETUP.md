@@ -73,9 +73,17 @@ and Linux: `export ROS_DOMAIN_ID=<n>` before `pixi run`.
 | Mac fallback | `docker-compose.mac.yml` |
 | Linux, Docker | `docker-compose.yml`, service `igvc_gazebo_linux` |
 | **Shared by every path** | everything else in `scripts/gazebo/`, the launch files in `src/igvc_test_bringup/launch/`, the robot description, the world. `scripts/gazebo/igvc_env.sh` is what lets one set of scripts run in both layouts |
-| Not the simulator | `docker-compose.jetson.yml` and the other services in `docker-compose.yml` are the robot and perception images |
+| Perception (torch, YOLOPv2), optional, NVIDIA only | `docker/Dockerfile.dev-jazzy`, service `igvc_dev_jazzy` (`igvc_dev_jazzy_linux` in `docker-compose.yml`). Not needed to run the simulator |
+| Not the simulator | `docker-compose.jetson.yml` and the ZED services are the robot's images |
 
-## 5. Maintainers
+## 5. Beyond the simulator
+
+- **The 2026 competition code, running, with a ROS 2 terminal on it**, all
+  in PowerShell: [`docs/COMPETITION_STACK.md`](docs/COMPETITION_STACK.md).
+- **What the robot's software needs for ROS 2 Jazzy**, package by package:
+  [`docs/JAZZY_MIGRATION.md`](docs/JAZZY_MIGRATION.md).
+
+## 6. Maintainers
 
 How the Docker image and the pixi environment are updated, verified and
 published, and the rule that keeps the two from drifting apart:

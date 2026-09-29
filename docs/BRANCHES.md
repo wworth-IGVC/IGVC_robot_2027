@@ -136,6 +136,28 @@ on Humble, since `rclcpp::Clock::now()` is const in Jazzy and not in Humble)
 while the Jetson container is Humble. They were different machines. **Worth
 confirming with the team lead.**
 
+**Corrected 2026-09-24 and 2026-09-29; the two paragraphs above are kept as
+they were written.**
+
+- **"One ROS graph across two machines" is false.** `docker-compose.yml` sets
+  `rmw_fastrtps_cpp` and the Jetson file `rmw_zenoh_cpp` with a peer config
+  listening on localhost only, and nothing in the repository starts a Zenoh
+  router. Two RMWs do not share a graph.
+- **The laptop inference is weaker than it looked.** The competition branch's
+  own scripts (`auton_launch.sh`, `sensor_launch.sh` and three more) all
+  `docker exec` into one container, `dazzling_easley`, which sources
+  `/opt/ros/jazzy` and starts the three ZED X cameras, the lidar, the GPS
+  **and** the drive stack. ZED X cameras connect over GMSL2, so that container
+  most likely ran on the Jetson, under Jazzy. The Humble `jetson-zed` service
+  then was not what ran the cameras at all. Still inferred: nobody who was
+  there has confirmed it. Asking whether `docker ps -a` on the Jetson shows
+  `dazzling_easley` would settle it.
+- **Which branch's code ran:** its scripts start the YOLOPv2 lane detector
+  from `2026/more_diverging_changes`. Adopting that branch is a **merge with
+  one trivial conflict and two fixups**, not a port, unless it is checked out
+  wholesale; `docs/JAZZY_MIGRATION.md` section 4 has the details. To run it
+  without merging anything, `docs/COMPETITION_STACK.md`.
+
 ### The part that is still open
 
 `main` pins `isaac/exts` at `375eddd1`, stereolabs upstream. Per the section
@@ -177,8 +199,10 @@ re-investigates it.
 
 ### `DevEnv`: only `main` is live
 
-This matters because the 2027 team standardised DevEnv on
-`osrf/ros:jazzy-desktop` with a `jazzy_ws`, and a branch literally named `jazzy`
+This matters because the 2027 team moved DevEnv to Jazzy (its `main` uses
+`ghcr.io/gold-rush-robotics/dev_env:9`, built from `ros:jazzy-ros-base`; a
+proposal to use `osrf/ros:jazzy-desktop` was closed unmerged), and a branch
+literally named `jazzy`
 invites the question of whether the real work lives there. **It does not.**
 
 | Branch | Ahead | Behind | Files | Last commit |

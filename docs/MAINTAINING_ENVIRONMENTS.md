@@ -10,6 +10,7 @@ carry the same software:
 | --- | --- | --- | --- |
 | **Docker image** | Windows (all), Linux on Docker, the Mac fallback | `docker/Dockerfile.gazebo-jazzy` | `ghcr.io/wworth-igvc/igvc-gazebo-jazzy`, public on GHCR |
 | **pixi environment** | Mac (Apple Silicon), native Linux | `pixi.toml` + `pixi.lock` | built on each machine by `pixi install` from RoboStack and conda-forge |
+| **Dev image** (optional) | people running perception (YOLOPv2) or building the whole workspace, NVIDIA only | `docker/Dockerfile.dev-jazzy`, `FROM` the Gazebo image pinned by tag and digest | **built locally**, not published: `docker compose -f docker-compose.windows.yml build igvc_dev_jazzy` |
 
 **The image contains no project code.** The repository is bind-mounted at
 runtime, so a code change never needs a new image. Rebuild only when the
@@ -27,6 +28,7 @@ commit**, or the commit says why not. Today's deliberate differences:
 | `ros-jazzy-gz-ros2-control`, `ros-jazzy-simulation-interfaces` | yes | no | unused by the Gazebo path; RQ-06 is undecided. Add to both if RQ-06 picks `gz_ros2_control` |
 | `coreutils`, `compilers`, `cmake` | from the base image | explicit | macOS ships no GNU `timeout` and no toolchain inside the environment |
 | gz-sim version | **8.15.0** (ROS vendor packages) | **8.10.0** (conda-forge) | Same Harmonic series; each channel ships what it ships. Recorded so a behaviour difference between routes has an obvious first suspect |
+| torch, torchvision, ultralytics, and the robot-only apt packages (`ros2_control`, `joy`, `teleop_twist_joy`) | **dev image only** | **no** | Perception is optional and the dev image is NVIDIA-only (CUDA torch). A pixi `perception` feature (PyTorch, which can use Apple's GPU through MPS) was planned and **not built** as of 2026-09-29; the native route has no YOLOPv2 yet |
 
 ## Changing the pixi environment
 
@@ -83,6 +85,38 @@ Do it deliberately, not as a side effect, and run all the gates afterwards.
 7. Record both digests (the index and the amd64 manifest) in
    `docs/DOCKER_CHANGES.md` section 16.
 
+## Changing the dev image
+
+`docker/Dockerfile.dev-jazzy` is the Gazebo image plus torch, ultralytics and
+every apt package the 22 packages declare. Its build **fails rather than
+ships** if OpenCV is not the pinned pip 4.11.0, numpy is not 1.x, torch lacks
+`sm_120`, setuptools is 80 or later, pip deleted any apt-owned Python file, or
+`cv_bridge` cannot round-trip an image. Read the comments in the Dockerfile
+before changing a pin: each one is a failure that was measured.
+
+1. Edit the Dockerfile, or `docker/perception-constraints.txt`.
+2. Build, then reset its volumes:
+   ```bash
+   docker compose -f docker-compose.windows.yml build igvc_dev_jazzy
+   docker compose -f docker-compose.windows.yml down -v
+   docker compose -f docker-compose.windows.yml up -d igvc_dev_jazzy
+   ```
+3. Check it, in the container:
+   - `python3 scripts/gazebo/measurements/torch_probe.py`: exit 0 only if a
+     convolution runs on the GPU and the GPU's architecture is compiled in;
+   - the whole workspace builds, 22 of 22, and every Python node module
+     imports (report section 20 has the commands);
+   - `bringup_smoke_test.sh` and `autonomy_check.sh` pass **with it as the
+     simulator container**.
+4. **When the Gazebo image is republished**, move this image's `FROM` to the
+   new dated tag **and** digest, rebuild, and repeat step 3. The digest pin is
+   deliberate: a republished `latest` must not silently change what this image
+   is built on.
+
+It is not published. If it ever is, the Gazebo image's publishing steps above
+apply unchanged, under the name `igvc-dev-jazzy`; it is 14.9 GB on disk and
+about 4.4 GB to download, which is why it stays optional.
+
 **The image is amd64 only.** A native arm64 build would make the Mac *Docker
 fallback* run without emulation. It is not needed for the Mac *route*, which is
 pixi, and it has not been built. If it is ever wanted, build arm64 on native
@@ -97,13 +131,17 @@ bits.
   `pixi.toml`, `pixi.lock`, `scripts/gazebo/` or a launch file.
 - The platform guides in `docs/setup/` still match what the scripts print.
 
-## Planned: perception on Jazzy, on both routes
+## Perception on Jazzy: done on Docker, not yet on pixi
 
-The one piece of the simulator stack still on ROS 2 Humble is YOLOPv2 lane
-segmentation, which runs in the Humble `igvc-humble-fused-drive` image and
-talks to the Jazzy simulator across a distro boundary with an open
-deserialisation defect (P0-1 in `docs/GAZEBO_TODO.md`). The plan is to remove
-Humble from the simulator path entirely. When that happens, keep it additive on
-both routes: a pixi **feature** (for example `[feature.perception]` with
-PyTorch, which on Apple Silicon can use the GPU through MPS) and a Docker image
-built `FROM` the Gazebo image, rather than a second, unrelated environment.
+**Done 2026-09-29 on the Docker route.** YOLOPv2 used to run only in the Humble
+`igvc-humble-fused-drive` image, across a distro boundary from the Jazzy
+simulator, with an open deserialisation defect (P0-1). The dev image above
+replaced it, so the simulator and perception are one distro and one ROS build,
+and the Humble image is in `docker/deprecated/`. Report section 20 has the
+evidence.
+
+**Not done on the pixi route.** Keep it additive when someone does it: a pixi
+**feature** (for example `[feature.perception]` with PyTorch, which on Apple
+Silicon can use the GPU through MPS), verified with `pixi lock` for both
+platforms, `native_dryrun.sh`, and a Mac owner, rather than a second,
+unrelated environment.

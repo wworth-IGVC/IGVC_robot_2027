@@ -68,7 +68,10 @@ Verified means a command was run and a number came back. Measured on Windows
   smoother and collision monitor, with **none of those nodes modified**. Last
   run: 83.0 m under its own control, 0.0% of samples with a footprint corner
   over the painted line. The test publishes no velocity command at any point.
-- **Both Docker images build** and the everyday image compiles all 22 packages.
+- **The whole workspace is on ROS 2 Jazzy.** All 22 packages build and every
+  Python module imports in the Jazzy dev image `igvc-dev-jazzy`, which
+  replaced the Humble torch image on 2026-09-29. Nothing on the simulator's
+  path is Humble any more. See [docs/JAZZY_MIGRATION.md](docs/JAZZY_MIGRATION.md).
 
 **Does not work, or is not what it looks like:**
 
@@ -82,8 +85,11 @@ Verified means a command was run and a number came back. Measured on Windows
 - **The camera point cloud is rotated 90 degrees.** Measured, and deliberately
   not fixed, because fixing it connects a Nav2 consumer that has never been
   connected.
-- **YOLOPv2 does not run** in the Gazebo image: it needs torch. The classical
-  Hough lane detector does run and needs nothing extra.
+- **YOLOPv2 does not run in the Gazebo image**: it needs torch. It **does**
+  run against the simulator in the Jazzy dev image `igvc-dev-jazzy`, measured
+  2026-09-29, and scores a hit rate of 0.166 at 0.25 m against a ground-truth
+  ceiling of 0.676, so it is not yet good enough to steer by (report section
+  20). The classical Hough lane detector runs in either image.
 - **`autonomy_check.sh`'s `IN LANE` gate is a coin flip** and that is a defect
   in the test, not the robot. Do not raise its tolerance to make it green.
 - **`/fix` is not published** and ros2_control is not in the loop.
@@ -106,10 +112,11 @@ evidence for each line and the retractions kept visible on purpose.
 
 ## What changed in this fork
 
-- **The Humble Docker image now builds.** It previously failed on every one of
-  the 22 workspace packages; it now builds all 22 clean. The root cause was a
-  `setuptools` version conflict that aborted the run before the other 21
-  packages were even attempted.
+- **A Jazzy dev image replaced the Humble one.** `docker/Dockerfile.dev-jazzy`
+  is the Gazebo image plus torch (CUDA 13.0, `sm_120`) and every dependency of
+  the workspace; all 22 packages build in it. The Humble image it replaced had
+  been fixed earlier in this fork, from 0 of 22 to 22 of 22; it is kept for one
+  season in [docker/deprecated/](docker/deprecated/).
 - **The private ZED image has an open replacement.**
   `docker/Dockerfile.igvc-zed-humble` builds an equivalent x86 image from public
   sources, so you no longer need pull access to
@@ -133,7 +140,9 @@ Every change, its root cause, and how it was verified is recorded in
 | --- | --- |
 | **Set up the simulator on your machine** | [SETUP.md](SETUP.md), then the guide for your platform in [docs/setup/](docs/setup/) |
 | Maintain the Docker image or the pixi environment | [docs/MAINTAINING_ENVIRONMENTS.md](docs/MAINTAINING_ENVIRONMENTS.md) |
-| The older Humble perception image (not the simulator) | [docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx) |
+| Run the 2026 competition code and open a ROS 2 terminal on it, from PowerShell | [docs/COMPETITION_STACK.md](docs/COMPETITION_STACK.md) |
+| Which packages and robot software are on Jazzy, and what is left | [docs/JAZZY_MIGRATION.md](docs/JAZZY_MIGRATION.md) |
+| The older Humble perception image (legacy, retired) | [docs/IGVC_2027_Docker_Setup_Guide.docx](docs/IGVC_2027_Docker_Setup_Guide.docx) |
 | Understand how the simulator works, or change it | [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) |
 | **See what is done and what is left on the simulator** | [docs/GAZEBO_TODO.md](docs/GAZEBO_TODO.md) |
 | Know what is in each image and why | [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md) |
@@ -148,8 +157,8 @@ and not for me" reports trace back to one of those.
 | Path | Purpose |
 | --- | --- |
 | `src/` | ROS 2 packages for bringup, robot description, hardware, perception, simulation, and vendored drivers/interfaces. |
-| `docker/` | Docker image definitions: the Humble fused-drive runtime image and the consolidated ZED + Humble image. |
-| `docker-compose.yml` | GPU-enabled compose services for the Jazzy ZED/dev environment, the Humble fused-drive runtime, and the consolidated ZED image. |
+| `docker/` | Docker image definitions: the Gazebo simulator image, the Jazzy dev image (torch, the whole workspace), and the robot-side ZED + Humble image. Retired ones are in `docker/deprecated/`. |
+| `docker-compose.yml` | GPU-enabled compose services for native Linux: the simulator, the Jazzy dev image, the org ZED/dev environment and the robot-side ZED images. |
 | `docker-compose.windows.yml` | Same services adapted for Docker Desktop on Windows, which cannot use `/dev`, host networking, or `runtime: nvidia`. |
 | `scripts/` | Workspace helper scripts for DDS setup, rosbag/data export, and Windows prerequisite setup (`setup-windows.ps1`). |
 | `training/` | YOLOv12 training workflow, dataset, training requirements, seed weights, and training outputs. |
@@ -170,28 +179,29 @@ unsupported before the team ever competes on it. Jazzy runs to May 2029.
 | Target | Use case | Status |
 | --- | --- | --- |
 | ROS 2 Jazzy in Docker | **The simulator.** Gazebo Harmonic, `ros_gz`, `gz_ros2_control`. | **Supported, and the robot drives the course autonomously.** `docker/Dockerfile.gazebo-jazzy`. ~5.6 GB on disk, now including Nav2. |
-| ROS 2 Humble in Docker | Fused-drive runtime, still the default for everyday work. | **Pending port to Jazzy.** `docker/Dockerfile.humble-fused-drive`. |
-| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. | **Pending port to Jazzy.** `docker/Dockerfile.igvc-zed-humble`, CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
+| ROS 2 Jazzy + torch in Docker | Perception (YOLOPv2, ultralytics) and building the whole workspace. | **Supported, verified 2026-09-29.** `docker/Dockerfile.dev-jazzy`, image `igvc-dev-jazzy`, 14.9 GB on disk. Replaced the Humble fused-drive image, which is in `docker/deprecated/`. |
+| ROS 2 Humble + ZED in Docker | ZED camera work and robot machines. **Robot side.** | **Pending port to Jazzy**, planned in [docs/JAZZY_MIGRATION.md](docs/JAZZY_MIGRATION.md) section 5. `docker/Dockerfile.igvc-zed-humble`, CUDA 13, ZED SDK, ZED ROS 2 wrapper. 28.6 GB on disk. |
 | ROS 2 Jazzy on host | Local debug GUI and host-side tools. | Host tools can see Docker topics when the shared DDS helper is sourced. |
 
-The two Humble images still work and have not been moved; they are the everyday
-path until their Jazzy replacements are built and verified. Retired images live
-in [docker/deprecated/](docker/deprecated/) with a README explaining what
+The only Humble image left outside `docker/deprecated/` is the robot-side ZED
+image; nothing on the simulator's path is Humble. Retired images live in
+[docker/deprecated/](docker/deprecated/) with a README explaining what
 replaced them.
 
 Jazzy is where the **code** already was, though not the robot images. The 2026
 competition branch is Jazzy code, the competition robot ran out of a
-`jazzy_ws`, the org's `dev_env` image is Jazzy, and the 2027 team standardised
-on `osrf/ros:jazzy-desktop`. The org's **robot-side** images, `jetson-zed`,
+`jazzy_ws`, and the org's `dev_env` image is Jazzy (the 2027 DevEnv's `main`
+uses `ghcr.io/gold-rush-robotics/dev_env:9`, built from `ros:jazzy-ros-base`). The org's **robot-side** images, `jetson-zed`,
 `jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros`, are genuinely Humble; see
 §5.4 of [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md), and beware two
 documented traps there: `docker-compose.jetson.yml`'s "ROS 2 Jazzy" comments
 are stale, and `jetson-ros-base` is tagged `jazzy-36.4.7-2` while its
 Dockerfile builds Humble.
 
-So the robot side is a real migration, not a formality, and nothing here has
-started it. The EOL date decides it anyway, Humble is unsupported before the
-team competes on it.
+So the robot side is a real migration, not a formality. What it needs, and
+which decisions are the team lead's, is in
+[docs/JAZZY_MIGRATION.md](docs/JAZZY_MIGRATION.md). The EOL date decides it
+anyway: Humble is unsupported before the team competes on it.
 
 `docker/Dockerfile.igvc-zed-humble` still does the job it was written for, it
 replaces a **private** ZED image that most team accounts cannot pull and that
@@ -260,7 +270,7 @@ colcon build --symlink-install --base-paths src
 source install/setup.bash
 ```
 
-For a narrower runtime build matching the Humble container package set:
+For a narrower build, the four packages the simulator uses plus the hardware plugins:
 
 ```bash
 colcon build --symlink-install \
@@ -282,46 +292,31 @@ ros2 run igvc_lane_detection navigation_node
 ros2 run igvc_simulation_interface simulation_interface
 ```
 
-## Humble Docker bringup
+## The Jazzy dev image
 
-The repo includes a ROS 2 Humble container for running the fused-drive stack on systems where the host ROS install is different, such as Jazzy.
-
-Build the dependency image once:
-
-```bash
-docker compose build igvc_humble_fused_drive
-```
-
-Launch the Humble fused-drive stack:
+`igvc-dev-jazzy` is the Gazebo image plus torch 2.14.0 (CUDA 13.0, with
+`sm_120` kernels for RTX 50-series cards), ultralytics, and every apt package
+the whole 22-package workspace needs. Use it for perception (YOLOPv2) or to
+build everything. It is not on GHCR; build it once:
 
 ```bash
-docker compose up igvc_humble_fused_drive
+docker compose -f docker-compose.windows.yml build igvc_dev_jazzy   # Windows
+docker compose build igvc_dev_jazzy_linux                           # native Linux
 ```
 
-The container runs:
+It can be the simulator container itself, since it carries everything
+`igvc_gazebo` does, or run beside `igvc_gazebo` on the same `ROS_DOMAIN_ID`
+for perception only. **Never run a simulator in both at once.** Its colcon
+output lives in its own named volumes, so after rebuilding it run
+`docker compose -f docker-compose.windows.yml down -v`, or a stale volume keeps
+serving the old build.
 
-```bash
-ros2 launch igvc_test_bringup igvc_fused_drive.launch.py hardware_interface:=IsaacDriveHardware use_sim_time:=true
-```
+To run the **2026 competition code** in it and open a ROS 2 terminal on the
+result, all from PowerShell, see
+[docs/COMPETITION_STACK.md](docs/COMPETITION_STACK.md).
 
-The Humble image definition lives in `docker/Dockerfile.humble-fused-drive`. The compose service keeps `build`, `install`, and `log` in Docker volumes so restarts can reuse colcon output instead of rebuilding from scratch each time.
-
-To force a clean Humble workspace rebuild:
-
-```bash
-docker compose down -v
-docker compose up igvc_humble_fused_drive
-```
-
-`down -v` removes the named volumes declared in `docker-compose.yml`, so it works
-regardless of what the checkout directory is called. Removing them by hand does
-not: Compose prefixes volume names with the directory, so in a fork checked out
-as `IGVC_robot_2027` they are `igvc_robot_2027_igvc_humble_*`, not
-`igvc_robot_2026_*`.
-
-Run `down -v` after rebuilding an image, too. Named volumes are seeded from the
-image only when they are first created, so a stale volume will quietly keep
-serving the old build output.
+It replaced the Humble fused-drive image on 2026-09-29; that Dockerfile is in
+[docker/deprecated/](docker/deprecated/) for one season.
 
 ## Windows / Docker Desktop
 
@@ -331,18 +326,9 @@ actually runs and it gives you working GUI tools.
 
 ### Option A - from inside WSL2 (recommended)
 
-Open your WSL distribution (`wsl -d <YourDistro>`), `cd` to the repo, and use
-the normal Linux compose file:
-
-```bash
-docker compose build igvc_humble_fused_drive
-docker compose run --rm igvc_humble_fused_drive
-```
-
-Inside WSL2, `/dev`, `/tmp`, and `/tmp/.X11-unix` are real Linux paths and
-`network_mode: host` applies to the WSL2 VM, so `docker-compose.yml` works
-essentially as written. On Windows 11, WSLg supplies an X server, which means
-`rviz2` and other GUI tools actually display - they cannot from PowerShell.
+Open your WSL distribution (`wsl -d <YourDistro>`) and `cd` to the repo. On
+Windows 11, WSLg supplies the display, which means Gazebo, `rviz2` and other
+GUI tools actually show - they cannot from PowerShell.
 
 Docker Desktop shares its daemon with WSL when the distro is enabled under
 Settings > Resources > WSL Integration, so you do not install Docker twice.
@@ -381,28 +367,25 @@ If you do not have WSL2 set up, use the Windows-specific compose file, passed
 explicitly with `-f`:
 
 ```powershell
-docker compose -f docker-compose.windows.yml build igvc_humble_fused_drive
-docker compose -f docker-compose.windows.yml run --rm igvc_humble_fused_drive
+docker compose -f docker-compose.windows.yml up -d igvc_gazebo
+docker exec -it igvc_gazebo bash
 ```
 
-Name the service. A bare `docker compose build` builds **every** service in the
-file, which now includes both ZED variants, roughly 40 minutes and 70 GB when
-all you wanted was the everyday image.
+Everything headless works this way: the checks, Nav2, perception, and a ROS 2
+terminal on the 2026 competition code ([docs/COMPETITION_STACK.md](docs/COMPETITION_STACK.md)).
+GUI tools will not display in this mode.
 
-This drops the host-Linux-only settings (`/dev`, `/tmp/.X11-unix`,
-`network_mode: host`, `runtime: nvidia`) that Docker Desktop cannot honour, and
-keeps GPU access through `gpus: all`. GUI tools will not display in this mode.
+Name the service. A bare `docker compose build` builds **every** service in the
+file, including both ZED variants, roughly 40 minutes and 70 GB.
 
 ### Automated setup
 
 `scripts/setup-windows.ps1` checks every prerequisite - Windows build, WSL2,
-Docker, GPU passthrough, disk space, submodules - then downloads the YOLOPv2
-weights and builds the image:
+Docker, GPU passthrough, disk space, submodules - and builds nothing:
 
 ```powershell
-.\scripts\setup-windows.ps1            # check, then build
-.\scripts\setup-windows.ps1 -CheckOnly # diagnose only, change nothing
-.\scripts\setup-windows.ps1 -WithZed   # also build the large ZED image
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1 -WithPerception   # also check disk for igvc-dev-jazzy
 ```
 
 Windows 10 users need 22H2 (build 19045) or newer; current Docker Desktop
@@ -450,18 +433,18 @@ rather than naming volumes by hand.
 | Service | Image | Purpose |
 | --- | --- | --- |
 | `igvc_dev_zed` | `ghcr.io/gold-rush-robotics/dev-zed:5.1.0-13.0.0` | Jazzy/ZED development container. Builds `igvc_test_bringup` and launches `simulation_launch.launch.yaml`. |
-| `igvc_humble_fused_drive` | Built from `docker/Dockerfile.humble-fused-drive` | Humble runtime container for `igvc_fused_drive.launch.py` with GPU, host networking, DDS profile, and persistent colcon volumes. **Everyday default**, 3.98 GB. |
-| `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | Everything the fused-drive image has, plus the ZED SDK and ZED ROS 2 wrapper. Use for ZED camera work and on robot machines. 28.6 GB on disk. |
+| `igvc_dev_jazzy` (`igvc_dev_jazzy_linux` on Linux) | Built from `docker/Dockerfile.dev-jazzy` | **Jazzy**: the Gazebo image plus torch, ultralytics and every workspace dependency. Perception, the whole workspace, and the 2026 competition code. 14.9 GB on disk. Replaced the Humble fused-drive image on 2026-09-29 |
+| `igvc_zed_humble` | Built from `docker/Dockerfile.igvc-zed-humble` | **Robot side, still Humble.** The ZED SDK and ZED ROS 2 wrapper on top of a Humble workspace image. Use for ZED camera work and on robot machines. 28.6 GB on disk. |
 | `igvc_zed_humble_upstream` | Same Dockerfile, different build args | Same as above but built against **upstream** `zed-ros2-wrapper` v5.4.1 with SDK 5.3.0, the same wrapper and SDK as the Jetson image. See below. |
 | `igvc_gazebo` | Built from `docker/Dockerfile.gazebo-jazzy` | **Gazebo Harmonic** (`gz-sim` 8.15.0) + **Jazzy** + `ros_gz` + `gz_ros2_control`. The simulator for everyday development, plus Nav2. ~5.6 GB on disk. Run it from WSL2; `igvc_gazebo_linux` in `docker-compose.yml` is the native-Linux twin. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md). |
 
-All three services mount the repository at `/root/ros2_ws/src/IGVC_robot_2026`, use host networking, expose `/dev`, share `/tmp/.X11-unix`, and request NVIDIA GPU access.
+Every service mounts the repository at `/root/ros2_ws/src/IGVC_robot_2026` and requests GPU access. In `docker-compose.yml` (native Linux) they also use host networking and expose `/dev`; the Windows file cannot.
 
 ### Which one should I use?
 
-Use **`igvc_humble_fused_drive`** unless you are working on ZED camera code. It
-is a quarter the size, and all 22 workspace packages build in it without the ZED
-SDK.
+Use **`igvc_gazebo`** for the simulator. Add **`igvc_dev_jazzy`** when you
+need torch (YOLOPv2) or the whole workspace. The ZED images are for ZED camera
+work on robot machines only.
 
 `igvc_zed_humble` exists to replace `igvc_dev_zed`, which pulls a **private**
 image (`ghcr.io/gold-rush-robotics/dev-zed`) that most team accounts cannot
@@ -519,7 +502,7 @@ Docker reports two different sizes and they differ by about 3.3×:
 
 | | Download | On disk |
 | --- | --- | --- |
-| `igvc_humble_fused_drive` | 3.98 GB | 13 GB |
+| `igvc_dev_jazzy` | 4.40 GB | 14.9 GB |
 | `igvc_zed_humble` | 9.70 GB | 28.6 GB |
 
 `docker image inspect` reports the compressed download size. `docker image ls`
@@ -541,7 +524,7 @@ docker builder prune    # reclaim build cache
 
 ## Shared DDS profile
 
-Humble-in-Docker and local Jazzy tools must use the same DDS settings to see the same ROS graph. Both compose services use the shared Fast DDS profile at:
+Containers and local tools must use the same DDS settings to see the same ROS graph. The compose services use the shared Fast DDS profile at:
 
 ```text
 src/igvc_test_bringup/config/fastdds_udp.xml
@@ -571,7 +554,7 @@ The main perception/navigation stack is in `igvc_lane_detection` and is launched
 | Odom/TF bridge | `odom_tf_bridge_node` | Publishes transform data from odometry when needed. |
 | Multi-camera detector | `multi_camera_lane_detection_node` | Multi-camera lane fusion path. |
 
-Runtime model weights are expected at `models/yolopv2.pt` or can be passed through `model_weights:=...`. The Humble Docker service sets:
+Runtime model weights are expected at `models/yolopv2.pt` or can be passed through `model_weights:=...`. The `igvc_dev_jazzy` service sets:
 
 ```text
 YOLOPV2_WEIGHTS=/root/ros2_ws/src/IGVC_robot_2026/models/yolopv2.pt
@@ -687,14 +670,11 @@ These directories/files are treated as generated, local, or large artifacts:
 
 ## Common workflows
 
-### Run the Humble fused-drive stack
+### Run the 2026 competition stack and open a ROS 2 terminal on it
 
-```bash
-docker compose build igvc_humble_fused_drive
-docker compose up igvc_humble_fused_drive
-```
+PowerShell, nine steps: [docs/COMPETITION_STACK.md](docs/COMPETITION_STACK.md).
 
-### Inspect Humble topics from a Jazzy shell
+### Inspect container topics from a local Jazzy shell
 
 ```bash
 source scripts/use_igvc_dds.sh

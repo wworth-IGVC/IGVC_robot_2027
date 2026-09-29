@@ -205,9 +205,9 @@ ros-humble-ros-gzharmonic         Conflicts: ros-humble-ros-gz, ros-humble-ros-g
 ros-humble-ros-gzharmonic-bridge  Conflicts: ros-humble-ros-gz-bridge, ros-humble-ros-gzgarden-bridge
 ```
 
-Both findings are now historical. The Humble image is preserved at
-`docker/deprecated/Dockerfile.gazebo-harmonic`; see
-`docker/deprecated/README.md`.
+Both findings are now historical. The Humble image was kept in
+`docker/deprecated/` until 2026-09-29 and then deleted; git has it at
+`88db437:docker/deprecated/Dockerfile.gazebo-harmonic`.
 
 ---
 
@@ -510,11 +510,15 @@ It does **not** contain the workspace's Python/ML stack: **no `torch`, no
 of `igvc_lane_detection` runs and the ground-truth nodes run - but the lane
 detector itself cannot, and that is the gap between today's ground-truth
 navigation and real perception. Adding torch to this image is a deliberate
-decision, not an oversight: it roughly triples the size, and perception work
-has a home already in `igvc-humble-fused-drive`.
+decision, not an oversight: it roughly triples the size. Perception work has
+its own image, `igvc-dev-jazzy` (`docker/Dockerfile.dev-jazzy`): this image
+plus torch and every workspace dependency, 14.9 GB. It replaced the Humble
+`igvc-humble-fused-drive` on 2026-09-29, so nothing on the simulator's graph
+is Humble any more (report section 20).
 
-Base image note: this is `ros:jazzy-ros-base`, not the `osrf/ros:jazzy-desktop`
-that the team standardised on for DevEnv. Desktop is roughly 3.5 GB against 800
+Base image note: this is `ros:jazzy-ros-base`, the same base the team's
+DevEnv image `dev_env:9` builds from, not the `osrf/ros:jazzy-desktop` an
+earlier DevEnv proposal used (that PR was closed unmerged). Desktop is roughly 3.5 GB against 800
 MB, and `rviz2` and `xacro` are installed explicitly above, so nothing it would
 have provided is missing. Disk is a live constraint here, `docker_data.vhdx`
 never shrinks and Windows 11 Home has no Hyper-V to compact it.

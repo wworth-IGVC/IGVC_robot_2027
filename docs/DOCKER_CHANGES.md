@@ -2063,3 +2063,65 @@ report section 19.4.
 - **`igvc_gazebo_linux` has still never run on a Linux machine**, and it sets
   `runtime: nvidia`, so as written it is NVIDIA-only. `docs/setup/LINUX.md`
   recommends pixi for that reason.
+
+## 18. A Jazzy dev image, and Humble leaves the simulator path
+
+**2026-09-29, branch `jazzy-only`.** The published Gazebo image is unchanged.
+The evidence for everything here is report section 20.
+
+### 18.1 Added: `docker/Dockerfile.dev-jazzy`, image `igvc-dev-jazzy`
+
+The Gazebo image, pinned by tag and digest
+(`ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17@sha256:79115da2...`), plus:
+
+| Layer | What | Why |
+| --- | --- | --- |
+| apt | `python3-pip`, `libasio-dev`, `ros-jazzy-ros2-control`, `-ros2-controllers`, `-ros2controlcli`, `-joy`, `-teleop-twist-joy`, `-joint-state-publisher-gui`, `python3-requests` | what the 22 packages declare that the Gazebo image lacks; `rosdep check` over `src/` exits 0 in the image |
+| pip, first | `setuptools>=77.0.3,<80`, `sympy>=1.13.3`, `mpmath`, `filelock>=3.16.1`, all `--ignore-installed` | pip otherwise "upgrades" these by deleting apt's copies |
+| pip | `torch==2.14.0+cu130`, `torchvision==0.29.0+cu130` from the cu130 index | `sm_120` for RTX 50-series |
+| pip | `ultralytics==8.4.162`, `lap==0.5.12`, `imutils==0.5.4`, then both OpenCV wheels removed and `opencv-python-headless==4.11.0.86` put back `--no-deps` | the OpenCV uninstall trap, and 4.12+ declaring numpy 2 |
+| `docker/perception-constraints.txt` | numpy `<2`, OpenCV `<5`, setuptools `>=77.0.3,<80`; kept in force by `PIP_CONSTRAINT` | each line is a measured break of apt `cv_bridge` or colcon |
+| build-time asserts | OpenCV version and location, numpy 1.x, torch version and `sm_120`, ultralytics version, setuptools `<80`, `dpkg --verify` of apt's Python files, a `cv_bridge` round trip | the build fails rather than ships |
+
+14.9 GB on disk, 4.40 GB compressed, about 12 to 15 minutes to build here.
+**Not published**; `docs/MAINTAINING_ENVIRONMENTS.md` says how it is changed
+and checked, and what publishing it would take.
+
+### 18.2 Compose changes
+
+| File | Change | Why |
+| --- | --- | --- |
+| `docker-compose.windows.yml` | **added** `igvc_dev_jazzy` with its own three colcon volumes, the same GPU, display and DDS settings as `igvc_gazebo`, and `IGVC_COMPOSE_FILE`/`IGVC_SERVICE`/`IGVC_CONTAINER` | it can be the simulator container, or run beside `igvc_gazebo` for perception |
+| `docker-compose.windows.yml` | **removed** `igvc_humble_fused_drive` and `igvc_gazebo_humble`, and their volumes; header rewritten; ZED services labelled robot side | Humble out of the simulator path |
+| `docker-compose.yml` | **added** `igvc_dev_jazzy_linux`, **removed** `igvc_humble_fused_drive` and its volumes, ZED services labelled robot side | same. `igvc_dev_jazzy_linux` is written from `igvc_gazebo_linux` and **has not run on a Linux machine** |
+| `.dockerignore` | `*` and `!docker/` only | the explicit line for the Humble Dockerfile went with the file; nothing copies from outside `docker/` |
+
+### 18.3 Moved and deleted
+
+- `docker/Dockerfile.humble-fused-drive` to `docker/deprecated/`, kept one
+  season because the robot side is not ported. No compose service; build it
+  with `docker build -f` if ever needed.
+- `docker/deprecated/Dockerfile.gazebo-harmonic` deleted; git has it at
+  `88db437`.
+- Local images **not** deleted: `igvc-humble-fused-drive:latest` (14.1 GB) and
+  `igvc-gazebo-harmonic:latest` (4.24 GB). Removing them frees Docker's space
+  but `docker_data.vhdx` does not shrink on Windows 11 Home.
+
+### 18.4 Outstanding, amended by this change
+
+Closed from section 8's list:
+
+- **Item 11, port `Dockerfile.humble-fused-drive` to Jazzy:** done, as
+  `Dockerfile.dev-jazzy` (18.1).
+- **Item 13, verify the repo's packages build on Jazzy:** yes, 22 of 22, four
+  times over, including without `--symlink-install` in a clean
+  `ros:jazzy-ros-base` and in the dev image; every Python node module imports
+  in the dev image (report section 20.2 and 20.3).
+
+Still open from this change:
+
+- Publishing `igvc-dev-jazzy`: the owner's call, 4.4 GB for anyone who pulls
+  it.
+- A pixi `perception` feature for the native route: planned, not built.
+- `igvc_dev_jazzy_linux` on a real Linux machine.
+- The robot-side ZED images on Jazzy: `docs/JAZZY_MIGRATION.md` section 5.

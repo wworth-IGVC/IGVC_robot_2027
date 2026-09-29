@@ -23,6 +23,8 @@ It picks your path by platform and sends you to one guide in `setup/`.
 | File | One line | Read it when |
 | --- | --- | --- |
 | `MAINTAINING_ENVIRONMENTS.md` | **How the Docker image and the pixi environment are updated, verified and published** | You own setup this year, or you are changing a dependency |
+| `JAZZY_MIGRATION.md` | **Every package and piece of robot software, and what it needs for ROS 2 Jazzy: exists, builds, migrate, rewrite or drop** | Planning the robot's move to Jazzy, or asking "does X work on Jazzy?" |
+| `COMPETITION_STACK.md` | **The 2026 competition code (`67a6934`) running in a container, and a ROS 2 terminal on it, in PowerShell commands** | You want to look at what competed: its nodes, topics, parameters, controllers. No simulator, no sensor data |
 | `GAZEBO_TODO.md` | **What is done and what is next, one page** | Picking up simulator work, or reporting status |
 | `GAZEBO_SETUP.md` | The simulator: which version, the GPU, the course, the robot, the interface contract, autonomy | Any Gazebo work |
 | `GAZEBO_AGX_BASELINE_REPORT.md` | The running engineering report: every pass, its evidence and its corrections | You want the reasoning behind a decision |
