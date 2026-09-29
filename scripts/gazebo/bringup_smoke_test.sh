@@ -430,8 +430,9 @@ echo "=============================================================="
 
 kill "$LAUNCH_PID" 2>/dev/null
 sleep 3
-pkill -f 'gz sim' 2>/dev/null
-pkill -f parameter_bridge 2>/dev/null
+# Everything the launch started, not only gz sim and the bridge. See
+# sim_teardown in sim_preflight.sh for what used to be left running.
+sim_teardown
 
 if [ "$FAIL" -ne 0 ] || [ "$DRIVE" -ne 0 ] || [ "$FRAME" -ne 0 ] || [ "$GT" -ne 0 ]; then
     echo

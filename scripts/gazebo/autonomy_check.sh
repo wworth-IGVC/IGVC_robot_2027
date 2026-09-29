@@ -122,8 +122,9 @@ timeout 15 ros2 topic echo --once /navigator/status std_msgs/msg/String 2>/dev/n
 
 kill "$LP" 2>/dev/null
 sleep 3
-pkill -f 'gz sim' 2>/dev/null
-pkill -f parameter_bridge 2>/dev/null
+# Everything the launch started, not only gz sim and the bridge. See
+# sim_teardown in sim_preflight.sh for what used to be left running.
+sim_teardown
 
 echo
 python3 - "$TRACK" /tmp/track_log.txt "$TOL" "$FINAL_Z" "$(dirname "$0")" <<'PY'

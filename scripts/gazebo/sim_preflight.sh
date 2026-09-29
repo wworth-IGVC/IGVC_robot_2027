@@ -60,6 +60,42 @@ _sim_procs () {
     pgrep -f 'ros2 launch'             2>/dev/null
 }
 
+# Kill everything _sim_procs finds: the launcher first so it stops
+# respawning, then everything it left behind. The second pass is SIGKILL
+# because gz sim and rviz2 both ignore SIGTERM often enough to matter.
+_sim_kill_all () {
+    pkill -f 'ros2 launch' 2>/dev/null
+    sleep 1
+    pkill -f "$_SIM_ROS_LIB"          2>/dev/null
+    pkill -f "$_SIM_WS_INSTALL"       2>/dev/null
+    pkill -f 'gz sim'                 2>/dev/null
+    sleep 4
+    pkill -9 -f "$_SIM_ROS_LIB"          2>/dev/null
+    pkill -9 -f "$_SIM_WS_INSTALL"       2>/dev/null
+    pkill -9 -f 'gz sim'                 2>/dev/null
+    sleep 2
+}
+
+# The check scripts call this when they finish. Until 2026-09-24 they killed
+# only the launch PID, gz sim and parameter_bridge, and every node the launch
+# had started was reparented to init and kept running: 15 of them, 40 minutes
+# after an autonomy_check.sh run, including a ground-truth /lane_map
+# publisher. The next check's preflight cleaned them up, so the checks never
+# noticed; a second container on the same ROS_DOMAIN_ID saw a phantom stack.
+# Quiet unless something survives.
+sim_teardown () {
+    local left
+    _sim_kill_all
+    left=$(_sim_procs | sort -u | wc -l)
+    if [ "$left" -ne 0 ]; then
+        echo "WARNING: $left simulator processes survived teardown:"
+        ps -eo pid,command 2>/dev/null | grep -E "$_SIM_ROS_LIB|$_SIM_WS_INSTALL|gz sim" \
+            | grep -v grep | head -8 | sed 's/^/   /'
+        return 1
+    fi
+    return 0
+}
+
 sim_preflight () {
     local found
     found=$(_sim_procs | sort -u | wc -l)
@@ -82,19 +118,7 @@ sim_preflight () {
     if [ "${FORCE:-0}" = "1" ]; then
         echo
         echo " FORCE=1, so cleaning up and continuing."
-        # Kill the launcher first so it stops respawning, then everything it
-        # left behind. The second pass is SIGKILL because gz sim and rviz2
-        # both ignore SIGTERM often enough to matter.
-        pkill -f 'ros2 launch' 2>/dev/null
-        sleep 1
-        pkill -f "$_SIM_ROS_LIB"          2>/dev/null
-        pkill -f "$_SIM_WS_INSTALL"       2>/dev/null
-        pkill -f 'gz sim'                 2>/dev/null
-        sleep 4
-        pkill -9 -f "$_SIM_ROS_LIB"          2>/dev/null
-        pkill -9 -f "$_SIM_WS_INSTALL"       2>/dev/null
-        pkill -9 -f 'gz sim'                 2>/dev/null
-        sleep 2
+        _sim_kill_all
         local left
         left=$(_sim_procs | sort -u | wc -l)
         if [ "$left" -ne 0 ]; then
