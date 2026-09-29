@@ -7,19 +7,74 @@
   <maintainer email="nchan18@outlook.com">ubuntu</maintainer>
   <license>TODO: License declaration</license>
 
-  <buildtool_depend>ament_python</buildtool_depend>
+  <!-- Everything below is what this package's launch files and nodes use at
+       runtime. Until 2026-09-24 the list was one commented-out block and a
+       buildtool key that does not exist (ament_python), so a clean
+       `rosdep install` installed none of it; on Jazzy that left the real
+       robot without twist_stamper, which it cannot move without. See
+       docs/JAZZY_MIGRATION.md. Declaring a dependency changes what rosdep
+       installs, never which nodes a launch file starts.
 
-  <!-- <exec_depend>controller_manager</exec_depend>
-  <exec_depend>grr_hardware</exec_depend>
-  <exec_depend>igvc_lane_detection</exec_depend>
-  <exec_depend>igvc_simulation_interface</exec_depend>
-  <exec_depend>igvc_test_description</exec_depend>
-  <exec_depend>nav2_bringup</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend>
+       Declaring ros_gz_sim below does not add Gazebo to a robot image: on
+       Jazzy, nav2_bringup already depends on the TurtleBot simulation
+       packages, which pull in ros_gz_sim and gz_sim_vendor. Measured
+       2026-09-24 with none of these declared. -->
+
+  <!-- Launch machinery, used by every launch file. -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>launch_yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <!-- This package's own nodes: gazebo_odom_shim, sim_startup_helper. -->
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
   <exec_depend>simulation_interfaces</exec_depend>
+
+  <!-- The real robot: igvc_fused_drive.launch.py and what it includes. -->
+  <exec_depend>igvc_test_description</exec_depend>
+  <exec_depend>igvc_lane_detection</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>diff_drive_controller</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>twist_stamper</exec_depend>
-  <exec_depend>xacro</exec_depend> -->
+  <exec_depend>robot_localization</exec_depend>
+  <exec_depend>joy</exec_depend>
+  <exec_depend>teleop_twist_joy</exec_depend>
+
+  <!-- Nav2, through navigation_no_docking.launch.py. -->
+  <exec_depend>nav2_common</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>navigation2</exec_depend>
+
+  <!-- The Gazebo simulator: gazebo_sim.launch.py, gazebo_nav_test.launch.py. -->
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+
+  <!-- Viewing, Isaac and debug launch files. -->
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>joint_state_publisher_gui</exec_depend>
+
+  <!-- ALSO USED, NOT DECLARED, built from source in this workspace:
+         odrive_ros2_control, grr_hardware   (the ros2_control plugins)
+         ublox_gps                           (igvc_fused_drive.launch.py)
+         igvc_simulation_interface, debug_gui (the Isaac launch files)
+       rosdep ignores workspace packages, so declaring them installs nothing.
+       What it does do is make colcon require every one of them to be built
+       before this package, even under packages-select, and that broke the
+       simulator's four-package build (MEASURED 2026-09-24: "Failed to find
+       .../package.sh", seven packages). If ublox_gps moves to its Jazzy
+       binary, declare it then: the key would resolve to apt.
+
+       NOT declared: zed_wrapper, used by zed_multi.launch.py. It has no
+       Jazzy binary (it is built from source in the ZED image), so a key for
+       it would make every rosdep install on noble fail. -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
@@ -30,4 +85,3 @@
     <build_type>ament_python</build_type>
   </export>
 </package>
-
