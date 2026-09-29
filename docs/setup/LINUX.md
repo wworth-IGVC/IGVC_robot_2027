@@ -59,3 +59,19 @@ docker exec -it igvc_gazebo_linux bash src/IGVC_robot_2026/scripts/gazebo/render
 NVIDIA GPU, remove `runtime: nvidia` from the service or use pixi instead.
 **This path has not been run on a Linux machine by this project**; if you run
 it, please record what happened in `docs/DOCKER_CHANGES.md`.
+
+**Perception (torch, YOLOPv2) on Docker** is a second, optional image,
+`igvc-dev-jazzy`: the simulator image plus torch for CUDA 13.0 and every
+dependency of the whole workspace. NVIDIA only, about 14.9 GB, built locally
+rather than pulled:
+
+```bash
+docker compose -f docker-compose.yml build igvc_dev_jazzy_linux
+docker compose -f docker-compose.yml up -d igvc_dev_jazzy_linux
+```
+
+It can be the simulator container itself, or run beside `igvc_gazebo_linux`
+on the same `ROS_DOMAIN_ID`, never with a simulator in both. **The
+`igvc_dev_jazzy_linux` service has not been run on a Linux machine either**;
+its Windows twin, `igvc_dev_jazzy`, is the one that was verified. The pixi
+route has no perception environment yet.

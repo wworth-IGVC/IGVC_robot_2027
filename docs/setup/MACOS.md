@@ -22,6 +22,11 @@ A 16 GB Mac has room to spare. An **8 GB** Mac (the base MacBook) should run
 the headless checks, but close other apps and expect the Gazebo window plus
 RViz to be tight.
 
+**No YOLOPv2 on the Mac yet.** The simulator, Nav2 and the Hough lane
+detector run natively; the torch-based lane detector runs only in the
+Docker dev image, which is NVIDIA-only. A pixi `perception` environment is
+planned in `docs/MAINTAINING_ENVIRONMENTS.md` and not built.
+
 **The route is native: pixi and RoboStack, no Docker.** RoboStack packages ROS
 2 Jazzy, Gazebo Harmonic and Nav2 as conda packages built for Apple Silicon,
 and `pixi` installs them into `.pixi/` inside the repository. What that buys

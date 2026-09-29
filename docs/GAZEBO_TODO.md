@@ -218,6 +218,37 @@ Verified means a command was run and a number came back. Nothing below is
 
 ## Not done
 
+### P0, blocking the merge of `jazzy-only` into `main`
+
+- [ ] **The Gazebo image's autonomy check did not pass on the final tree,
+      2026-09-29, and nobody knows why.** Two runs in `igvc_gazebo`, the
+      unchanged simulator image:
+      1. **FAIL** while the laptop's GPU power setting held the GPU in P8:
+         the simulator ran at about 0.21x real time and the robot left the
+         lane, 7.87 m off the centreline, mean yaw to the lane 98.6 deg,
+         31.6% of samples over the paint, although it drove 87.5 m.
+      2. After the setting was raised: **aborted**, because every simulator
+         process vanished at 46 s of simulation time. The launch log has no
+         shutdown lines, the container's cgroup shows no out-of-memory kill,
+         and Docker's event log shows no kill command.
+
+      The same check passed in this image on 2026-09-24 before the branch
+      changed anything, and passed twice today in `igvc-dev-jazzy`, which is
+      this image plus torch. The branch changes only what the checks run
+      after they finish (`sim_teardown`). **Not explained, and two bad runs
+      in a row is not "seen once".** Next: rerun it three times on a quiet
+      machine with the GPU power setting high, keeping each run's
+      `/tmp/track_log.txt` (the failed run's was overwritten), and watch for
+      the vanishing processes with `ps` while it runs. Until three passes in
+      each image are recorded, the freeze rule is not met and `jazzy-only`
+      must not be merged. Report section 20.9 has the logs.
+- [ ] **A slow GPU power setting slows the whole simulator, silently.** With
+      the GPU held in P8 (about 250 to 700 MHz) the simulator's real-time
+      factor fell to 0.21, against 0.4 on 2026-09-24 and 0.56 earlier the same
+      day, and `render_check.sh` still passed, because the GPU was in use,
+      just slowly. Worth a line in the Windows guide once it is understood,
+      and possibly a real-time-factor warning in the checks.
+
 ### P0, blocking real perception work
 
 - [x] **Hough lane detection already runs, in the Gazebo image, today.**
