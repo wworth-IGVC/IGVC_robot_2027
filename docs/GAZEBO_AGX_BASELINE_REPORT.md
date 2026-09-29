@@ -2456,3 +2456,255 @@ git push origin main
 ```
 
 `--ff-only` refuses rather than creating a merge commit if `main` has moved.
+
+## 20. ROS 2 Jazzy only: a dev image, P0-1 closed, and Humble out of the simulator path
+
+**Written 2026-09-24 to 2026-09-29, on `jazzy-only`.** Aidan's assignment card
+asked for a working Gazebo simulation of the 2026 robot, migrated to ROS 2
+Jazzy, with updated simulation resources, and on Discord for a look at "all of
+the different packages and software we need to run the robot" and how much of
+it exists for Jazzy. Liam's instruction on 2026-09-24 was to convert the
+simulator path fully, "no Humble whatsoever". The simulator itself had been
+Jazzy since section 11; what remained Humble on its path was the only image
+with torch in it, and so YOLOPv2. This section is that conversion. The work
+was paused on 2026-09-24 and finished on 2026-09-29.
+
+### 20.1 The answer to Aidan's question
+
+`docs/JAZZY_MIGRATION.md`, one row per package and per piece of robot
+software. **All 22 packages build on Jazzy with no code change, and nothing
+needs rewriting because of Jazzy.** What needed migrating in the repository
+was packaging and one image, both done here. What still needs migrating is on
+the robot: JetPack on the Orin Nano Super, the ZED SDK and wrapper, and torch
+on the Orin, which need hardware and decisions only Aidan can make.
+`scripts/check_jazzy_inventory.py` fails if a package in `src/` is missing
+from the table, listed twice, or listed after being removed; it was shown to
+fail on three broken copies.
+
+### 20.2 Every package declares what it uses
+
+MEASURED in a clean `ros:jazzy-ros-base`, the repository mounted read-only,
+before and after:
+
+| | Before | After, final manifests (2026-09-29) |
+| --- | --- | --- |
+| `rosdep install` with no `-r` | failed on `ament_python`, not a key | exit 0 |
+| `rosdep check` | exit 2 | exit 0 |
+| `twist_stamper`, `joy`, `teleop_twist_joy`, `python3-requests` after a clean install | missing | all installed |
+| `colcon build`, **no** `--symlink-install` | 22/22 | 22/22, exit 0 (10 min 25 s, alongside another build) |
+| `ros2 pkg executables igvc_test_bringup` | empty (scripts landed in `bin/`) | `gazebo_odom_shim`, `sim_startup_helper` |
+| Python node modules importing on plain Jazzy | 31/36 | 32/36 |
+
+The four modules that do not import on plain Jazzy need pip-only packages
+(torch, ultralytics, imutils) by design; section 20.3 is where they come from.
+Declared, not changed: `igvc_test_bringup` now declares 29 runtime
+dependencies; `igvc_lane_detection` declares `tf2_ros_py` and `python3-yaml`
+(`3e0510d`); `ping_location` declares `python3-requests` (`2b10209`). Those
+two are protected packages, so each is its own `Jazzy compat:` commit for
+Aidan and David to review. Declaring a dependency changes what rosdep
+installs, never which nodes a launch file starts.
+
+### 20.3 The dev image replaces the Humble torch image
+
+`docker/Dockerfile.dev-jazzy` builds `igvc-dev-jazzy`: the published Gazebo
+image pinned by tag **and digest**, plus torch 2.14.0 and torchvision 0.29.0
+built for CUDA 13.0 (`sm_120` for the team's RTX 50-series laptops),
+ultralytics 8.4.162 and every apt package the workspace declares, behind
+`docker/perception-constraints.txt`. The build **fails rather than ships** if
+OpenCV is not the pinned pip 4.11.0 under `/usr/local`, numpy is not 1.x,
+torch lacks `sm_120`, setuptools is 80 or later, pip deleted any apt-owned
+Python file, or `cv_bridge` cannot round-trip a colour and a depth image. The
+last two were shown to fail: a deleted apt file stops the build, and OpenCV
+5.0.0 fails the `cv_bridge` round trip with `KeyError: 16`.
+
+Four things the Humble recipe did break on noble, each MEASURED: `pip3 install
+-U pip` refuses (PEP 668); `setuptools==58.2.0` cannot be imported on Python
+3.12, so colcon fails; uninstalling `opencv-python` also deletes the headless
+build's `cv2`, which is why **the Humble image had been running apt's OpenCV
+4.5.4 all along**; and pip "upgrades" an apt-installed package by deleting
+apt's files (setuptools, sympy, mpmath on the first build; filelock refused).
+
+| Check | Result |
+| --- | --- |
+| Size | **14.9 GB** on disk, 4.40 GB compressed; 5.7 GB of it is pip content (CUDA libraries 3.12 GB, torch 1.15, triton 0.88). The plan's 11.3 GB was an inference and was wrong |
+| Build time | about 12 to 15 minutes on this laptop (torch download 275 to 289 s, layer export 378 s) |
+| `torch_probe.py` | PASS, exit 0: a convolution on the GPU, capability (12, 0). With CUDA hidden it exits 1 |
+| Whole workspace in the image, no symlink install | 22 of 22 in 6 min 21 s; `rosdep check` exit 0 |
+| Every Python node module imports | 36 of 36 |
+| As the simulator container | smoke **18/18** and autonomy **PASS** at 19:30 UTC; the final-tree runs are in 20.9 |
+| Reproducible from the committed Dockerfile | a rebuild through the final compose file hit the cache on every step and kept the original creation time (2026-09-24 21:10:06Z); its id differs only by the three `com.docker.compose.*` labels compose adds |
+
+It is optional, NVIDIA only, and not published. The Gazebo image stays lean
+on purpose: CUDA torch is useless on an Intel, AMD or no-GPU machine and on a
+Mac.
+
+### 20.4 YOLOPv2 against the simulator
+
+In the dev image as the simulator container, one self-driving run, 100 s,
+front camera at 640x360, the weights checked against their recorded SHA256,
+scored by `lane_eval_sim.py` with Hough and the ground truth in the same
+drive:
+
+| Producer | Hit rate @ 0.25 m | Occupied cells | Coverage near observed cells | Median distance to paint |
+| --- | --- | --- | --- | --- |
+| **YOLOPv2**, `cuda:0`, half precision | **0.166** | 2721 | 0.762 | 0.768 m |
+| Hough, same drive | 0.389 | 18 | 0.273 | 0.268 m |
+| ground truth, the ceiling | 0.676 | 2946 | 0.996 | 0.096 m |
+
+**YOLOPv2 runs and finds most of the paint it can see, and places it badly.**
+No threshold was set in advance; this is the baseline. The causes are not
+separated: the resolution (its pixel thresholds were tuned at 2.4x the linear
+size), the unknown lens, and its depth projection. The ceiling reproduced
+2026-09-17's 0.676 exactly, so the scorer is stable.
+
+**The Hough row is not a new Hough baseline.** Hough found no TF from the
+camera's optical frame at startup, fell back to pinhole projection for the
+whole run and produced 13 to 16 points a frame. The comparison for YOLOPv2 is
+the 2026-09-17 Hough figure, 0.491.
+
+### 20.5 P0-1, closed by removal, and most of its mechanism
+
+`scripts/gazebo/measurements/dds_idle_probe.py`, a node that subscribes to
+nothing, 60 s each, the simulator in `igvc_gazebo`, every container on one
+compose network and ROS domain:
+
+| Probe container | Simulator | Fast DDS profile | Defect lines | Nodes discovered |
+| --- | --- | --- | --- | --- |
+| Humble (retired image) | none | yes | 0 | 0, exit 3: a control that proves nothing by design |
+| Humble | running | yes | **3** | **0** |
+| Humble | running | no | **3** | **0** |
+| `igvc-dev-jazzy` | running | no | **0** | 4 |
+| `igvc-dev-jazzy` | running | yes | **0** | 4 |
+
+**Gone with a Jazzy perception container; still reproduced from the Humble
+one, so the test can fail.** The zero in the last column was new: the Humble
+node discovers **no ROS node names at all** from the Jazzy graph, although
+section 13B showed its topic counts agreeing within 1%. Read from both images:
+`rmw_dds_common`'s `Gid` is `char[24]` on Humble and `char[16]` on Jazzy
+(`RMW_GID_STORAGE_SIZE` 24u against 16u). Node names travel in
+`/ros_discovery_info` messages built from Gids, so a Humble reader misparses
+Jazzy's, prints "sequence size exceeds remaining buffer", and learns no names,
+while topic data still flows because DDS endpoint discovery does not use that
+topic. **The sizes and the zero are measured; the causal link is inferred.**
+It also means `ros2 node list` from a Humble container shows an empty Jazzy
+graph, which is worth knowing while the robot side is still Humble.
+
+### 20.6 Humble out of the simulator path
+
+| Change | Why |
+| --- | --- |
+| `docker/deprecated/Dockerfile.gazebo-harmonic` and the `igvc_gazebo_humble` service **deleted** | superseded since 2026-09-15; git has it at `88db437` |
+| `docker/Dockerfile.humble-fused-drive` **moved** to `docker/deprecated/`, its services **removed** from both compose files | replaced by `igvc-dev-jazzy`; kept one season because the robot side is not ported |
+| The ZED services labelled **robot side** in both compose files, with a pointer to the migration plan | they are the one Humble image left, and not the simulator's |
+| `.dockerignore`, `setup-windows.ps1`, `topic_counter.py`, the README and four docs | referred to the retired image |
+
+The local images `igvc-humble-fused-drive` (14.1 GB) and
+`igvc-gazebo-harmonic` (4.24 GB) were **not** deleted: that is Liam's call.
+
+Every remaining `humble` in the repository, classified with
+`git grep -n -i humble` on the final tree: **none is in the simulator path** (launch files, `SETUP.md`, `docs/setup/`, and the simulator services' configuration have 0). **Robot side:** `Dockerfile.igvc-zed-humble`, its two services in each compose file, `docker-compose.jetson.yml`, and the `-WithZed` disk line in `setup-windows.ps1`. **Historical record:** the dated sections of `DOCKER_CHANGES.md`, this report, `GAZEBO_TODO.md`, the EOL reasoning in `GAZEBO_SETUP.md` section 2, `README.md` and the Dockerfiles, the P0-1 results in `dds_idle_probe.py`, two comments in `setup-windows.ps1`, the `gz_ros2_control` history in `gazebo_sim.urdf.xacro`, and one compatibility comment each in `navigator.py` and `lane_detection.py` (protected, left alone). **`docker/deprecated/`:** the retired Dockerfile and its README.
+
+### 20.7 The 2026 competition code, running, with a ROS 2 terminal on it
+
+`docs/COMPETITION_STACK.md` and `scripts/competition_stack/`: nine PowerShell
+steps build `2026/more_diverging_changes` at `67a6934` in a throwaway
+container of the dev image, launch it exactly as its `auton_launch.sh` does,
+and open a sourced ROS 2 shell on it. Hardware drivers are stand-ins with the
+real node names and no data; the ODrive plugin becomes ros2_control's mock.
+Measured from PowerShell on a fresh container: steps 1 to 6 in 13 s, the
+stack up after 7 to 14 s, **34 nodes, the same graph measured on 2026-09-24**,
+Nav2 active, YOLOPv2 loaded on `cuda:0`. Its check fails on no stack, a killed
+node, weights one byte longer and a missing package; Ctrl-C leaves nothing
+running.
+
+It turned the 2026-09-28 and 29 code reading into measurements, now in
+`JAZZY_MIGRATION.md` 6.5: `/cmd_vel_nav` has 7 publisher endpoints from 4
+nodes and no arbitration; `velocity_smoother` `min_velocity` is
+`[0.0, 0.0, -1.5]`, so no reverse; **`/odom` has 0 publishers and 2
+subscribers**; both collision-monitor sources and `StopZone` are disabled; the
+mission planner's `auto_start` is false with every waypoint 0.0.
+
+### 20.8 Mistakes, and what caught each
+
+1. **The `igvc_test_bringup` manifest broke the simulator's build.** Declaring
+   seven workspace-built packages made colcon require them built even under
+   `--packages-select`: "Failed to find .../package.sh". Caught by the first
+   smoke test in the dev image, on 2026-09-24. Now a comment saying why;
+   verified by the smoke test's build step passing on 2026-09-29.
+2. **The smoke and autonomy checks had always left about 15 nodes running**
+   after they exit, reparented to init, a ground-truth `/lane_map` publisher
+   among them, found 40 minutes after a baseline run. Each check's preflight
+   cleaned up at its next start, which is why nothing noticed; a second
+   container on the same domain saw a phantom stack. `sim_teardown` in
+   `sim_preflight.sh` now runs at the end of both. Verified: **0 leftovers**
+   after each check, where a leftover counter shown to count a live node
+   reads 1.
+3. **The P0-1 harness never stopped its own simulator.** It copied its stop
+   script with `MSYS_NO_PATHCONV=1` set, so Git Bash handed Docker a `/c/...`
+   path and every stop step failed ("GetFileAttributesEx C:\c:"), leaving the
+   simulator running after the test. The results stand, because both
+   containers were checked idle beforehand; the harness now uses `pwd -W`.
+4. **The Jazzy audit's baseline moved under it.** Ten agents audited the
+   packages while this branch was being committed, so their citations into
+   `package.xml` and the state file went stale mid-run, and the critic caught
+   it. Their corrections were applied to the migration document, not the
+   stale lines.
+5. **Two of my own wait loops were broken by Git Bash path conversion**
+   (the same trap as item 3), so they waited on a file path that could not
+   exist. Caught before either reached the command it was guarding.
+6. A claim corrected on the way: the 2026 cameras did **not** run in the
+   Humble `jetson-zed` container. The competition scripts start them in the
+   same Jazzy container as the drive stack (`sensor_launch.sh`), so the
+   "JetPack 6 host, Jazzy in a container" option is what competed.
+
+### 20.9 Gates on the final tree
+
+Windows tier A, RTX 5070 Ti laptop, after every change above. Laptop numbers,
+not Jetson numbers.
+
+| Gate | Gazebo image (`igvc_gazebo`) | Dev image (`igvc_dev_jazzy`) |
+| --- | --- | --- |
+| `render_check.sh` | PASS, tier A, twice | PASS, tier A |
+| `bringup_smoke_test.sh` | **18/18 in all 6 runs**: 182, 199 and 185 s with the GPU power-limited, then 155, 146 and 139 s after Liam raised it; drive 2.759 m, heading 0.13 deg, ratio 0.9970 | 18/18 at 19:30 UTC (139 s); final: **18/18** (141 s), drive 2.760 m, ratio 0.9970 |
+| `autonomy_check.sh` | **Not passed on the final tree.** Run 1 **FAIL**: with the GPU held in P8 the simulator ran at about 0.21x real time, and the robot left the lane (7.87 m off the centreline, mean yaw to lane 98.6 deg, 31.6% of samples over the paint) although it drove 87.5 m. Run 2, after the power change, **aborted**: every simulator process vanished at 46 s of simulation time with no shutdown line in the launch log, no out-of-memory kill in the container's cgroup, and no kill command in the container's event log. Cause unknown; stopped there for Liam's deadline | PASS at 19:31 UTC (89.2 m in 100.0 s of sim time, worst clearance +0.063 m, 0.0% over the paint, IN LANE 1.97 m); final: **PASS**, 89.9 m in 100.1 s of sim time, worst clearance +0.024 m, 0.0% over the paint, IN LANE 1.88 m. Two passes in all, not the three the rule asks for |
+| `native_dryrun.sh` (pixi route, clean Ubuntu 24.04) | PASS: bootstrap 18/18 in 257 s; autonomy PASS, 88.7 m, worst clearance +0.122 m, IN LANE 1.78 m | |
+
+For comparison, the same Gazebo-image autonomy check passed on 2026-09-24
+before this branch changed anything (84.6 m, clearance +0.071 m), and this
+branch does not change the Gazebo image; in the checks it changes only what
+runs after they finish (`sim_teardown`). So the two bad runs are not
+explained by the branch's changes, **but they are not explained at all**, and
+two in a row is not "seen once".
+
+**The freeze rule is not met.** It asks for autonomy to pass three times in
+each image. `jazzy-only` is committed and safe to push as a branch, but it is
+**not ready to merge into `main`** until the Gazebo-image autonomy failure is
+understood and three passes are recorded in each image.
+
+A separate observation from the same afternoon: with the GPU power setting
+low, the GPU stayed in P8 (about 250 to 700 MHz) while `gz sim` rendered
+through D3D12, and the simulator's real-time factor fell from 0.4 (2026-09-24)
+and 0.56 (earlier today) to 0.21. The smoke test's time recovered once the
+setting was raised; the autonomy run's did not measurably.
+
+### 20.10 Not done
+
+- **A pixi `perception` feature** for the native route (PyTorch, which can use
+  Apple's GPU through MPS). The plan made it optional; not attempted, so the
+  Mac and Linux native route has no YOLOPv2. `MAINTAINING_ENVIRONMENTS.md`
+  records the deliberate difference between the routes.
+- **The stretch goal, Nav2's obstacle layer on `/scan`** (perception stage 1).
+  Not started.
+- **Publishing `igvc-dev-jazzy` to GHCR.** The owner's call; teammates build
+  it locally for now.
+- **`igvc_dev_jazzy_linux` on a real Linux machine.** Written, never run.
+- **A same-drive Hough baseline.** This run's Hough lost a TF race at
+  startup; rerun with the node started after TF is up.
+- **YOLOPv2 at 1280x720** on the same drive, to separate the resolution from
+  the other causes of its 0.166.
+- **Typing into an interactive `docker exec -it` window** for
+  `COMPETITION_STACK.md`: the same scripts ran without `-it`, and Ctrl-C was
+  reproduced by SIGINT to the process group.
+- **Out of scope, as planned:** the robot-side images (ZED, Jetson) on
+  Jazzy, merging the competition branch, and every real-robot configuration
+  value. `JAZZY_MIGRATION.md` plans the first; the other two are Aidan's.
