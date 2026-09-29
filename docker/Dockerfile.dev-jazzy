@@ -1,0 +1,170 @@
+# ---------------------------------------------------------------------------
+# igvc-dev-jazzy: the Gazebo image plus everything the whole workspace needs,
+# PyTorch and YOLOPv2's dependencies included. ROS 2 Jazzy, Ubuntu 24.04,
+# Python 3.12.
+#
+# WHAT IT REPLACES. docker/deprecated/Dockerfile.humble-fused-drive, the
+# Humble image (14.1 GB) that was the only place torch existed. Running
+# YOLOPv2 from it against the Jazzy simulator crossed a distro boundary and
+# printed "sequence size exceeds remaining buffer" three times per process
+# (P0-1 in docs/GAZEBO_TODO.md). With this image the simulator and perception
+# are one distro and one ROS build.
+#
+# WHO NEEDS IT. Only people running perception (YOLOPv2, yolo_ros) or
+# building the whole workspace. The simulator itself is docker/Dockerfile.
+# gazebo-jazzy, which stays lean on purpose: this image adds CUDA torch,
+# which is useless on an Intel/AMD or no-GPU machine and on a Mac.
+#
+# WHY FROM THE PUBLISHED GAZEBO IMAGE, PINNED BY DIGEST.
+#   - identical ROS packages to the simulator, so the dev container can BE the
+#     simulator container, or run beside it on the same ROS_DOMAIN_ID;
+#   - a second FROM ros:jazzy-* would duplicate about 5 GB and let two apt
+#     snapshots drift apart;
+#   - the digest, not :latest, so a republished Gazebo image cannot silently
+#     change what this one is built on. To move it, update both the tag and
+#     the digest here and rerun every check in docs/MAINTAINING_ENVIRONMENTS.md.
+#
+# The image contains no project code. The repository is bind-mounted at
+# runtime exactly as for the Gazebo image.
+# ---------------------------------------------------------------------------
+FROM ghcr.io/wworth-igvc/igvc-gazebo-jazzy:2026-09-17@sha256:79115da25a4aee155701d9da6c2c7f8b56a878b38bbc4a1c9d4dad5ca6fe8a31
+
+LABEL org.opencontainers.image.source="https://github.com/wworth-IGVC/IGVC_robot_2027"
+LABEL org.opencontainers.image.description="IGVC 2027 dev image: ROS 2 Jazzy, Gazebo Harmonic, Nav2, torch 2.14 cu130"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ---------------------------------------------------------------------------
+# apt: what the 22 packages declare (a rosdep check over src/ in this image
+# exits 0) that the Gazebo image does not already carry.
+#
+#   python3-pip            the pip below; the Gazebo image has no pip at all
+#   libasio-dev            ublox_gps (cmake/Findasio.cmake)
+#   ros-jazzy-ros2-control, ros-jazzy-ros2-controllers, ros-jazzy-ros2controlcli
+#                          the real robot's drive path (motor_controllers
+#                          launch files, odrive_botwheel_explorer)
+#   ros-jazzy-joy, ros-jazzy-teleop-twist-joy
+#                          teleop.launch.py, the real robot's joystick
+#   ros-jazzy-joint-state-publisher-gui
+#                          rviz.launch.py
+#   python3-requests       ping_location
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3-pip \
+        libasio-dev \
+        ros-jazzy-ros2-control \
+        ros-jazzy-ros2-controllers \
+        ros-jazzy-ros2controlcli \
+        ros-jazzy-joy \
+        ros-jazzy-teleop-twist-joy \
+        ros-jazzy-joint-state-publisher-gui \
+        python3-requests \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# pip. Ubuntu 24.04's Python is "externally managed" (PEP 668), so a plain
+# `pip3 install` refuses. PIP_BREAK_SYSTEM_PACKAGES lets pip install into
+# /usr/local, which shadows /usr/lib/python3 for the packages it installs.
+# Not a venv: ament_python entry points run under /usr/bin/python3.
+#
+# The constraints file is what stops this breaking ROS. Read it; every line
+# is a measured failure. PIP_CONSTRAINT keeps it in force for any pip install
+# run later inside a container, not only here.
+#
+# Three things the Humble recipe did that are NOT carried forward, each
+# measured on noble:
+#   pip3 install -U pip          fails: externally-managed-environment
+#   setuptools==58.2.0           cannot even be imported on Python 3.12
+#   packaging<25                 had no effect; apt ships 24.0
+# ---------------------------------------------------------------------------
+ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_CONSTRAINT=/etc/pip-constraints.txt
+COPY docker/perception-constraints.txt /etc/pip-constraints.txt
+
+# pip must never delete a file apt owns. When a pip package needs a newer
+# version of something apt already installed, pip "upgrades" it by deleting
+# apt's copy, or refuses when apt left no RECORD file. Measured on the first
+# build of this file, 2026-09-24: the torch step deleted apt's setuptools
+# 68.1.2, sympy 1.12 and mpmath, and the ultralytics step then stopped on
+# "Cannot uninstall filelock 3.13.1, RECORD file not found". So the four that
+# need newer versions go in first with --ignore-installed: into /usr/local,
+# where they shadow apt's copies and leave them intact. The dpkg --verify
+# assertion further down fails the build if any apt Python file goes missing.
+#   setuptools   torch on 3.12 needs >=77.0.3 (and the constraints cap it <80)
+#   sympy        torch 2.14 needs >=1.13.3; apt has 1.12
+#   mpmath       sympy's dependency, apt's reports version 0.0.0
+#   filelock     ultralytics 8.4.162 needs >=3.16.1; apt has 3.13.1
+RUN pip3 install --ignore-installed \
+        'setuptools>=77.0.3,<80' 'sympy>=1.13.3' 'mpmath>=1.1.0,<1.4' 'filelock>=3.16.1'
+
+# torch 2.14.0 + torchvision 0.29.0 built for CUDA 13.0, whose arch list
+# includes sm_120 (Blackwell: the RTX 50-series laptops on this team). The
+# local version (+cu130) is pinned explicitly so pip cannot pick the PyPI
+# build of the same version, which targets a different CUDA.
+RUN pip3 install \
+        --index-url https://download.pytorch.org/whl/cu130 \
+        --extra-index-url https://pypi.org/simple \
+        torch==2.14.0+cu130 torchvision==0.29.0+cu130
+
+# ultralytics (yolo_ros, multi_camera_lane_detection), pinned to one version.
+# lap is what yolo_ros's tracker needs; ultralytics would otherwise try to
+# pip-install it at runtime. imutils is debug_gui/camera_test.py.
+#
+# The OpenCV trap. ultralytics pulls the full opencv-python. Both it and
+# opencv-python-headless install into the SAME site-packages/cv2 directory,
+# so `pip uninstall opencv-python` also deletes headless's cv2 and Python
+# silently falls back to apt's older OpenCV. The Humble image has run like
+# that since it was built: its cv2 is apt 4.5.4. So: remove both wheels, put
+# headless back without its dependencies, then check where cv2 comes from.
+#
+# Pinned exactly, because --no-deps also skips OpenCV's own numpy
+# requirement: 4.12 and later declare numpy>=2, and an unpinned reinstall
+# took 4.14.0 on the first build of this file. 4.11.0.86 is the newest
+# release whose metadata accepts numpy 1.x, the version ultralytics resolves
+# to under the constraints, and the one measured with apt cv_bridge.
+RUN pip3 install ultralytics==8.4.162 lap==0.5.12 imutils==0.5.4 \
+    && pip3 uninstall -y opencv-python opencv-python-headless \
+    && pip3 install --no-deps opencv-python-headless==4.11.0.86
+
+# The build fails here, not at runtime, if any of the above did not take.
+# No GPU is visible during a build, so the arch list is read from the
+# compiled flags rather than from a device; torch_probe.py runs the real
+# kernel on the GPU afterwards.
+RUN python3 -c "import sys, cv2, numpy, torch, torchvision, ultralytics, setuptools; \
+v = {'cv2': cv2.__version__, 'cv2_file': cv2.__file__, 'numpy': numpy.__version__, \
+     'torch': torch.__version__, 'torch_cuda': torch.version.cuda, \
+     'torchvision': torchvision.__version__, 'ultralytics': ultralytics.__version__, \
+     'setuptools': setuptools.__version__, 'arch': torch._C._cuda_getArchFlags()}; \
+print(v); \
+assert cv2.__file__.startswith('/usr/local/'), 'cv2 is not the pip build: ' + cv2.__file__; \
+assert cv2.__version__ == '4.11.0', 'OpenCV must be the pinned 4.11.0: ' + cv2.__version__; \
+assert numpy.__version__.startswith('1.'), 'numpy must be 1.x for apt cv2'; \
+assert torch.__version__ == '2.14.0+cu130', torch.__version__; \
+assert 'sm_120' in v['arch'], 'no Blackwell kernels: ' + str(v['arch']); \
+assert ultralytics.__version__ == '8.4.162', ultralytics.__version__; \
+assert int(setuptools.__version__.split('.')[0]) < 80, 'setuptools >= 80 breaks colcon'; \
+assert torch.from_numpy(numpy.zeros(3)).sum().item() == 0.0"
+
+# No apt-owned Python file may have been deleted by pip (see above). Only
+# module paths are checked: the Ubuntu base image deliberately installs no
+# /usr/share/doc or man pages, so dpkg reports those "missing" in every image.
+RUN missing=$(dpkg --verify $(dpkg-query -W -f='${Package}\n' 'python3-*') 2>&1 \
+        | grep '^missing' | grep '/usr/lib/python3' || true); \
+    if [ -n "$missing" ]; then echo "pip deleted apt-owned files:"; echo "$missing"; exit 1; fi; \
+    echo "DPKG_VERIFY_OK: no apt-owned file under /usr/lib/python3 is missing"
+
+# cv_bridge is apt's, compiled against apt OpenCV 4.6; the Python side must
+# still round-trip an image with the pip OpenCV and numpy above.
+RUN bash -c "source /opt/ros/jazzy/setup.bash && python3 -c \"\
+import numpy as np; from cv_bridge import CvBridge; b = CvBridge(); \
+img = (np.arange(360*640*3) % 251).astype(np.uint8).reshape(360, 640, 3); \
+back = b.imgmsg_to_cv2(b.cv2_to_imgmsg(img, 'bgr8'), 'bgr8'); \
+assert back.shape == img.shape and (back == img).all(); \
+d = np.random.rand(360, 640).astype(np.float32); \
+dback = b.imgmsg_to_cv2(b.cv2_to_imgmsg(d, '32FC1'), '32FC1'); \
+assert (dback == d).all(); print('CV_BRIDGE_ROUND_TRIP_OK')\""
+
+WORKDIR /root/ros2_ws

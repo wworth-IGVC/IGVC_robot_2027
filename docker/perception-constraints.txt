@@ -1,0 +1,24 @@
+# pip constraints for docker/Dockerfile.dev-jazzy (ROS 2 Jazzy, Ubuntu 24.04,
+# Python 3.12). Applied to every pip install in that image through
+# PIP_CONSTRAINT, including any a member runs later by hand.
+#
+# Each line was measured on 2026-09-24 in a noble container; the evidence is
+# in docs/DOCKER_CHANGES.md section 18 and docs/JAZZY_MIGRATION.md.
+
+# numpy 2 breaks the apt OpenCV that ROS Python packages load:
+#   apt cv2 4.6.0 under numpy 2.5.3 fails with
+#   "numpy.core.multiarray failed to import".
+# Also keeps pip from replacing Debian's numpy 1.26.4 with a 2.x build.
+numpy<2
+
+# OpenCV 5.0.0 breaks apt cv_bridge: cv2_to_imgmsg raises KeyError: 16.
+# 4.11 plus numpy 1.26 passes the round trip. Both wheel names, because
+# ultralytics pulls opencv-python and the image keeps opencv-python-headless.
+opencv-python<5
+opencv-python-headless<5
+
+# The Humble image pinned setuptools==58.2.0. On Python 3.12 that version fails
+# to import (pkgutil has no ImpImporter) and colcon then exits 1 on any
+# ament_python package. torch on 3.12 needs >=77.0.3; colcon-core 0.21.1 needs
+# <80. colcon built the workspace with 78.1.0.
+setuptools>=77.0.3,<80

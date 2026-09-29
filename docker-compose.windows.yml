@@ -237,6 +237,81 @@ services:
 
 
   # ---------------------------------------------------------------------
+  # The dev image: the Gazebo image above PLUS torch (CUDA 13.0, sm_120),
+  # ultralytics, and every apt package the whole 22-package workspace needs.
+  # ROS 2 Jazzy, same ROS build as igvc_gazebo. Optional: only for people
+  # running perception (YOLOPv2, yolo_ros) or building the whole workspace.
+  # NVIDIA GPUs only for torch; the simulator in it works on any tier.
+  #
+  # It is to replace the Humble igvc_humble_fused_drive service above. See docker/Dockerfile.dev-jazzy and
+  # docs/MAINTAINING_ENVIRONMENTS.md.
+  #
+  # Two ways to use it, from a WSL2 shell in the repo root:
+  #
+  #   1. AS the simulator container. It carries everything igvc_gazebo does,
+  #      with the same GPU and display settings below, so every script in
+  #      scripts/gazebo/ runs in it unchanged:
+  #        docker compose -f docker-compose.windows.yml up -d igvc_dev_jazzy
+  #        docker exec -it igvc_dev_jazzy bash src/IGVC_robot_2026/scripts/gazebo/start_sim.sh
+  #
+  #   2. BESIDE igvc_gazebo, on the same ROS_DOMAIN_ID, running only
+  #      perception nodes against the simulator's topics. Both containers sit
+  #      on this compose file's network, as the Humble container used to.
+  #
+  # NEVER run a simulator in both at once on one ROS_DOMAIN_ID: two /clock,
+  # /odom and /tf publishers, results that look real and are worthless.
+  # sim_preflight.sh cannot see across containers, so this is on you.
+  #
+  # Separate colcon volumes from igvc_gazebo on purpose: a second container
+  # building into the same install tree at the same time corrupts it.
+  # ---------------------------------------------------------------------
+  igvc_dev_jazzy:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev-jazzy
+    image: igvc-dev-jazzy:latest
+    container_name: igvc_dev_jazzy
+    stdin_open: true
+    tty: true
+    gpus: all
+    devices:
+      - /dev/dxg
+    working_dir: /root/ros2_ws
+    shm_size: "2gb"
+    volumes:
+      - .:/root/ros2_ws/src/IGVC_robot_2026
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+      - igvc_dev_jazzy_build:/root/ros2_ws/build
+      - igvc_dev_jazzy_install:/root/ros2_ws/install
+      - igvc_dev_jazzy_log:/root/ros2_ws/log
+    environment:
+      - GALLIUM_DRIVER=d3d12
+      - MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib:/opt/ros/jazzy/lib
+      - DISPLAY=${DISPLAY:-}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=/mnt/wslg/PulseServer
+      - GZ_VERSION=harmonic
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=0
+      - FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+      - ROS_DISTRO=jazzy
+      - IGVC_WORKSPACE_ROOT=/root/ros2_ws/src/IGVC_robot_2026
+      # Where lane_segmentation_node looks when its config names no weights.
+      # Fetch them once: src/igvc_lane_detection/scripts/fetch_yolopv2_weights.sh
+      - YOLOPV2_WEIGHTS=/root/ros2_ws/src/IGVC_robot_2026/models/yolopv2.pt
+      # So the recovery hints the scripts print name THIS service and
+      # container. Read by scripts/gazebo/igvc_env.sh.
+      - IGVC_COMPOSE_FILE=docker-compose.windows.yml
+      - IGVC_SERVICE=igvc_dev_jazzy
+      - IGVC_CONTAINER=igvc_dev_jazzy
+    command: ["bash"]
+
+  # ---------------------------------------------------------------------
   # DEPRECATED. Gazebo Harmonic + ROS 2 Humble, the previous simulator.
   #
   # Kept only so old results can be reproduced. Humble reaches end of life in
@@ -302,6 +377,9 @@ volumes:
   igvc_gazebo_build:
   igvc_gazebo_install:
   igvc_gazebo_log:
+  igvc_dev_jazzy_build:
+  igvc_dev_jazzy_install:
+  igvc_dev_jazzy_log:
   igvc_gazebo_humble_build:
   igvc_gazebo_humble_install:
   igvc_gazebo_humble_log:
