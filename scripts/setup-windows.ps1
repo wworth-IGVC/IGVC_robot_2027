@@ -25,8 +25,9 @@
 
     Useful switches:
 
-        -WithPerception  Also check for the extra disk the 14 GB Humble
-                         perception image needs. Not needed for the simulator.
+        -WithPerception  Also check for the extra disk the 14.9 GB Jazzy
+                         dev image (igvc-dev-jazzy: torch, YOLOPv2) needs.
+                         Not needed for the simulator.
         -WithZed         Also check for the disk the 28.6 GB ZED SDK image
                          needs. Only for ZED camera code, and a ZED camera
                          cannot be used from Docker on Windows anyway.
@@ -290,7 +291,7 @@ Write-Step "Checking disk space"
 # figure is a margin rather than a measurement. Stated rather than dressed up.
 $needed = 20                                      # pull the image from GHCR
 if ($BuildImage)      { $needed = 30 }            # build it from the Dockerfile
-if ($WithPerception)  { $needed = $needed + 20 }  # igvc-humble-fused-drive is 14.1 GB
+if ($WithPerception)  { $needed = $needed + 20 }  # igvc-dev-jazzy is 14.9 GB
 if ($WithZed)         { $needed = $needed + 40 }  # igvc-zed-humble is 28.6 GB
 
 $drive = (Get-Location).Drive.Name

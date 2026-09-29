@@ -1,10 +1,16 @@
 # Deprecated images
 
 **Nothing in this folder is the main use case.** It is kept for reference and
-for reproducing old results, not for daily work.
+for reproducing old results, not for daily work. No compose file has a service
+for anything in here, on purpose.
 
-The supported path is **ROS 2 Jazzy**. If you are looking for the simulator,
-you want `docker/Dockerfile.gazebo-jazzy` and the `igvc_gazebo` service.
+The supported path is **ROS 2 Jazzy**:
+
+| You want | Use |
+| --- | --- |
+| The simulator | `docker/Dockerfile.gazebo-jazzy`, service `igvc_gazebo` |
+| Perception (torch, YOLOPv2), or the whole 22-package workspace | `docker/Dockerfile.dev-jazzy`, service `igvc_dev_jazzy` (`igvc_dev_jazzy_linux` on native Linux) |
+| The 2026 competition code, with a ROS 2 terminal on it | `docs/COMPETITION_STACK.md` |
 
 ## Why Humble is being retired
 
@@ -19,61 +25,54 @@ The competition is **4 to 8 June 2027**. Humble reaches end of life the month
 before it, so the 2027 team would compete on an unsupported distro and the 2028
 team would inherit one. Jazzy covers both.
 
-Jazzy is also where the code already was, though not the robot images. The 2026
-robot ran out of `DevEnv/jazzy_ws`, `ghcr.io/gold-rush-robotics/dev-zed` and
-the org `dev_env` image are Jazzy, and the 2026 competition branch
-`more_diverging_changes` is Jazzy code. The org robot-side images
-(`jetson-zed`, `jetson-ros-base`, `jetson-isaac-ros`, `isaac-ros`) are still
-Humble and are a separate migration - see section 5.4 of `DOCKER_CHANGES.md`,
-and note that the "ROS 2 Jazzy" comments in `docker-compose.jetson.yml` are
-stale.
+Jazzy is also where the code already was. The 2026 competition branch
+`more_diverging_changes` is Jazzy code, its scripts source `/opt/ros/jazzy`,
+and the org `dev_env` image is Jazzy. What is still Humble is on the robot
+side; see "Still Humble, and not in here" below.
 
 ## What is in here
 
-| File | Replaced by | Status |
+| File | Replaced by | Since | Status |
+| --- | --- | --- | --- |
+| `Dockerfile.humble-fused-drive` | `docker/Dockerfile.dev-jazzy` (`igvc-dev-jazzy`) | 2026-09-29 | Retired from the compose files. Kept **for one season**, because the robot side has not been ported to Jazzy yet and someone may need to reproduce a Humble result. Delete it once nobody has needed it for a while |
+
+The replacement was verified before this one was retired (report section 20):
+the whole workspace builds 22 of 22 in it, every Python module imports, torch
+runs a convolution on the GPU, YOLOPv2 runs against the simulator, both
+simulator gates pass with it as the simulator container, and the cross-distro
+DDS defect P0-1 is gone because nothing on the simulator's graph is Humble any
+more.
+
+**Deleted, 2026-09-29:** `Dockerfile.gazebo-harmonic`, the previous simulator
+(Gazebo Harmonic on Humble), superseded by `docker/Dockerfile.gazebo-jazzy`
+since 2026-09-15. Its findings (the GPU render path, the WSL2 settings, the
+silent llvmpipe trap, the camera budget) were properties of WSL2, Docker and
+the GPU and are documented against the Jazzy image in `docs/GAZEBO_SETUP.md`.
+Git keeps it:
+
+```bash
+git show 88db437:docker/deprecated/Dockerfile.gazebo-harmonic
+```
+
+## Still Humble, and not in here
+
+| File | Why it stays | Where its migration is planned |
 | --- | --- | --- |
-| `Dockerfile.gazebo-harmonic` | `docker/Dockerfile.gazebo-jazzy` | Superseded. Same simulator, Gazebo Harmonic, on Humble instead of Jazzy. |
-
-The Harmonic image was not wrong, and the findings it produced still hold. The
-GPU render path, the four required WSL2 settings, the silent llvmpipe trap, the
-no-display-from-PowerShell trap and the measured camera budget are all
-properties of WSL2, Docker and the GPU, with nothing ROS-version-specific in
-them. See `docs/GAZEBO_SETUP.md`, which documents them against the Jazzy image.
-
-One thing genuinely changed for the better. On Humble, `gz_ros2_control` had no
-Harmonic binary anywhere and was the single source build blocking Stage 2. On
-Jazzy, `ros-jazzy-gz-ros2-control` ships as a binary against the same Gazebo.
-
-## What is NOT in here yet
-
-These are still Humble and are still the working images. They have **not** been
-moved, because no verified Jazzy replacement exists yet and moving them would
-leave the team with nothing for everyday work:
-
-| File | Status |
-| --- | --- |
-| `docker/Dockerfile.humble-fused-drive` | Humble. Port to Jazzy not started. Still the everyday default. |
-| `docker/Dockerfile.igvc-zed-humble` | Humble. Port to Jazzy not started. The private image it replaces, `dev-zed`, is itself Jazzy, so this port moves it closer to what it stands in for. |
-
-Do not move them until their replacements build and pass the same checks.
+| `docker/Dockerfile.igvc-zed-humble` (services `igvc_zed_humble`, `igvc_zed_humble_upstream`) | **Robot side**: the ZED SDK and wrapper. Not part of the simulator path | `docs/JAZZY_MIGRATION.md` section 5: ZED SDK 5.5 with wrapper v5.5.0 on Jazzy, proven by launching the node |
+| `jetson-zed:5.3-36.4.7` in `docker-compose.jetson.yml` | Robot side, an org image, JetPack 6 | the same section, and the JetPack decision |
 
 ## Building something in here anyway
 
-The compose services still exist, suffixed so they cannot be reached by
-accident:
+It has no `COPY`, so it builds from the repo root in either shell:
 
 ```bash
-docker compose -f docker-compose.windows.yml build igvc_gazebo_humble
+docker build -f docker/deprecated/Dockerfile.humble-fused-drive -t igvc-humble-fused-drive:latest .
 ```
 
-Or directly, since this Dockerfile has no `COPY` and needs no build context:
-
-```bash
-docker build -t igvc-gazebo-harmonic:latest - < docker/deprecated/Dockerfile.gazebo-harmonic
-```
+About 14 GB. Nothing else in the repo starts it any more.
 
 ## When this folder gets deleted
 
-Once the fused-drive and ZED images are ported and verified on Jazzy, and
-nobody has needed a Humble image for a while, delete this folder. Git keeps the
-history; `git log --follow` works across the move.
+Once the robot-side images are ported and verified on Jazzy, and nobody has
+needed a Humble image for a while, delete this folder. Git keeps the history;
+`git log --follow` works across the move.
