@@ -2687,6 +2687,86 @@ through D3D12, and the simulator's real-time factor fell from 0.4 (2026-09-24)
 and 0.56 (earlier today) to 0.21. The smoke test's time recovered once the
 setting was raised; the autonomy run's did not measurably.
 
+#### 20.9.1 Rerun the same evening: the freeze rule is met
+
+Added later on 2026-09-29; the text above is left as it was written. Same final
+tree (`3c9bf24`), same laptop, Windows power plan Balanced, one simulator at a
+time: `igvc_gazebo` alone, then `igvc_dev_jazzy` alone. Each gate set ran in a
+detached `docker exec -d` with nothing else executing in that container during
+the run (progress was read with `docker cp`, not `exec`), with a sampler
+recording the pid of every key simulator process every 2 s, and each run's
+track log, launch output and ROS log directory kept.
+
+| Gate | Gazebo image (`igvc_gazebo`) | Dev image (`igvc_dev_jazzy`) |
+| --- | --- | --- |
+| `render_check.sh` | PASS | PASS |
+| `bringup_smoke_test.sh` | **18/18 three times** (102, 91, 84 s) | **18/18 three times** (93, 89, 92 s) |
+| `autonomy_check.sh` | **PASS three times**: 89.2, 88.2, 89.9 m; max off the centreline 1.98, 1.86, 1.91 m; worst clearance +0.035, +0.059, +0.062 m; 0.0% over the paint | **PASS three times**: 88.9, 89.3, 86.9 m; max off the centreline 1.86, 1.80, 1.91 m; worst clearance +0.074, +0.027, +0.083 m; 0.0% over the paint |
+| Leftover processes after each gate | 0 | 0 |
+
+The simulator ran at about 1.0x real time (`pose_logger` took 9.5 samples per
+simulated second at 10 Hz wall). No process disappeared during any run: in
+each, `pose_logger` ended first and the check itself stopped the launch about
+8 s later.
+
+**The freeze rule is met**: `render_check.sh`, `bringup_smoke_test.sh` three
+times and `autonomy_check.sh` three times pass on the final tree in both
+images, and `native_dryrun.sh` passed earlier the same day. `jazzy-only` is
+ready to merge into `main`.
+
+**The two bad runs from the afternoon, re-examined.**
+
+1. *The aborted run.* Its files were still in `igvc_gazebo`. The launch output
+   (`/tmp/autonomy.log`) stops at 20:56:44 UTC, but the navigator's own ROS
+   log has a line at 20:57:09 and `/tmp/gzpose.txt` holds a valid
+   `gz model -p` pose written at 20:57:00. So `ros2 launch` stopped first,
+   while the nodes and Gazebo ran on for at least 25 s. "Every process
+   vanished" was most likely the check's own `sim_teardown`, reached after
+   `pose_logger` ended with a shutdown signal (`ExternalShutdownException`).
+   One suspected mechanism was tested and ruled out: killing a `docker exec`
+   client, with or without `-t`, leaves the processes it started running. The
+   launch did not die in any of the nine instrumented runs of the evening. That
+   afternoon the session was polling the same container with many
+   `docker exec` calls, stopping background tasks and committing to the
+   bind-mounted repository in the same minutes; none of these is shown to be
+   the cause. **Seen once, not explained.**
+2. *The low-power FAIL.* Two controlled attempts to reproduce a slow
+   simulator, each running the stock check:
+
+   | Condition | Effective speed | Result |
+   | --- | --- | --- |
+   | Gazebo held at `real_time_factor` 0.2 through `/world/igvc_course/set_physics`, CPU free | 0.200x, from Gazebo's own statistics | **PASS**: 89.8 m, max 1.98 m, worst clearance +0.089 m, 0.0% over the paint |
+   | The container capped to 2 CPUs (`docker update --cpus 2`), every process starved | about 0.21x (46.9 samples per simulated second) | **PASS**: 89.8 m, max 1.73 m, worst clearance +0.017 m, 0.0% over the paint |
+
+   So neither a slow simulator nor a starved CPU makes the robot leave the
+   lane, and the GPU sat in P8 for 166 of 177 samples during the evening's
+   passing gates, so P8 alone is not the cause either. **The FAIL is not
+   reproduced and not explained.** Its numbers, a normal distance (87.5 m) and
+   span (28.8 m) but a mean 98.6 deg to the lane, describe a path of normal
+   shape pointing the wrong way rather than a stack that stopped working. Its
+   track log was overwritten, so that cannot be checked.
+
+A read-only audit of wall-clock dependencies (Nav2 1.3.13 source and this
+tree) found the team's simulator-side nodes on simulated time throughout.
+Nav2's `velocity_smoother` runs a wall-clock timer with a fixed step, so at a
+real-time factor r its acceleration limits are effectively 1/r times looser in
+simulated time, and the controller server's loop is wall-rate. Neither broke
+the 0.2x run; worth remembering on a slow Jetson.
+
+**Lap times, from the same track logs.** The simulated course is a closed loop
+of 78.8 m along its centreline (`track_points.json`). The robot completed one
+lap in 90.2 to 95.3 s of simulated time in all eight evening runs (81 to 83 m
+driven, 0.87 to 0.90 m/s), timed from the start of the watch window with the
+robot already moving. That is the configured `desired_linear_vel: 0.90`, on
+both this branch and the competition branch, against the 2.24 m/s (5 mph)
+cap. Faster is possible in principle, but `IN LANE` already passes by only
+0.02 to 0.27 m against the flat 2.00 m tolerance, as it did before the branch.
+
+Evidence, outside the repository in `local-notes/oneshot_evidence/`:
+`gates_2026-09-29_gz_g1/`, `gates_2026-09-29_dev_d1/`, `exp_2026-09-29_rtf020/`,
+`exp_2026-09-29_cpu2/`; the runner and sampler are `scripts/gates2.sh`,
+`scripts/psampler.sh` and `scripts/exp_rtf.sh`.
+
 ### 20.10 Not done
 
 - **A pixi `perception` feature** for the native route (PyTorch, which can use

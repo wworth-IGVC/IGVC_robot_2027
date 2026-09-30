@@ -220,8 +220,19 @@ Verified means a command was run and a number came back. Nothing below is
 
 ### P0, blocking the merge of `jazzy-only` into `main`
 
-- [ ] **The Gazebo image's autonomy check did not pass on the final tree,
-      2026-09-29, and nobody knows why.** Two runs in `igvc_gazebo`, the
+- [x] **Done 2026-09-29 evening: the freeze rule is met** (report section
+      20.9.1). On the final tree, in both `igvc_gazebo` and `igvc_dev_jazzy`,
+      one simulator at a time with nothing else running in the container:
+      render PASS, smoke 18/18 three times, autonomy PASS three times, no
+      leftovers. The two bad runs below did not recur; each is recorded as
+      seen once, not explained. A slow simulator does not reproduce the FAIL:
+      the check passes with Gazebo held at 0.2x real time, and with the
+      container starved to 2 CPUs (about 0.21x). The aborted run's own files
+      show `ros2 launch` died first while the nodes and Gazebo ran on, so
+      "every process vanished" was the check's teardown afterwards.
+- [x] ~~**The Gazebo image's autonomy check did not pass on the final tree,
+      2026-09-29, and nobody knows why.**~~ Superseded by the item above; the
+      original entry is kept below. Two runs in `igvc_gazebo`, the
       unchanged simulator image:
       1. **FAIL** while the laptop's GPU power setting held the GPU in P8:
          the simulator ran at about 0.21x real time and the robot left the
@@ -247,7 +258,10 @@ Verified means a command was run and a number came back. Nothing below is
       factor fell to 0.21, against 0.4 on 2026-09-24 and 0.56 earlier the same
       day, and `render_check.sh` still passed, because the GPU was in use,
       just slowly. Worth a line in the Windows guide once it is understood,
-      and possibly a real-time-factor warning in the checks.
+      and possibly a real-time-factor warning in the checks. **Downgraded
+      2026-09-29 evening: slow is not a failure.** The autonomy check passes
+      at 0.2x (report 20.9.1), and the GPU sat in P8 during the evening's
+      passing gates too, which ran at about 1.0x. Now P2: a guide note only.
 
 ### P0, blocking real perception work
 
