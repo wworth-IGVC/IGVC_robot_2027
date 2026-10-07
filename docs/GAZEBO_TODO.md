@@ -1,6 +1,6 @@
 # Gazebo simulator: what is done, and what is next
 
-**Updated 2026-10-01.** A single page for "where is the simulator up to".
+**Updated 2026-10-07.** A single page for "where is the simulator up to".
 `GAZEBO_SETUP.md` is the detail behind every line here.
 
 Priorities: **P0** blocks other work · **P1** needed before competition ·
@@ -510,8 +510,16 @@ Verified means a command was run and a number came back. Nothing below is
       mid-run. Isaac's generated field still gives them **no collision at
       all**; `--no-barrel-collision` reproduces that. Touches are now counted
       (`GAZEBO_SETUP.md` 10.11).
-- [ ] **Publish `/fix`.** The last unbridged row of the contract. Needs
-      `<spherical_coordinates>` in the world first. Nothing consumes it today.
+- [x] **`/fix` is published** *(2026-10-07)*: `<spherical_coordinates>` and
+      the NavSat system in the world, a `navsat` sensor on
+      `front_gps_antenna_link`, bridged as NavSatFix. `measurements/fix_check.py`
+      PASS (0.002 m, 0.00 deg); its control with the axes 90 deg off FAILS
+      (18 to 20 m, 90 deg). **The datum is a placeholder**, and nothing in the
+      sim consumes `/fix` yet. `GAZEBO_SETUP.md` 10.14.
+- [ ] **TEAM (Aidan): the course datum, and `/fix` against `/gps/fix`.** No
+      surveyed IGVC course coordinate exists in the repository; and `main`'s
+      `localization.py` and `navigator.py` read `/gps/fix` while the u-blox
+      driver publishes `/fix` (the competition branch uses `/fix`).
 
 ### P2, worth doing
 

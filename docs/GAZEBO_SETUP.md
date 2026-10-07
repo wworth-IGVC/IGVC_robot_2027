@@ -1568,3 +1568,29 @@ is how the 2026 robot avoided obstacles in lane mode. Both files are in
 `igvc_lane_detection`, a protected package, so bringing them to `main` is a
 team decision; with it, `obstacle_source:=lidar_map` is the next step, judged
 by this check with `none` as its negative control.
+
+### 10.14 GPS `/fix`, published and checked (2026-10-07)
+
+The world now has `<spherical_coordinates>` (WGS84, ENU, heading 0, so world
++x is east and +y north) and the NavSat system; the sim xacro has a `navsat`
+sensor on `front_gps_antenna_link` at 1 Hz with no noise, bridged to `/fix`
+as `sensor_msgs/NavSatFix`, the u-blox driver's topic and frame. **The datum
+is a placeholder**: the 2026 team's own simulator origin
+(42.400510946, -83.130640432, from the competition branch's
+`sim_gps_spoofer.py`), about 31 km from Oakland University. No surveyed
+course coordinate exists in the repository; Aidan supplies one.
+
+`scripts/gazebo/measurements/fix_check.py` takes a fix at rest, drives 3 s,
+takes another, converts both to world metres through the datum, and compares
+them with the antenna's ground truth (`gz model -p` plus the TF offset
+rotated by yaw). Measured 2026-10-07:
+
+| Run | Position error | Heading of the displacement | Verdict |
+| --- | --- | --- | --- |
+| `fix_check.py` | 0.002 m at both fixes | -0.00 deg over 1.359 m | **PASS** |
+| `--rotate-deg 90` (control) | 18.35 and 19.96 m | +90.00 deg | **FAIL**, as it must |
+
+Nothing in the simulator consumes `/fix` yet (`gps_enabled` is false in the
+sim launches, and `main`'s localisation reads `/gps/fix`, not `/fix`: a
+question for Aidan). This completes the sensor contract; it does not make
+anything use GPS.

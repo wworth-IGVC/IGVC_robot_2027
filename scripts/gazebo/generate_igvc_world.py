@@ -52,6 +52,18 @@ BARREL_HEIGHT_M = 0.9
 # igvc_test_bringup/config/gazebo_bridge.yaml under the same name.
 BARREL_CONTACT_TOPIC = "/sim/barrel_contacts"
 
+# The world's geographic origin, for the navsat sensor (/fix). A PLACEHOLDER:
+# no surveyed coordinate of the IGVC course exists anywhere in the repository.
+# This is the 2026 team's own simulator origin
+# (2026/more_diverging_changes, sim_gps_spoofer.py:34-35), which lies about
+# 31 km from Oakland University, so it is not "the venue". Decision D6 of
+# local-notes/SIM_DELIVERABLE_PLAN.md: Aidan supplies the real datum.
+# ENU with heading 0: world +x is east, +y is north, so a fix converts back to
+# world metres with no rotation (scripts/gazebo/measurements/fix_check.py).
+DATUM_LAT_DEG = 42.400510946
+DATUM_LON_DEG = -83.130640432
+DATUM_ELEVATION_M = 0.0
+
 # ---------------------------------------------------------------------------
 # The course width is NOT constant, and getting this wrong put the camera and
 # the planner on two different courses.
@@ -395,6 +407,20 @@ def main():
             name="gz::sim::systems::Imu"/>
     <plugin filename="gz-sim-contact-system"
             name="gz::sim::systems::Contact"/>
+    <plugin filename="gz-sim-navsat-system"
+            name="gz::sim::systems::NavSat"/>
+
+    <!-- Origin for the navsat sensor. PLACEHOLDER datum, not the venue: see
+         DATUM_LAT_DEG in generate_igvc_world.py. ENU, heading 0: +x east,
+         +y north. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>{DATUM_LAT_DEG}</latitude_deg>
+      <longitude_deg>{DATUM_LON_DEG}</longitude_deg>
+      <elevation>{DATUM_ELEVATION_M}</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>

@@ -177,6 +177,22 @@
     </sensor>
   </gazebo>
 
+  <!-- ================= gps =================
+       /fix as sensor_msgs/NavSatFix, the u-blox driver's name and frame
+       (ublox_firmware7plus.hpp: /fix, front_gps_antenna_link). Needs the
+       world's <spherical_coordinates> and the NavSat system, both written by
+       generate_igvc_world.py; the datum there is a PLACEHOLDER. No noise, so
+       fix_check.py can test the chain to centimetres. Nothing in the sim
+       consumes /fix yet (gps_enabled is false in the sim launches). -->
+  <gazebo reference="front_gps_antenna_link">
+    <sensor name="navsat_sensor" type="navsat">
+      <topic>/fix</topic>
+      <gz_frame_id>front_gps_antenna_link</gz_frame_id>
+      <update_rate>1</update_rate>
+      <always_on>1</always_on>
+    </sensor>
+  </gazebo>
+
   <!-- ================= cameras =================
        Attached to the *_left_camera_frame, not the optical frame: Gazebo
        cameras look down +X, which is what that frame gives. The optical frame

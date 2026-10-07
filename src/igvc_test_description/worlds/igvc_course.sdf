@@ -47,6 +47,20 @@
             name="gz::sim::systems::Imu"/>
     <plugin filename="gz-sim-contact-system"
             name="gz::sim::systems::Contact"/>
+    <plugin filename="gz-sim-navsat-system"
+            name="gz::sim::systems::NavSat"/>
+
+    <!-- Origin for the navsat sensor. PLACEHOLDER datum, not the venue: see
+         DATUM_LAT_DEG in generate_igvc_world.py. ENU, heading 0: +x east,
+         +y north. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>42.400510946</latitude_deg>
+      <longitude_deg>-83.130640432</longitude_deg>
+      <elevation>0.0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>

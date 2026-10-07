@@ -230,6 +230,17 @@
   gz_type_name: "gz.msgs.PointCloudPacked"
   direction: GZ_TO_ROS
 
+# ── gps ──────────────────────────────────────────────────────────────────────
+# The navsat sensor on front_gps_antenna_link (gazebo_sim.urdf.xacro). The
+# world's datum is a PLACEHOLDER (generate_igvc_world.py), so latitude and
+# longitude are only meaningful relative to it. Nothing in the sim consumes
+# /fix yet. Checked by scripts/gazebo/measurements/fix_check.py.
+- ros_topic_name: "/fix"
+  gz_topic_name: "/fix"
+  ros_type_name: "sensor_msgs/msg/NavSatFix"
+  gz_type_name: "gz.msgs.NavSat"
+  direction: GZ_TO_ROS
+
 # ── test instrumentation, NOT part of the 3.7 contract ──────────────────────
 # Every barrel in igvc_course.sdf carries a contact sensor on its collision,
 # all publishing here (generate_igvc_world.py). Silent until something touches
@@ -245,12 +256,6 @@
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  STILL MISSING FROM THE 3.7 CONTRACT, deliberately
-#
-#  /fix  (sensor_msgs/NavSatFix)
-#      Gazebo has a navsat sensor and it would be a short xacro block, but the
-#      world needs <spherical_coordinates> before it produces anything sane,
-#      and every sim config in this repo runs with gps_enabled: false - the
-#      Isaac path did not publish it either. Small, queued, not urgent.
 #
 #  /isaac_joint_cmd  (sensor_msgs/JointState, ROS to sim)
 #      The control path, not the sensor path. Gazebo's DiffDrive takes
