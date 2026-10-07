@@ -1502,3 +1502,69 @@ ground-truth robot's barrel avoidance is now measured, not assumed.
 
 `autonomy_check.sh` also takes `LAUNCH_ARGS` now, appended to the launch, so
 the same check runs on other configurations (section 10.12).
+
+### 10.12 Nav2's obstacle layer cannot make `main`'s robot avoid a barrel (2026-10-01)
+
+The plan for obstacle perception was to put `obstacle_layer` back with the
+lidar as its only source (`/scan` is proven to see the barrels, 2026-09-24).
+Reading the code first said it would not work, so it was measured before
+anything was built on it.
+
+**Why the code said no.** The navigator builds its path only from
+`/lane_costmap` (`navigator.py:292`, centreline search `:1044-1267`) and sends
+it straight to FollowPath, so Nav2's planner never runs; RPP runs with
+`use_collision_detection: false` and cost-regulated scaling off
+(`nav2_lane_follow_config.yaml:108`, `:115`); the collision monitor's only
+source is `enabled: false` and it has no lidar source. Nothing that moves the
+robot reads Nav2's costmaps. The ground-truth run avoids barrels only because
+`gt_nav_bridge_node` stamps them into `/lane_costmap` itself.
+
+**The switch.** `gazebo_nav_test.launch.py` takes `obstacle_source`:
+
+| Value | The planner's barrels | Nav2 |
+| --- | --- | --- |
+| `gt` (default, unchanged) | stamped from `track_points.json` | lane and inflation layers |
+| `none` | none: `gt_nav_bridge_node` gets a copy of the track file with `obstacles_m` emptied | as `gt` |
+| `nav2_scan` | none | plus `obstacle_layer` on `/scan` alone (`gazebo_nav_test_nav2_obstacle_scan.yaml`, merged over the usual overrides at launch) |
+
+The barrels stay in the world in every case: `gazebo_sim.launch.py` reads only
+the spawn pose from the track file. Half of them are in the robot's path: with
+the chassis half-width 0.405 m, a robot on the centreline would strike barrels
+0, 2, 4 and 5.
+
+**Measured**, two runs each, the full `autonomy_check.sh`:
+
+| Condition | Run 1 | Run 2 |
+| --- | --- | --- |
+| `none` (the negative control) | touched barrel 4 at 39.1 s, pinned to the end | barrel 4 at 39.2 s, pinned |
+| `nav2_scan` | barrel 4 at 38.5 s, pinned | barrel 4 at 39.3 s, pinned |
+
+In both `nav2_scan` runs the layer loaded and subscribed in both costmaps
+("Subscribed to Topics: lidar_scan"); the behaviour was identical to having no
+obstacle perception at all. **So on `main` a barrel that only the lidar sees
+is neither avoided nor stopped for.** Barrel 4 is simply the first of the four
+in the path that the robot reaches; it never got further.
+
+**A second, separate observation:** while `lane_layer` is on, Nav2's published
+costmaps carry none of the lidar layer's marks. The costmaps with and without
+the layer were identical (2000 lethal cells in the global costmap, 1269 in the
+local one, in both). Switching `lane_layer` off at runtime revealed **24096**
+lethal cells in the global costmap with the layer and **0** without it, so
+the layer does mark and the lane layer hides it. The mechanism is not
+established: Nav2 1.3.13's StaticLayer takes the maximum even in a rolling
+window (`static_layer.cpp:476-479`), so it is not a plain overwrite. 24096 is
+also far more than eight barrels: `inf_is_valid: true` turns "no return" into
+`range_max - 0.0001` (`obstacle_layer.cpp:378`), 11.9999 m, inside the global
+layer's 12.0 m `obstacle_max_range`, which would mark a phantom ring 12 m out.
+Neither changes any decision here, because nothing that moves the robot reads
+these costmaps; both are recorded for whoever next touches the real robot's
+Nav2 configuration.
+
+**What does work, on the competition branch.** `2026/more_diverging_changes`
+(`67a6934`) adds `lidar_obstacle_costmap.py` (`/scan` to a decaying evidence
+grid `/lidar_obstacle_map`) and its navigator overlays that grid's lethal cells
+onto the region it searches for a path (branch `navigator.py:1270-1295`). That
+is how the 2026 robot avoided obstacles in lane mode. Both files are in
+`igvc_lane_detection`, a protected package, so bringing them to `main` is a
+team decision; with it, `obstacle_source:=lidar_map` is the next step, judged
+by this check with `none` as its negative control.

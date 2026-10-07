@@ -82,10 +82,22 @@ Arguments
     debug_png_path                GT grid PNG export
     odom_topic                    odometry every consumer is remapped onto
                                   (default: /front_zed_camera_x/zed_node/odom)
+    obstacle_source               where the planner's barrels come from
+                                  (default: gt, the behaviour before 2026-10-01)
+        gt         gt_nav_bridge_node stamps track_points.json's obstacles_m
+                   into /lane_map and /lane_costmap
+        none       it stamps none: the barrels are still physically in the
+                   world but nothing tells the planner about them, so the
+                   robot should hit any in its path (a negative control)
+        nav2_scan  as none, plus Nav2's obstacle_layer on /scan alone, merged
+                   from config/gazebo_nav_test_nav2_obstacle_scan.yaml
 """
 
+import json
 import os
+import tempfile
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
@@ -114,12 +126,68 @@ def _find(rel_from_repo: str, pkg: str, rel_from_share: str) -> str:
     return os.path.join(_repo_root(), rel_from_repo)
 
 
+# ── obstacle_source: where the planner's barrels come from ───────────────────
+OBSTACLE_SOURCES = ("gt", "none", "nav2_scan")
+
+
+def _track_without_obstacles(track_file: str) -> str:
+    """A copy of track_file with obstacles_m emptied, for gt_nav_bridge_node.
+
+    Only the planner's grid loses the barrels. The world is the prebuilt
+    igvc_course.sdf, and gazebo_sim.launch.py reads nothing but the spawn pose
+    from track_file, so the barrels stay physically on the course: something
+    else must now perceive them, or the robot drives into them. Half of them
+    are in its path: a robot on the centreline would strike barrels 0, 2, 4
+    and 5 (measured from track_points.json, 2026-10-01).
+    """
+    with open(track_file, encoding="utf-8") as fh:
+        data = json.load(fh)
+    data["obstacles_m"] = []
+    out = os.path.join(tempfile.gettempdir(), "igvc_track_no_obstacles.json")
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    return out
+
+
+def _merge(base: dict, over: dict) -> dict:
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def _merged_overrides(base_file: str, extra_file: str) -> str:
+    """base_file with extra_file merged over it, written to a temp file.
+
+    navigation_no_docking.launch.py takes one extra_params_file, so the sim's
+    fixed overrides and an optional obstacle layer are kept in two files and
+    joined here, rather than copied into a third that could drift.
+    """
+    with open(base_file, encoding="utf-8") as fh:
+        base = yaml.safe_load(fh)
+    with open(extra_file, encoding="utf-8") as fh:
+        extra = yaml.safe_load(fh)
+    out = os.path.join(tempfile.gettempdir(), "igvc_nav2_overrides_merged.yaml")
+    with open(out, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(_merge(base, extra), fh, default_flow_style=None)
+    return out
+
+
 def _setup(context, *args, **kwargs):
     def cfg(name):
         return LaunchConfiguration(name).perform(context)
 
     use_sim_time = cfg("use_sim_time").lower() in ("true", "1", "yes")
     odom_topic = cfg("odom_topic")
+    obstacle_source = cfg("obstacle_source")
+    if obstacle_source not in OBSTACLE_SOURCES:
+        raise RuntimeError("obstacle_source:=%s is not one of %s"
+                           % (obstacle_source, ", ".join(OBSTACLE_SOURCES)))
+    bridge_track = cfg("track_file")
+    if obstacle_source != "gt":
+        bridge_track = _track_without_obstacles(bridge_track)
 
     # The same config the Isaac nav test uses. Nothing in it is Isaac-specific:
     # it is grid geometry, obstacle inflation and navigator gains. Sharing it
@@ -197,7 +265,9 @@ def _setup(context, *args, **kwargs):
             shared_cfg,
             {
                 "use_sim_time": use_sim_time,
-                "track_file": cfg("track_file"),
+                # The only node whose track file depends on obstacle_source:
+                # it is the one that stamps barrels into the planner's grid.
+                "track_file": bridge_track,
             },
         ],
     )
@@ -232,6 +302,17 @@ def _setup(context, *args, **kwargs):
 
     # ── Nav2 and the navigator: the part that makes the robot drive itself ───
     use_nav2 = cfg("nav2").lower() in ("true", "1", "yes")
+    nav2_overrides = _find(
+        os.path.join("src", "igvc_test_bringup", "config",
+                     "gazebo_nav_test_nav2_overrides.yaml"),
+        "igvc_test_bringup",
+        os.path.join("config", "gazebo_nav_test_nav2_overrides.yaml"))
+    if obstacle_source == "nav2_scan":
+        nav2_overrides = _merged_overrides(nav2_overrides, _find(
+            os.path.join("src", "igvc_test_bringup", "config",
+                         "gazebo_nav_test_nav2_obstacle_scan.yaml"),
+            "igvc_test_bringup",
+            os.path.join("config", "gazebo_nav_test_nav2_obstacle_scan.yaml")))
     if use_nav2:
         nav2 = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(_find(
@@ -246,12 +327,7 @@ def _setup(context, *args, **kwargs):
                                  "nav2_lane_follow_config.yaml"),
                     "igvc_test_bringup",
                     os.path.join("config", "nav2_lane_follow_config.yaml")),
-                "extra_params_file": _find(
-                    os.path.join("src", "igvc_test_bringup", "config",
-                                 "gazebo_nav_test_nav2_overrides.yaml"),
-                    "igvc_test_bringup",
-                    os.path.join("config",
-                                 "gazebo_nav_test_nav2_overrides.yaml")),
+                "extra_params_file": nav2_overrides,
                 "use_sim_time": cfg("use_sim_time"),
             }.items(),
         )
@@ -318,6 +394,8 @@ def _setup(context, *args, **kwargs):
     print("  shared config : %s" % shared_cfg)
     print("  odom topic    : %s" % odom_topic)
     print("  nav2          : %s" % ("on" if use_nav2 else "off"))
+    print("  obstacles     : %s (planner track file %s; nav2 overrides %s)"
+          % (obstacle_source, bridge_track, nav2_overrides))
 
     return actions
 
@@ -364,6 +442,13 @@ def generate_launch_description():
             description="Seconds to wait before starting Nav2, so its ten "
                         "lifecycle nodes are not activating while Gazebo is "
                         "still loading meshes and rendering its first frame."),
+        DeclareLaunchArgument(
+            "obstacle_source", default_value="gt",
+            description="Where the planner's barrels come from: gt (stamped "
+                        "from track_points.json, the default), none (not at "
+                        "all; a negative control), nav2_scan (Nav2's "
+                        "obstacle_layer on /scan alone). The barrels stay in "
+                        "the world in every case."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),

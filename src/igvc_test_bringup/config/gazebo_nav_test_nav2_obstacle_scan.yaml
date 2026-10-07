@@ -1,0 +1,37 @@
+# ── Nav2 obstacle layer on the lidar only: obstacle_source:=nav2_scan ─────────
+#
+# Merged OVER gazebo_nav_test_nav2_overrides.yaml by gazebo_nav_test.launch.py
+# when obstacle_source:=nav2_scan, never used on its own. It puts back the
+# obstacle_layer that file removes, in the real robot's plugin order, with the
+# lidar as its ONLY source. Every other obstacle_layer parameter (the lidar_scan
+# source's topic, ranges, heights, marking and clearing) comes unchanged from
+# nav2_lane_follow_config.yaml, the real robot's file.
+#
+# Why the lidar only: under the default sim_cameras:=front the left and right
+# clouds never publish, and the front cloud is still stamped with the wrong
+# frame (GAZEBO_SETUP.md 10.6), so a camera source would either wait forever or
+# mark obstacles in the wrong place.
+#
+# What this is for (2026-10-01): a MEASUREMENT, not a fix. On main the
+# navigator builds its path from /lane_costmap only and hands it straight to
+# FollowPath; RPP runs with use_collision_detection: false; the collision
+# monitor has no enabled source. Read from the code, nothing would then react
+# to an obstacle that exists only in Nav2's costmaps. Running the autonomy
+# check with the barrels removed from the planner's grid, with and without this
+# layer, tests that reading. See docs/GAZEBO_TODO.md, "Obstacles from the
+# lidar, in the loop".
+# ──────────────────────────────────────────────────────────────────────────────
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      plugins: ["obstacle_layer", "lane_layer", "inflation_layer"]
+      obstacle_layer:
+        observation_sources: "lidar_scan"
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      plugins: ["obstacle_layer", "lane_layer", "inflation_layer"]
+      obstacle_layer:
+        observation_sources: "lidar_scan"

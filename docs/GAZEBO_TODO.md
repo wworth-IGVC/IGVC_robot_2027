@@ -347,7 +347,33 @@ Verified means a command was run and a number came back. Nothing below is
       re-baseline all three gates when it is. The lidar cannot see paint, so
       lanes stay a camera problem; 80 own-body returns at 0.10 to 0.13 m are
       inside the footprint the layer clears.
-- [ ] **Fix the point-cloud frame, and expect it to change behaviour.** Three
+- [x] **Measured 2026-10-01: Nav2's obstacle layer on `/scan` does NOT make
+      `main`'s robot avoid a barrel**, which retracts "the smaller first
+      step" above. With the barrels removed from the planner's grid
+      (`obstacle_source:=none`) the robot drove into barrel 4 and stayed
+      pinned, 2 runs of 2; with the layer added (`obstacle_source:=nav2_scan`)
+      exactly the same, 2 of 2, although the layer loaded and subscribed.
+      Nothing that moves the robot reads Nav2's costmaps: the navigator plans
+      on `/lane_costmap` alone and drives FollowPath, RPP collision detection
+      is off, the collision monitor has no source. Separately, the lane layer
+      hides the obstacle layer's marks in the published costmaps (mechanism
+      not established). `GAZEBO_SETUP.md` 10.12.
+- [ ] **TEAM: bring the competition branch's lidar obstacle map to `main`.**
+      `lidar_obstacle_costmap.py` and the navigator overlay of its grid
+      (`2026/more_diverging_changes`, `navigator.py:1270-1295`) are how the
+      2026 robot avoided obstacles in lane mode. Both are in the protected
+      `igvc_lane_detection`. Once agreed: `obstacle_source:=lidar_map`, judged
+      by `autonomy_check.sh` (0 barrel contacts, three runs) with
+      `obstacle_source:=none` as the negative control.
+- [ ] **Fix the point-cloud frame, and expect it to change behaviour.**
+      *(2026-10-01: on `main` it most likely will not, because nothing that
+      moves the robot reads Nav2's costmaps, measured in the item above; the
+      competition branch's YOLOPv2, which projects lane pixels through this
+      cloud, is what needs it. And the "three options written up in the
+      report" were never written: no branch has them. The fix is a re-stamp
+      of the cloud alone to the camera's body frame, because `gz_frame_id`
+      also stamps the image, depth and camera_info, which must stay
+      optical.)* Three
       options are written up in the report; a republisher is the only one that
       does not disturb the perception path. **This is not a bug fix, it is a
       new system under test.** `gazebo_nav_test_nav2_overrides.yaml:36-44`
