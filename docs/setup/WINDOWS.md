@@ -836,14 +836,14 @@ lane clearance       : worst +0.040 m (chassis), +0.081 m (Nav2 footprint)
 AUTONOMY CHECK: PASS
 ```
 
-**`IN LANE` is provisional and you should read it as a number, not a verdict.**
-It compares centreline deviation against a flat 2.00 m tolerance while the lane
-width varies by a factor of two along the course, and it ignores the robot's
-yaw. Three runs at honest sampling gave 2.04 (FAIL), 1.95 (PASS), 1.98 (PASS),
-while every one of those runs drove 47 to 51 m under its own control with
-**0.0%** of samples over the paint. If you see a FAIL there, look at the
-clearance line before believing the robot misbehaved. Nobody is tuning the
-tolerance until the metric is right.
+**The lane criterion is `LANE`: the chassis must never cross the painted
+boundary.** (Until 2026-10-07 it was `IN LANE`, a flat 2.00 m from the
+centreline, which failed runs that never touched the paint because the lane is
+10 to 20 ft wide.) A FAIL means a sample had a negative `lane clearance`, or
+that the clearance could not be measured. The clearance is thin, 1.4 to 8.4 cm
+in recent runs, and good to about 3 cm, so look at the number as well as the
+verdict. The centreline deviation is still printed but no longer decides
+anything. `docs/GAZEBO_SETUP.md` 10.9 has the history and the evidence.
 
 ---
 

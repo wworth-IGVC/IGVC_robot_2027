@@ -87,7 +87,7 @@ echo "  bootstrap exit=$B in $(( $(t) - T0 ))s"
 
 say "pixi run autonomy"
 T0=$(t); pixi run autonomy > /tmp/auto.log 2>&1; A=$?
-grep -E "distance travelled|sim time covered|clearance|MOVED|PROGRESS|IN LANE|ON THE SLAB|AUTONOMY CHECK" /tmp/auto.log | sed "s/^/  /"
+grep -E "distance travelled|sim time covered|clearance|MOVED|PROGRESS|LANE|ON THE SLAB|AUTONOMY CHECK" /tmp/auto.log | sed "s/^/  /"
 echo "  autonomy exit=$A in $(( $(t) - T0 ))s"
 
 say "RESULT"

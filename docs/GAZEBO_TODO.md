@@ -457,19 +457,21 @@ Verified means a command was run and a number came back. Nothing below is
       also starts `gt_nav_bridge_node` publishing the same name. Caught by
       checking the grid geometry against the config rather than trusting the
       topic name. The rerun remaps to `/hough/lane_map`.
-- [ ] **TEAM: decide the `IN LANE` gate.** `autonomy_check.sh` compares
-      centreline deviation against a flat **2.00 m** tolerance while the lane
-      width varies by a factor of two along the course, so it measures the
-      wrong quantity and sits on its own threshold. At honest 15 Hz sampling
-      it produced **2.04 (FAIL), 1.95 (PASS), 1.98 (PASS)**; one run in three
-      fails. The behaviour did not regress: 47 to 51 m driven under its own
-      control every time, on the slab throughout, **0.0% of samples over the
-      paint** in all three. What changed is that the measurement got honest.
-      **The regression baseline is unreliable until this is settled**, and it
-      is a one-line change once decided. **Do not raise `TOL` to make it
-      green.** The obvious candidate is to judge on the clearance metric,
-      which is already computed and already lane-width aware, and to keep the
-      centreline number as information.
+- [x] **DONE 2026-10-07 (decision D4): `IN LANE` is now `LANE`.**
+      `autonomy_check.sh` used to compare centreline deviation against a flat
+      **2.00 m**, which failed runs that never touched the paint (2.04 m on
+      09-17 and 2.07 m on 10-01, both 0.0% over the line) because the lane is
+      10 to 20 ft wide.
+      `LANE` fails if the chassis footprint crosses the painted boundary at
+      any sample, or if the clearance is not measured; the centreline number
+      is reported only. Tested: negative controls fail, 18 saved runs
+      re-scored with 0 surprises, one live run PASS. `ANALYSE_ONLY=<track_log>`
+      re-scores a saved run without a simulator. `docs/GAZEBO_SETUP.md` 10.9.
+- [ ] **The `LANE` margin is thin: 1.4 to 8.4 cm over 13 ground-truth runs
+      (today's live run was +0.014 m), and the metric is good to about 3 cm.**
+      A FAIL within about 3 cm of zero is noise until shown otherwise. The fix
+      is steering that keeps further from the paint (navigator, Nav2: protected,
+      not started), never a looser gate. Not urgent while the gate passes.
 
 ### P1, before competition
 

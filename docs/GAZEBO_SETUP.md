@@ -537,7 +537,7 @@ never shrinks and Windows 11 Home has no Hyper-V to compact it.
 | `scripts/gazebo/generate_igvc_world.py` | Builds `worlds/igvc_course.sdf` from `track_points.json`. See section 8.2 |
 | `scripts/gazebo/start_sim.sh` | One command to bring the whole thing up inside the container: build, regenerate the world if the track data is newer, launch Gazebo plus RViz. Prints the teleop instructions. **`NAV=1` also starts Nav2 and the navigator, so the robot drives itself**; `RVIZ=0`, `HEADLESS=1`, `CAMERAS=all` |
 | `scripts/gazebo/bringup_smoke_test.sh` | **The simulator and the contract.** 18 checks: every section 3.7 topic carries a message, the camera frame ids resolve in TF, and a commanded velocity moves the odometry in the right direction by the right distance against `gz` ground truth. Exit 0 only if the robot drives. `NAV=0` for the simulator alone, `RVIZ=1` for the GUI checks |
-| `scripts/gazebo/autonomy_check.sh` | **Does the robot drive the course BY ITSELF.** Never publishes `/cmd_vel`; grades distance travelled, ground covered, deviation from the lane centreline, and whether it stayed on the ground slab. `DURATION`, `TOL`, `RVIZ` are env vars |
+| `scripts/gazebo/autonomy_check.sh` | **Does the robot drive the course BY ITSELF.** Never publishes `/cmd_vel`; grades distance travelled, ground covered, whether the chassis crossed the painted lane boundary (`LANE`), whether it touched a barrel (`BARRELS`), and whether it stayed on the ground slab. `DURATION`, `RVIZ`, `LAUNCH_ARGS` are env vars; `ANALYSE_ONLY=<track_log>` re-scores a saved run without a simulator (10.9) |
 | `scripts/gazebo/sim_preflight.sh` | Sourced by the others. Refuses to start on top of a running simulator, because two on one ROS domain both publish `/clock`, `/odom` and `/tf` and produce results that look real and are not. `FORCE=1` cleans up instead of refusing |
 | `scripts/gazebo/pose_logger.py` | Logs the robot's world pose at a fixed rate for `autonomy_check.sh`. Exists because `gz model -p` took ~20 s per call under a loaded simulator |
 
@@ -1340,15 +1340,16 @@ needs. Any extra white mark breaks the ranking silently, and fewer than four
 contours falls through to a constant-width fallback with `lane_half_width_m`
 defaulting to 0.25, which is a silent 0.5 m corridor.
 
-### 10.9 Lane-boundary clearance, reported and not enforced
+### 10.9 Lane-boundary clearance: reported 2026-09-17, enforced as `LANE` from 2026-10-07
 
 `autonomy_check.sh` measured distance to the **centreline** only, which cannot
 say whether the robot stayed inside a lane whose width varies by a factor of
 two. It now also reports the clearance between the chassis edge and the **inner
 edge of the painted line**, evaluated at the **local** half-width, for both
 candidate robot half-widths. The width profile is imported from
-`generate_igvc_world.py` so there is one definition. **Pass criteria are
-unchanged.** The premise was confirmed first: both painted lines are offset by
+`generate_igvc_world.py` so there is one definition. **At that point the pass
+criteria were unchanged; the gate changed on 2026-10-07, at the end of this
+section.** The premise was confirmed first: both painted lines are offset by
 the same distance either side of `centerline_m`, so the centreline used for
 "deviation" is the centre of the painted lane by construction.
 
@@ -1386,16 +1387,126 @@ Three runs with the rotated footprint at honest sampling:
 **8 to 9 cm**, not the 25 cm an earlier unrotated, under-sampled version of
 this metric reported.
 
-**The `IN LANE` gate is now visibly a coin flip, and it has deliberately not
-been touched.** At honest sampling it produced 2.04 (FAIL), 1.95 (PASS) and
-1.98 (PASS) against a flat 2.00 m tolerance. The behaviour did not regress: 47
-to 51 m driven under its own control every time, on the slab throughout, and
-0.0% of samples over the paint in all three. What changed is that the
-measurement got honest. **The gate measures the wrong quantity**, a constant
-tolerance against a lane whose width varies by a factor of two, and it sits
-right on its own threshold. Raising `TOL` to make it green would be the wrong
-fix twice over. **This needs a team decision.** Until it is made, read a
-failing `IN LANE` alongside the clearance figures rather than as a regression.
+**The `IN LANE` gate was visibly a coin flip** (2026-09-17). At honest
+sampling it produced 2.04 (FAIL), 1.95 (PASS) and 1.98 (PASS) against a flat
+2.00 m tolerance. The behaviour did not regress: 47 to 51 m driven under its
+own control every time, on the slab throughout, and 0.0% of samples over the
+paint in all three. What changed is that the measurement got honest. The gate
+measured the wrong quantity, a constant tolerance against a lane whose width
+varies by a factor of two, and it sat right on its own threshold. Raising
+`TOL` would have been the wrong fix twice over, so it was left alone until the
+decision below.
+
+#### The change: `IN LANE` becomes `LANE` (2026-10-07, decision D4)
+
+Liam delegated the decision and it was taken that day. `IN LANE` is gone.
+**`LANE` fails if the chassis footprint's clearance to the painted boundary is
+negative at any sample, and fails if the clearance is NOT MEASURED** (no yaw
+column in the pose log, no width profile, or any non-finite sample). The
+chassis figure is used, not Nav2's: it is the larger, stricter footprint. The
+centreline deviation is still printed, as a number, and decides nothing.
+`TOL` is no longer read; the script says so if it is set.
+
+*Why this quantity.* The 2026 rules do not judge distance from the centre.
+Page 11: "Crossing internal lines is not allowed and will be judged an E-Stop
+end of run with penalty." Page 12 (the traffic violations): the distance is
+measured to the furthest point where the final part of the vehicle crossed the
+boundary edge; crossing with part of the vehicle still in bounds is "Careless
+Driving", a 5 ft ticket with no E-stop. `LANE` follows page 11, so it is
+stricter than that ticket. Read from the rules PDF on 2026-10-07. The sim lane
+is 10 to 20 ft wide (half-width 1.52 to 3.05 m), so a flat 2.00 m was too loose
+where it is narrow and too strict where it is wide.
+
+*Offline scoring.* `ANALYSE_ONLY=<track_log> bash autonomy_check.sh` runs the
+same Python block on a saved log and starts nothing. A log cannot carry what a live run measures, so
+`CONTACT_LOG`, `CONTACT_SENSORS` and `FINAL_Z` come from the environment and
+default to "not measured", which fails. There is one code path: the live run
+calls the same block. `measurements/clearance_rate_sensitivity.sh` now uses it
+too (it used to cut the block out with awk, and had been broken since the
+contact arguments were added on 2026-10-01).
+
+*Equivalence.* Re-scoring `gates_2026-10-07_stage24/3_track_log.txt` offline
+reproduced the saved live output on every figure (86.8 m, span 29.7 m,
+deviation mean 0.84 and max 1.80 m, yaw 17.3 and 59.2 deg, clearance +0.074 m
+and +0.117 m, 0.0% over). Across all 18 saved runs below, MOVED, PROGRESS, ON
+THE SLAB and BARRELS agreed with each saved output: 0 mismatches. (The first
+pass showed one, an oldworld run whose world had no barrel sensors; the driver
+had wrongly declared 8. The driver was fixed, not the gate.)
+
+*Negative controls, offline, on a copy of that run (worst clearance +0.074 m):*
+
+| Change to the pose log | Must | Result |
+| --- | --- | --- |
+| none (positive control) | PASS | **PASS**, +0.074 m |
+| every pose moved 0.5 m away from the centreline, along the line from the nearest centreline point (perpendicular to the lane) | FAIL | **FAIL**, worst -0.371 m, 20.1% of samples over the paint |
+| every pose moved +0.5 m in world y (weaker: along the lane where it runs along y) | FAIL | **FAIL**, worst -0.180 m, 2.7% over |
+| yaw column removed | FAIL, NOT MEASURED | **FAIL**, NOT MEASURED |
+| one sample's yaw set to nan | FAIL, NOT MEASURED | **FAIL**, NOT MEASURED (see below) |
+
+The nan control found a real hole: `min()` and `< 0` both skip a NaN, so the
+first version printed "worst +0.074 m" and would have passed a log with one
+bad sample. Any non-finite sample now makes the whole clearance NOT MEASURED.
+
+*Where it flips.* The same run with every pose pushed outward by a growing
+amount (reported margin +0.074 m): PASS at 0.00, 0.05, 0.07, 0.08, 0.09 and
+0.10 m; **FAIL from 0.11 m** (-0.003 m), and monotone beyond (-0.013 at 0.12,
+-0.033 at 0.14, -0.093 at 0.20, -0.205 at 0.30, -0.371 at 0.50). So the gate
+does flip, at a shift of about 0.11 m against a margin of 0.074 m; the 3 cm
+between them is the resolution limit described below.
+
+*The saved runs, old verdict against new* (`local-notes/oneshot_evidence/
+lane_gate_2026-10-07/rescore_table.md`). Every ground-truth run passes `LANE`,
+including the one that failed `IN LANE` at 2.07 m. No surprises.
+
+| Run | Max centreline deviation | Old `IN LANE` (2.00 m) | Worst chassis clearance | New `LANE` |
+| --- | --- | --- | --- | --- |
+| 09-29 `gates_2026-09-29_dev_d1` run 5 | 1.86 m | PASS | +0.074 m | PASS |
+| 09-29 `dev_d1` run 6 | 1.80 m | PASS | +0.027 m | PASS |
+| 09-29 `dev_d1` run 7 | 1.91 m | PASS | +0.083 m | PASS |
+| 09-29 `gates_2026-09-29_gz_g1` run 5 | 1.98 m | PASS | +0.035 m | PASS |
+| 09-29 `gz_g1` run 6 | 1.86 m | PASS | +0.059 m | PASS |
+| 09-29 `gz_g1` run 7 | 1.91 m | PASS | +0.062 m | PASS |
+| 10-01 baseline | 1.66 m | PASS | +0.045 m | PASS |
+| 10-01 stage 0 | 1.93 m | PASS | +0.081 m | PASS |
+| 10-01 stage 1a verify, `gt` | **2.07 m** | **FAIL** | +0.084 m | **PASS** |
+| 10-01 stage 1a, world without contact sensors | 1.85 m | PASS | +0.055 m | PASS |
+| 10-01 stage 1a verify, same world | 1.87 m | PASS | +0.072 m | PASS |
+| 10-07 stages 2 and 4 gates | 1.80 m | PASS | +0.074 m | PASS |
+| *Void for lane purposes: the barrels were removed from the planner's grid and the robot ended pinned against one, so its odometry is not its position (10.11). `BARRELS` fails these.* | | | | |
+| 10-01 stage 1a runs 1 and 4 (`none`) | 1.88, 1.90 m | PASS | +0.231, +0.278 m | PASS |
+| 10-01 stage 1a runs 2 and 5 (`nav2_scan`) | 1.88, 1.87 m | PASS | +0.247, +0.215 m | PASS |
+| 10-07 stage 1a verify (`none`) | 1.87 m | PASS | +0.254 m | PASS |
+| 10-01 stage 1a verify, `none`: the robot never moved (0.0 m) | 0.00 m | PASS | +1.740 m | PASS (MOVED and PROGRESS fail it) |
+
+*A live default run on the final script* (`gates2.sh lane_d4 autonomy`,
+2026-10-07, the tree carrying the uncommitted stage 2 files): 88.8 m driven,
+span 28.8 m, deviation mean 0.65 m and max 1.82 m, yaw to lane mean 15.2 and
+max 49.8 deg, 1622 samples at 16.2 Hz, **worst chassis clearance +0.014 m**,
+0.0% over the paint, no barrel contact (8 sensors live), on the slab, `aborts=2`,
+real-time factor about 0.89. MOVED, PROGRESS, LANE, ON THE SLAB and BARRELS all
+PASS; the leftover count was 0. Re-scoring its saved log offline gave the same
+numbers.
+
+*What the new gate can and cannot say. Read before trusting a pass or a fail.*
+
+1. **The margin is thin.** The worst clearance of the 13 ground-truth runs
+   above (including today's) runs from **+0.014 to +0.084 m**, median +0.062.
+   The gate can fail, but an ordinary run can land within a centimetre of zero,
+   so a `LANE` FAIL near zero is not by itself a regression and three passes do
+   not show a comfortable margin. The cure is steering that keeps further from
+   the paint, not a looser gate. Nobody has started that: it is the navigator
+   and Nav2, which are protected.
+2. **Resolution is about 3 cm.** The painted half-width is looked up by nearest
+   centreline index, and `h` steps by up to 2.8 cm between neighbouring
+   indices (mean 0.6 cm; 1000 points, 2.8 to 12 cm apart). In the sweep above the
+   worst clearance went +0.004 m at a 0.07 m shift and +0.027 m at 0.08 m.
+3. **It sees samples, not the path between them.** At 16 Hz and 0.9 m/s the
+   poses are about 5 cm apart. Re-scoring today's log at lower rates gave
+   +0.014 m (16.2 Hz), +0.052 m (8.1 Hz), +0.052 m (4.1 Hz) and +0.165 m
+   (2.0 Hz): a brief crossing between samples can be missed, and the slower the
+   sampling the more can be. The earlier finding about sampling (above) stands.
+4. **Poses come from odometry through `gazebo_odom_shim`**, not from ground
+   truth. After a barrel contact they are void, as before.
 
 ### 10.10 Two guards and one forwarding fix
 

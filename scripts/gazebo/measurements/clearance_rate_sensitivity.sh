@@ -2,16 +2,22 @@
 # Re-score one autonomy pose log at decreasing sample rates, to show how much
 # of the lane-clearance margin is an artifact of sampling too slowly. Produced
 # the 2.4x figure: +0.093 m at 15.8 Hz against +0.227 m at 2 Hz.
-# Run inside the Gazebo container AFTER an autonomy_check.sh run.
+# Run inside the Gazebo container AFTER an autonomy_check.sh run, or give it a
+# saved log:   bash clearance_rate_sensitivity.sh [track_log]
+#
+# Scores through autonomy_check.sh's ANALYSE_ONLY mode, so it is the same code
+# that grades a live run. (Until 2026-10-07 this cut the Python block out of
+# autonomy_check.sh with awk and called it by hand, which broke as soon as the
+# block gained arguments.)
 set -o pipefail
 REPO=/root/ros2_ws/src/IGVC_robot_2026
-awk '/^python3 - /{f=1;next} /^PY$/{f=0} f' "$REPO/scripts/gazebo/autonomy_check.sh" > /tmp/score.py
-N=$(wc -l < /tmp/track_log.txt)
+LOG="${1:-/tmp/track_log.txt}"
+N=$(wc -l < "$LOG")
 echo "full log: $N samples"
 for STRIDE in 1 2 4 8; do
-  awk -v s=$STRIDE 'NR % s == 1' /tmp/track_log.txt > /tmp/ds.txt
+  awk -v s=$STRIDE 'NR % s == 1 % s' "$LOG" > /tmp/ds.txt
   M=$(wc -l < /tmp/ds.txt)
-  printf "\n--- every %dth sample (%d rows, ~%.1f Hz) ---\n" "$STRIDE" "$M" "$(python3 -c "print($M/52.5)")"
-  python3 /tmp/score.py "$REPO/IGVC_track_generator/track_points.json" /tmp/ds.txt 2.0 0.2311 "$REPO/scripts/gazebo" 2>&1 \
-    | grep -E "centreline deviation|lane clearance|yaw to lane|IN LANE"
+  printf "\n--- every %dth sample (%d rows) ---\n" "$STRIDE" "$M"
+  ANALYSE_ONLY=/tmp/ds.txt bash "$REPO/scripts/gazebo/autonomy_check.sh" 2>&1 \
+    | grep -E "sample rate|centreline deviation|lane clearance|yaw to lane|LANE  "
 done

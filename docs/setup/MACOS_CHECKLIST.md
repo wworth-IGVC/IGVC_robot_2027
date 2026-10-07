@@ -211,7 +211,7 @@ open Activity Monitor, Memory tab, and note the "Memory Used" figure.
 ACTUAL
 AUTONOMY CHECK      =
 distance travelled  =
-IN LANE max         =
+LANE                =
 worst clearance     =
 total time          =
 Memory Used (Activity Monitor), roughly =

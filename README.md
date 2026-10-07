@@ -90,8 +90,11 @@ Verified means a command was run and a number came back. Measured on Windows
   2026-09-29, and scores a hit rate of 0.166 at 0.25 m against a ground-truth
   ceiling of 0.676, so it is not yet good enough to steer by (report section
   20). The classical Hough lane detector runs in either image.
-- **`autonomy_check.sh`'s `IN LANE` gate is a coin flip** and that is a defect
-  in the test, not the robot. Do not raise its tolerance to make it green.
+- **`autonomy_check.sh` grades `LANE`, not distance from the centreline.**
+  Since 2026-10-07 the chassis footprint must never cross the painted
+  boundary (the old flat 2.00 m `IN LANE` limit is gone). The clearance it
+  measures is thin, 1.4 to 8.4 cm in recent runs, and good to about 3 cm, so
+  read the number as well as the verdict (`docs/GAZEBO_SETUP.md` 10.9).
 - **`/fix` is not published** and ros2_control is not in the loop.
 - **Four collision meshes have zero vertex normals and segfault the physics
   engine.** Worked around for simulation with primitive colliders under

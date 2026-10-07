@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Does the robot drive the IGVC course BY ITSELF, and does it stay in the lane?
+# Does the robot drive the IGVC course BY ITSELF, and does it stay inside the
+# painted lane?
 #
 # bringup_smoke_test.sh proves the simulator works and publishes the interface
 # contract. This proves the thing anyone actually cares about: start it, touch
@@ -14,7 +15,8 @@
 #
 # What can fail here, deliberately:
 #   * the robot never moves                      -> nav stack not closing
-#   * it moves but wanders off the centreline    -> following nothing useful
+#   * its chassis crosses the painted boundary,  -> LANE, see below
+#     or that cannot be measured
 #   * it leaves the ground slab                  -> drove off the world
 #   * it moves but covers no NEW course          -> spinning or stuck in place
 #   * it touches a barrel, or touches cannot be  -> BARRELS, see below
@@ -30,7 +32,6 @@
 # about half real time on the second.
 #
 #   DURATION=100   how long to watch, in SIMULATION seconds (default 100)
-#   TOL=2.0        max allowed distance from the lane centreline, metres
 #   STARTUP_LIMIT=300  wall-clock ceiling on waiting for the robot to start
 #                  driving itself. A ceiling, not a wait.
 #   NAV2_DELAY=25  delay Nav2's own bringup, if it loses the race with
@@ -40,6 +41,31 @@
 #                  configuration (a perception source, say). The default run
 #                  passes none, so the default meaning of this check is
 #                  unchanged: ground-truth lanes and barrels.
+#   ANALYSE_ONLY=<track_log>  do not run a simulator: score a saved run. The
+#                  same Python block that grades a live run reads the file.
+#                  Optional companions, because a live run measures them and a
+#                  file cannot: CONTACT_LOG=<file> (default: none, so BARRELS
+#                  reads NOT MEASURED), CONTACT_SENSORS=<n> (default 0), and
+#                  FINAL_Z=<metres> (default nan, so ON THE SLAB reads NOT
+#                  MEASURED). Unmeasured stays a FAIL; nothing is assumed.
+#
+# LANE (replaced IN LANE on 2026-10-07): the chassis footprint must never cross
+# the painted boundary, and a run in which that cannot be measured fails. IN
+# LANE failed a run whose distance from the centreline passed a flat 2.00 m.
+# The rules do not judge distance from the centre. They judge the line: 2026
+# rules p.11, "crossing internal lines ... will be judged an E-Stop end of run
+# with penalty"; p.12 measures the distance to where the vehicle crossed the
+# boundary edge. (A partial crossing with part of the vehicle still in bounds
+# is a 5 ft "Careless Driving" ticket on p.12, so LANE is stricter than that
+# ticket and follows p.11.) The lane is 10 to 20 ft wide, so the half-width
+# runs from 1.52 to 3.05 m, and 2.00 m was too loose where it is narrow and too
+# strict where it is wide: runs with 0.0% of samples over the paint and a
+# positive clearance failed at 2.04 m (2026-09-17) and 2.07 m (2026-10-01).
+# The centreline deviation is still printed, as a number.
+#
+# Resolution: the painted half-width is looked up by nearest centreline index,
+# which steps by up to 2.8 cm, so a clearance is good to about 3 cm. Margins
+# smaller than that are not a measurement (docs/GAZEBO_SETUP.md 10.9).
 #
 # BARRELS (added 2026-10-01): touching any barrel is a FAIL, and so is being
 # unable to tell. Two reasons. The IGVC rules penalise any touch. And a touch
@@ -53,13 +79,7 @@
 set -o pipefail
 . "$(dirname "$0")/igvc_env.sh" || exit 1
 
-# Refuse to run on top of an existing simulator. A run with two of them looks
-# plausible and means nothing - see sim_preflight.sh.
-. "$(dirname "$0")/sim_preflight.sh"
-FORCE=1 sim_preflight || exit 1
-
 DURATION="${DURATION:-100}"
-TOL="${TOL:-2.0}"
 STARTUP_LIMIT="${STARTUP_LIMIT:-300}"
 # Passed through to the launch file, which delays Nav2 to stop it racing
 # Gazebo. Its own default is 15.0 and neither check script could reach it
@@ -67,111 +87,146 @@ STARTUP_LIMIT="${STARTUP_LIMIT:-300}"
 NAV2_DELAY="${NAV2_DELAY:-}"
 TRACK="$REPO/IGVC_track_generator/track_points.json"
 
-echo "--- building ---"
-igvc_build || exit 1
-echo "    ok"
+# TOL was the old IN LANE limit. Nothing reads it now; say so rather than
+# letting a stale habit look as though it still does something.
+[ -n "${TOL:-}" ] && echo "note: TOL is no longer read; LANE fails on a negative clearance, not a distance"
 
-echo
-echo "=============================================================="
-echo " Gazebo autonomy check: does it drive the course itself?"
-echo "=============================================================="
-echo "watching for ${DURATION} s of SIMULATION time, centreline tolerance ${TOL} m"
-echo "this script never publishes /cmd_vel"
-echo
+if [ -n "${ANALYSE_ONLY:-}" ]; then
+    # Scoring a saved run. Nothing is built, started or measured, so there
+    # is no preflight either. What a live run measures and a file cannot
+    # carry comes in from the environment, and defaults to "not measured",
+    # which fails.
+    if [ ! -f "$ANALYSE_ONLY" ]; then
+        echo "FAIL: ANALYSE_ONLY=$ANALYSE_ONLY is not a file."
+        exit 1
+    fi
+    TRACK_LOG="$ANALYSE_ONLY"
+    CONTACT_LOG="${CONTACT_LOG:-}"
+    CONTACT_SENSORS="${CONTACT_SENSORS:-0}"
+    FINAL_Z="${FINAL_Z:-nan}"
+    echo
+    echo "=============================================================="
+    echo " Gazebo autonomy check: ANALYSE ONLY, no simulator was run"
+    echo "=============================================================="
+    echo "track log    : $TRACK_LOG"
+    echo "contact log  : ${CONTACT_LOG:-none} (${CONTACT_SENSORS} sensor(s) declared)"
+    echo "final height : $FINAL_Z"
+    echo
+else
+    TRACK_LOG=/tmp/track_log.txt
+    CONTACT_LOG=/tmp/contact_log.txt
 
-ARGS="headless:=true"
-[ "${RVIZ:-0}" = "1" ] && ARGS="headless:=false rviz:=true"
-[ -n "$NAV2_DELAY" ] && ARGS="$ARGS nav2_delay:=$NAV2_DELAY"
-[ -n "${LAUNCH_ARGS:-}" ] && ARGS="$ARGS $LAUNCH_ARGS" \
-    && echo "extra launch arguments: $LAUNCH_ARGS"
+    # Refuse to run on top of an existing simulator. A run with two of them looks
+    # plausible and means nothing - see sim_preflight.sh.
+    . "$(dirname "$0")/sim_preflight.sh"
+    FORCE=1 sim_preflight || exit 1
 
-ros2 launch igvc_test_bringup gazebo_nav_test.launch.py $ARGS \
-    > /tmp/autonomy.log 2>&1 &
-LP=$!
+    echo "--- building ---"
+    igvc_build || exit 1
+    echo "    ok"
 
-# Every barrel touch from launch to the end of the watch window, so a touch
-# during startup counts too. See contact_logger.py for why silence alone
-# proves nothing and what it records instead.
-python3 "$(dirname "$0")/contact_logger.py" /tmp/contact_log.txt \
-    > /tmp/contact_logger.out 2>&1 &
-CL=$!
+    echo
+    echo "=============================================================="
+    echo " Gazebo autonomy check: does it drive the course itself?"
+    echo "=============================================================="
+    echo "watching for ${DURATION} s of SIMULATION time"
+    echo "this script never publishes /cmd_vel"
+    echo
 
-# Open the watch window when the robot is DRIVING ITSELF, not after a guess.
-#
-# This was `sleep 50` until 2026-09-24: Gazebo, ten Nav2 lifecycle nodes in
-# sequence, then the navigator's first plan. How long that takes is a property
-# of the machine. The thing the window is meant to watch starts when the robot
-# moves, so wait for exactly that. If it never moves, the ceiling expires, the
-# window runs anyway, and MOVED fails loudly, which is the right outcome.
-echo "waiting for the robot to start driving itself (ceiling ${STARTUP_LIMIT}s)..."
-python3 "$(dirname "$0")/wait_ready.py" moving "$STARTUP_LIMIT" 0.3
+    ARGS="headless:=true"
+    [ "${RVIZ:-0}" = "1" ] && ARGS="headless:=false rviz:=true"
+    [ -n "$NAV2_DELAY" ] && ARGS="$ARGS nav2_delay:=$NAV2_DELAY"
+    [ -n "${LAUNCH_ARGS:-}" ] && ARGS="$ARGS $LAUNCH_ARGS" \
+        && echo "extra launch arguments: $LAUNCH_ARGS"
 
-if ! kill -0 "$LP" 2>/dev/null; then
-    kill -INT "$CL" 2>/dev/null   # sim_teardown does not match a script
-    echo "FAIL: launch died during startup."
-    tail -40 /tmp/autonomy.log
-    exit 1
-fi
+    ros2 launch igvc_test_bringup gazebo_nav_test.launch.py $ARGS \
+        > /tmp/autonomy.log 2>&1 &
+    LP=$!
 
-# Sample through a ROS subscriber, not by calling `gz model -p` in a loop.
-# That call is a gz-transport round trip per sample and took about 20 SECONDS
-# each under a loaded simulator: 18 samples in seven minutes, spaced by
-# whatever the simulator was busy doing. See pose_logger.py.
-SPAWN=$(python3 -c "
+    # Every barrel touch from launch to the end of the watch window, so a touch
+    # during startup counts too. See contact_logger.py for why silence alone
+    # proves nothing and what it records instead.
+    python3 "$(dirname "$0")/contact_logger.py" "$CONTACT_LOG" \
+        > /tmp/contact_logger.out 2>&1 &
+    CL=$!
+
+    # Open the watch window when the robot is DRIVING ITSELF, not after a guess.
+    #
+    # This was `sleep 50` until 2026-09-24: Gazebo, ten Nav2 lifecycle nodes in
+    # sequence, then the navigator's first plan. How long that takes is a property
+    # of the machine. The thing the window is meant to watch starts when the robot
+    # moves, so wait for exactly that. If it never moves, the ceiling expires, the
+    # window runs anyway, and MOVED fails loudly, which is the right outcome.
+    echo "waiting for the robot to start driving itself (ceiling ${STARTUP_LIMIT}s)..."
+    python3 "$(dirname "$0")/wait_ready.py" moving "$STARTUP_LIMIT" 0.3
+
+    if ! kill -0 "$LP" 2>/dev/null; then
+        kill -INT "$CL" 2>/dev/null   # sim_teardown does not match a script
+        echo "FAIL: launch died during startup."
+        tail -40 /tmp/autonomy.log
+        exit 1
+    fi
+
+    # Sample through a ROS subscriber, not by calling `gz model -p` in a loop.
+    # That call is a gz-transport round trip per sample and took about 20 SECONDS
+    # each under a loaded simulator: 18 samples in seven minutes, spaced by
+    # whatever the simulator was busy doing. See pose_logger.py.
+    SPAWN=$(python3 -c "
 import json
 p = json.load(open('$TRACK', encoding='utf-8'))['robot_start_pose']['position_m']
 print('%.6f %.6f' % (p['x'], p['y']))
 ")
-# How many barrel contact sensors are live, counted as Gazebo PUBLISHERS on
-# /sim/barrel_contacts (one per barrel). A world generated before 2026-10-01
-# has none, and its silence would read as "never touched a barrel". Not
-# `gz topic -l`: that lists the topic in either case, because the bridge
-# SUBSCRIBES to it (measured with both worlds, 2026-10-01).
-CONTACT_SENSORS=$(timeout 30 gz topic -i -t /sim/barrel_contacts 2>/dev/null \
-    | awk '/^Publishers/ {p = 1; next} /^Subscribers/ {p = 0}
-           p && /gz.msgs.Contacts/ {n++} END {print n + 0}')
+    # How many barrel contact sensors are live, counted as Gazebo PUBLISHERS on
+    # /sim/barrel_contacts (one per barrel). A world generated before 2026-10-01
+    # has none, and its silence would read as "never touched a barrel". Not
+    # `gz topic -l`: that lists the topic in either case, because the bridge
+    # SUBSCRIBES to it (measured with both worlds, 2026-10-01).
+    CONTACT_SENSORS=$(timeout 30 gz topic -i -t /sim/barrel_contacts 2>/dev/null \
+        | awk '/^Publishers/ {p = 1; next} /^Subscribers/ {p = 0}
+               p && /gz.msgs.Contacts/ {n++} END {print n + 0}')
 
-echo "watching for ${DURATION} s of simulation time..."
-python3 "$(dirname "$0")/pose_logger.py" /tmp/track_log.txt "$DURATION" $SPAWN "${POSE_HZ:-10.0}" sim
-kill -INT "$CL" 2>/dev/null
-wait "$CL" 2>/dev/null
-cat /tmp/contact_logger.out
+    echo "watching for ${DURATION} s of simulation time..."
+    python3 "$(dirname "$0")/pose_logger.py" "$TRACK_LOG" "$DURATION" $SPAWN "${POSE_HZ:-10.0}" sim
+    kill -INT "$CL" 2>/dev/null
+    wait "$CL" 2>/dev/null
+    cat /tmp/contact_logger.out
 
-# One ground-truth reading, for the one thing odometry cannot tell us: whether
-# the robot is still on the ground slab. Wheels spinning in mid-air produce
-# perfectly healthy odometry.
-#
-# If the read fails, say so. It used to fall back to the spawn height, which
-# made ON THE SLAB pass without anything having been measured, and on a slow
-# machine this gz-transport call is exactly the one that times out.
-timeout 60 gz model -m igvc_robot -p 2>/dev/null > /tmp/gzpose.txt
-FINAL_Z=$(python3 -c "
+    # One ground-truth reading, for the one thing odometry cannot tell us: whether
+    # the robot is still on the ground slab. Wheels spinning in mid-air produce
+    # perfectly healthy odometry.
+    #
+    # If the read fails, say so. It used to fall back to the spawn height, which
+    # made ON THE SLAB pass without anything having been measured, and on a slow
+    # machine this gz-transport call is exactly the one that times out.
+    timeout 60 gz model -m igvc_robot -p 2>/dev/null > /tmp/gzpose.txt
+    FINAL_Z=$(python3 -c "
 import re
 t = open('/tmp/gzpose.txt').read()
 m = re.search(r'\[\s*-?[0-9.]+\s+-?[0-9.]+\s+(-?[0-9.]+)\s*\]', t)
 print(m.group(1) if m else 'nan')
 ")
-echo "  final height: $FINAL_Z m (spawn was 0.2311)"
+    echo "  final height: $FINAL_Z m (spawn was 0.2311)"
+
+    echo
+    echo "--- navigator's own view ---"
+    timeout 15 ros2 topic echo --once /navigator/status std_msgs/msg/String 2>/dev/null \
+        | grep -v '^\[' | head -3 | sed 's/^/  /'
+
+    kill "$LP" 2>/dev/null
+    sleep 3
+    # Everything the launch started, not only gz sim and the bridge. See
+    # sim_teardown in sim_preflight.sh for what used to be left running.
+    sim_teardown
+fi
 
 echo
-echo "--- navigator's own view ---"
-timeout 15 ros2 topic echo --once /navigator/status std_msgs/msg/String 2>/dev/null \
-    | grep -v '^\[' | head -3 | sed 's/^/  /'
-
-kill "$LP" 2>/dev/null
-sleep 3
-# Everything the launch started, not only gz sim and the bridge. See
-# sim_teardown in sim_preflight.sh for what used to be left running.
-sim_teardown
-
-echo
-python3 - "$TRACK" /tmp/track_log.txt "$TOL" "$FINAL_Z" "$(dirname "$0")" \
-    /tmp/contact_log.txt "$CONTACT_SENSORS" <<'PY'
+python3 - "$TRACK" "$TRACK_LOG" "$FINAL_Z" "$(dirname "$0")" \
+    "$CONTACT_LOG" "$CONTACT_SENSORS" <<'PY'
 import json, math, os, sys
 
 track_file, log_file = sys.argv[1], sys.argv[2]
-tol, final_z = float(sys.argv[3]), float(sys.argv[4])
-contact_file, contact_sensors = sys.argv[6], int(sys.argv[7] or 0)
+final_z = float(sys.argv[3])
+contact_file, contact_sensors = sys.argv[5], int(sys.argv[6] or 0)
 n_barrels = len(json.load(open(track_file, encoding='utf-8')).get('obstacles_m', []))
 centre = [(p['x'], p['y'])
           for p in json.load(open(track_file, encoding='utf-8'))['centerline_m']]
@@ -222,12 +277,12 @@ def dist_to_centreline(x, y):
 # One definition of the width profile, shared with the world generator, so the
 # world the camera sees and the limit this test scores against cannot drift.
 #
-# The directory comes in as argv[5], NOT from __file__: this block is fed to
+# The directory comes in as argv[4], NOT from __file__: this block is fed to
 # python3 on stdin, where __file__ is the literal string "<stdin>" and
 # dirname(abspath(...)) silently resolves to the working directory instead.
 # That produced "NOT MEASURED (No module named 'generate_igvc_world')" on the
 # first run, which is the right failure but for the wrong reason.
-sys.path.insert(0, sys.argv[5])
+sys.path.insert(0, sys.argv[4])
 try:
     from generate_igvc_world import track_inner_edge_m
     HAVE_WIDTH = True
@@ -270,13 +325,14 @@ path_len = sum(math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
 dev_idx = [dist_to_centreline(p[0], p[1]) for p in pts]
 devs = [d for d, _ in dev_idx]
 
-# Lane-boundary compliance. REPORTED ONLY - it is deliberately not a pass
-# criterion yet, because the footprint width is still an open question and
-# tightening the gate before that is settled would fail runs for the wrong
-# reason. clearance = local painted half-width minus (deviation + robot
-# half-width). Negative means the chassis edge crossed the inner edge of the
-# paint.
+# Lane-boundary compliance, and the LANE criterion below grades it on the
+# chassis footprint (clear_true), the larger of the two and so the stricter.
+# clearance = local painted half-width minus the rotated footprint's reach
+# sideways from the centreline. Negative means a chassis corner crossed the
+# inner edge of the paint. clear_nav2 stays in the report: the repo still
+# disagrees with itself about the robot's size.
 clear_true = clear_nav2 = None
+nonfinite = 0
 yaw_missing = any(p[3] is None for p in pts)
 if HAVE_WIDTH and not yaw_missing:
     n_c = len(centre)
@@ -293,6 +349,12 @@ if HAVE_WIDTH and not yaw_missing:
             ROBOT_HALF_TRUE, ROBOT_LEN_HALF_TRUE, t)))
         clear_nav2.append(h - (d + lateral_reach(
             ROBOT_HALF_NAV2, ROBOT_LEN_HALF_NAV2, t)))
+    # A NaN yaw or position gives a NaN clearance, which min() and "< 0" both
+    # skip, so one bad sample would otherwise be invisible. Any non-finite
+    # sample means the measurement as a whole is missing.
+    nonfinite = sum(1 for c in clear_true if not math.isfinite(c))
+    if nonfinite:
+        clear_true = clear_nav2 = None
 # Odometry cannot see the robot fall off the slab - free-spinning wheels read
 # the same as driving - so the height comes from one gz ground-truth reading.
 worst_z = abs(final_z - 0.2311)
@@ -304,8 +366,8 @@ span = max(math.hypot(a[0] - b[0], a[1] - b[1]) for a in pts for b in pts)
 print('  samples              : %d' % len(pts))
 print('  distance travelled   : %.1f m' % path_len)
 print('  furthest two points  : %.1f m apart' % span)
-print('  centreline deviation : mean %.2f m, max %.2f m' %
-      (sum(devs) / len(devs), max(devs)))
+print('  centreline deviation : mean %.2f m, max %.2f m (reported, not a '
+      'criterion)' % (sum(devs) / len(devs), max(devs)))
 print('  final height         : %.3f m, %.3f off the spawn height'
       % (final_z, worst_z))
 print('  sim time covered     : %.1f s' % elapsed)
@@ -322,10 +384,13 @@ if clear_true is not None:
     print('                         (negative = footprint corner past the '
           'paint; %.1f%% of samples over the line)' % over_t)
     print('                         Rotated footprint against the LOCAL '
-          'painted half-width. REPORTED, not a pass criterion.')
+          'painted half-width. The chassis figure is the LANE criterion.')
 elif yaw_missing:
     print('  lane clearance       : NOT MEASURED (pose log has no yaw column; '
           'rerun with the current pose_logger.py)')
+elif nonfinite:
+    print('  lane clearance       : NOT MEASURED (%d sample(s) have a '
+          'non-finite pose or yaw)' % nonfinite)
 else:
     print('  lane clearance       : NOT MEASURED (%s)' % WIDTH_ERR)
 
@@ -390,13 +455,20 @@ if span < 5.0:
 else:
     print('  PROGRESS    : PASS  ranged over %.1f m of course' % span)
 
-if max(devs) > tol:
-    print('  IN LANE     : FAIL  strayed %.2f m from the centreline (limit %.2f)'
-          % (max(devs), tol))
+# LANE: no sample may have the chassis footprint past the painted boundary,
+# and a run whose clearance could not be computed fails rather than passes
+# (no yaw column, no width profile, or a non-finite sample: see above).
+# Centreline deviation is a number in the report, not a limit.
+if clear_true is None:
+    print('  LANE        : FAIL  NOT MEASURED, see lane clearance above')
+    ok = False
+elif worst_t < 0:
+    print('  LANE        : FAIL  chassis crossed the paint: worst clearance '
+          '%+.3f m, %.1f%% of samples over the line' % (worst_t, over_t))
     ok = False
 else:
-    print('  IN LANE     : PASS  never more than %.2f m off the centreline'
-          % max(devs))
+    print('  LANE        : PASS  chassis never crossed the paint, worst '
+          'clearance %+.3f m' % worst_t)
 
 if worst_z != worst_z:   # NaN: the ground-truth height could not be read
     print('  ON THE SLAB : FAIL  NOT MEASURED, gz model -p returned no pose')
@@ -423,7 +495,7 @@ sys.exit(0 if ok else 1)
 PY
 RC=$?
 
-if [ "$RC" -ne 0 ]; then
+if [ "$RC" -ne 0 ] && [ -z "${ANALYSE_ONLY:-}" ]; then
     echo
     echo "--- launch log, errors only ---"
     grep -iE "error|abort|fail" /tmp/autonomy.log \
