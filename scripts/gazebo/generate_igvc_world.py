@@ -48,6 +48,9 @@ FT = 0.3048
 LINE_WIDTH_M = 3.0 * 0.0254   # IGVC painted lines are about 3 inches
 LINE_THICK_M = 0.005          # just proud of the ground so it never z-fights
 BARREL_HEIGHT_M = 0.9
+# Every barrel's contact sensor publishes here; bridged to ROS by
+# igvc_test_bringup/config/gazebo_bridge.yaml under the same name.
+BARREL_CONTACT_TOPIC = "/sim/barrel_contacts"
 
 # ---------------------------------------------------------------------------
 # The course width is NOT constant, and getting this wrong put the camera and
@@ -297,18 +300,36 @@ def main():
 
     for i, o in enumerate(obstacles):
         r = o["radius_m"]
-        # RQ-11 is OPEN and this line is the decision. Isaac's generated
-        # field.usd gives obstacles no CollisionAPI, no RigidBodyAPI and no
-        # mass, so there the robot drives straight through them; whether that
-        # was deliberate or an oversight is unknown. Solid is the default here
-        # because an obstacle course the robot cannot hit does not test
-        # obstacle avoidance. Cylinder primitives rather than the STL meshes,
-        # because RQ-11 notes Gazebo mesh collision is expensive and it costs
+        # RQ-11, DECIDED 2026-10-01 (Liam): barrels are static and solid, not
+        # knockable. Isaac's generated field.usd gives obstacles no
+        # CollisionAPI, no RigidBodyAPI and no mass, so there the robot drives
+        # straight through them. Static is enough because the IGVC rules
+        # penalise any touch and end the run on a displacement, so a test only
+        # ever needs to know WHETHER the robot touched a barrel, never what
+        # the barrel did next; and a barrel that can move would change the
+        # course for the rest of the run. Cylinder primitives rather than the
+        # STL meshes, because Gazebo mesh collision is expensive and it costs
         # real-time factor directly. Pass --no-barrel-collision to match Isaac.
+        #
+        # Each barrel carries a contact sensor on its own collision, all
+        # publishing to one topic. On the barrel rather than the robot because
+        # a sensor watches one named collision, and every robot collision is
+        # lumped into base_link (chassis, three camera bodies, lidar, antenna)
+        # plus the wheels and caster: from the barrel side, any part of the
+        # robot touching it is reported. Static against static (barrel and
+        # ground) is never computed, so the topic is silent until something
+        # touches a barrel. autonomy_check.sh counts it via contact_logger.py.
         collision = "" if not args.barrel_collision else f"""
         <collision name="collision">
           <geometry><cylinder><radius>{r:.4f}</radius><length>{BARREL_HEIGHT_M}</length></cylinder></geometry>
-        </collision>"""
+        </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>{BARREL_CONTACT_TOPIC}</topic>
+          </contact>
+        </sensor>"""
         models.append(
             f"""    <model name="barrel_{i}">
       <static>true</static>
@@ -340,10 +361,11 @@ def main():
                 BOTH diffuseColor and emissiveColor so lane lines stay visible
                 regardless of scene lighting. Dropping it would make every
                 lane-detection result depend on the sun angle.
-  Barrels     : {len(obstacles)}, collision {'ON' if args.barrel_collision else 'OFF'} - RQ-11 is OPEN.
-                Isaac's generated field.usd gives obstacles NO collision at all,
-                so there the robot drives through them. Solid is the default
-                here; the no-barrel-collision flag matches Isaac instead.
+  Barrels     : {len(obstacles)}, collision {'ON' if args.barrel_collision else 'OFF'} - RQ-11 decided 2026-10-01:
+                static and solid. Isaac's generated field.usd gives obstacles
+                NO collision at all, so there the robot drives through them;
+                the no-barrel-collision flag matches Isaac instead. With
+                collision on, each barrel reports touches on {BARREL_CONTACT_TOPIC}.
                 (An XML comment cannot contain a double hyphen, so the flag is
                 named without its leading dashes.)
   Robot start : x={start['position_m']['x']:.4f} y={start['position_m']['y']:.4f} yaw={start['yaw_rad']:.6f} rad ({start['yaw_deg']:.1f} deg)
@@ -371,6 +393,8 @@ def main():
     </plugin>
     <plugin filename="gz-sim-imu-system"
             name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-contact-system"
+            name="gz::sim::systems::Contact"/>
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>

@@ -1,6 +1,6 @@
 # Gazebo simulator: what is done, and what is next
 
-**Updated 2026-09-29.** A single page for "where is the simulator up to".
+**Updated 2026-10-01.** A single page for "where is the simulator up to".
 `GAZEBO_SETUP.md` is the detail behind every line here.
 
 Priorities: **P0** blocks other work · **P1** needed before competition ·
@@ -123,6 +123,18 @@ Verified means a command was run and a number came back. Nothing below is
 - [x] `sim_preflight.sh`, refuses to start a second simulator on top of a
       first, because two on one ROS domain produce results that look real and
       are worthless.
+- [x] **Barrel contacts are counted** *(2026-10-01)*. Every barrel carries a
+      contact sensor; `autonomy_check.sh` reports each touch (barrel, robot
+      part, simulation time) and prints NOT MEASURED rather than "none" when
+      the chain is not live. `measurements/barrel_contact_check.sh` drives
+      into barrel 0 (1175 contact messages) and down an open lane (0).
+      **`BARRELS` is a pass criterion**: a touch fails, and so does being
+      unable to measure one, because a touch voids every other reading (they
+      come from odometry, which kept counting while a pinned robot's wheels
+      slipped: a "normal lap" while ground truth put the robot 14.9 m from
+      where odometry said). First default run: **no contact**, so the
+      ground-truth robot's barrel avoidance is now measured, not inferred.
+      `GAZEBO_SETUP.md` 10.11.
 
 ### Documentation
 
@@ -465,9 +477,13 @@ Verified means a command was run and a number came back. Nothing below is
       depends on which GPUs a laptop has.
 - [ ] **Verify `igvc_gazebo_linux` on a real Linux machine.** Written, never
       run. Delete the caveat in `DOCKER_CHANGES.md` 13.4 when it works.
-- [ ] **TEAM: decide RQ-11, do barrels tip?** Gazebo has them solid and
-      `static`; Isaac's generated field gives them **no collision at all**.
-      The two simulators disagree right now. Real IGVC barrels tip.
+- [x] **RQ-11 decided 2026-10-01 (Liam): barrels are static and solid, not
+      knockable.** The rules penalise any touch and end the run on a crash or
+      a displaced barrel, so the simulator only needs to know whether the
+      robot touched one, and a barrel that could move would change the course
+      mid-run. Isaac's generated field still gives them **no collision at
+      all**; `--no-barrel-collision` reproduces that. Touches are now counted
+      (`GAZEBO_SETUP.md` 10.11).
 - [ ] **Publish `/fix`.** The last unbridged row of the contract. Needs
       `<spherical_coordinates>` in the world first. Nothing consumes it today.
 
@@ -486,8 +502,10 @@ Verified means a command was run and a number came back. Nothing below is
 - [ ] **Repair the four zero-normal collision meshes**, or decide the
       primitive colliders are permanent for simulation. They are still broken
       for Isaac and MoveIt.
-- [ ] **Run `sim_cameras:=all` against the real course.** The three-camera
-      budget was measured on a bare test scene, not this world.
+- [x] ~~**Run `sim_cameras:=all` against the real course.**~~ **Not needed,
+      2026-10-01: the team is moving to one camera, the centre (front) one**
+      (Liam), which is already the default `sim_cameras:=front`. The
+      three-camera option stays in the description for the 2026 robot.
 - [ ] **Does YOLOPv2 tolerate 640x360?** The camera budget forces that
       resolution. If perception needs 720p, three cameras are not viable on
       this hardware - which is also the AGX-versus-Orin-Nano argument.

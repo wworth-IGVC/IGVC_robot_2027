@@ -1432,3 +1432,73 @@ replaces `plugins` with `["lane_layer", "inflation_layer"]` in both costmaps,
 so the clouds have never reached `obstacle_layer` at all. That is a new system
 under test, not a bug fix. Expect autonomy behaviour to change and re-baseline
 all three gates afterwards.
+
+### 10.11 Barrel contacts, measured, and RQ-11 decided (2026-10-01)
+
+**`autonomy_check.sh` could not see a barrel.** It read only the centreline
+and the spawn pose from `track_points.json`, and it samples the robot's pose
+from `/odom`, which a wheel slipping against a barrel corrupts at exactly the
+moment that matters. Every claim that the robot "avoids the barrels" was
+therefore inferred from where the ground-truth planner put them, never
+measured. Before any perception goes in the loop, a touch has to be countable.
+
+**RQ-11 is decided: barrels are static and solid** (Liam, 2026-10-01). The
+IGVC rules penalise any touch ("Sideswipe/Obstacle Touch", 5 ft, the run
+continues) and end the run on a crash or a displaced barrel (10 ft), so a test
+only ever needs to know *whether* the robot touched a barrel, never what the
+barrel did next. A barrel that can move would also change the course for the
+rest of the run. Isaac's generated `field.usd` gives obstacles no collision at
+all; `--no-barrel-collision` still reproduces that.
+
+**How it is measured.** Each barrel in `igvc_course.sdf` carries a `contact`
+sensor on its own collision (`generate_igvc_world.py`), all publishing to
+`/sim/barrel_contacts`, bridged as `ros_gz_interfaces/msg/Contacts`
+(`gazebo_bridge.yaml`), and the world loads `gz::sim::systems::Contact`. The
+sensors are on the barrels rather than the robot because a contact sensor
+watches one named collision, and every robot collision is lumped into
+`base_link` (chassis, three camera bodies, lidar, antenna) plus the wheels and
+caster; from the barrel side any part of the robot is reported. Static against
+static (barrel and ground) is never computed, so the topic is silent until
+something touches a barrel. `contact_logger.py` records each touch with its
+simulation time, the barrel and the robot part.
+
+**Silence is the dangerous result**, because a broken chain produces it too.
+So `autonomy_check.sh` prints "none" only when Gazebo has contact sensors
+publishing on `/sim/barrel_contacts` (counted as publishers with
+`gz topic -i`, one per barrel) and the bridge offered the topic in ROS;
+otherwise it prints NOT MEASURED and says which link is missing. The first
+version of this guard used `gz topic -l`, and its negative control (the world
+from `main`, which has no sensors) **passed it**: the topic is listed either
+way, because the bridge *subscribes* to it. `gz topic -i` shows eight
+publishers with the sensors and "No publishers" without.
+
+**The test that can fail**, `scripts/gazebo/measurements/barrel_contact_check.sh`:
+
+| Arm | Setup | Required | 2026-10-01 |
+| --- | --- | --- | --- |
+| HIT | spawn 1.2 m from barrel 0's centre facing it, drive 0.3 m/s for 5 s | barrel 0 reported | **1175 contact messages, barrel_0, by the chassis**; the robot stopped with its front face on the barrel's surface (x 5.322 m + 0.485 m = 5.807 m, the barrel's edge) |
+| CLEAR | course start, the same command down the open lane | nothing reported | **0** |
+
+A mistake it caught on the way: the first version put `<topic>` on the
+`<sensor>`, which the Contact system ignores; it reads `<contact><topic>`. The
+sensors then published under default names such as
+`/world/igvc_course/model/barrel_0/link/link/sensor/contact/contact`, the
+chosen topic stayed silent, and the HIT arm reported nothing while the robot
+sat against the barrel. That is the failure this test exists for.
+
+**`BARRELS` is a pass criterion of the default check**: a touch FAILS, and so
+does being unable to measure touches. It was first added as reported only,
+to leave the gate's meaning alone, and was changed the same day by what it
+found. **A touch voids every other reading**, because they come from
+odometry and odometry keeps counting while the wheels slip against a static
+barrel. Measured (section 10.12): with the barrels removed from the planner's
+grid, the robot drove into barrel 4 at 39 s and stayed pinned there to the
+end of the run, and the check read a normal lap, 89.4 m, MOVED, PROGRESS and
+IN LANE all PASS, while `gz model -p` put the robot 0.79 m from the barrel's
+centre and **14.9 m from where odometry said**. The old gate passed a pinned
+robot. A correct run loses nothing: the first default run with the sensors
+(2026-10-01) touched no barrel, 89.9 m, worst lane clearance +0.081 m. So the
+ground-truth robot's barrel avoidance is now measured, not assumed.
+
+`autonomy_check.sh` also takes `LAUNCH_ARGS` now, appended to the launch, so
+the same check runs on other configurations (section 10.12).

@@ -230,6 +230,19 @@
   gz_type_name: "gz.msgs.PointCloudPacked"
   direction: GZ_TO_ROS
 
+# ── test instrumentation, NOT part of the 3.7 contract ──────────────────────
+# Every barrel in igvc_course.sdf carries a contact sensor on its collision,
+# all publishing here (generate_igvc_world.py). Silent until something touches
+# a barrel. The /sim/ prefix marks simulator truth that the real robot has no
+# equivalent of, so nothing in the 2026 stack may subscribe to it.
+# autonomy_check.sh counts it through contact_logger.py;
+# measurements/barrel_contact_check.sh proves the chain can report a touch.
+- ros_topic_name: "/sim/barrel_contacts"
+  gz_topic_name: "/sim/barrel_contacts"
+  ros_type_name: "ros_gz_interfaces/msg/Contacts"
+  gz_type_name: "gz.msgs.Contacts"
+  direction: GZ_TO_ROS
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  STILL MISSING FROM THE 3.7 CONTRACT, deliberately
 #

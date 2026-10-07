@@ -13,10 +13,11 @@
                 BOTH diffuseColor and emissiveColor so lane lines stay visible
                 regardless of scene lighting. Dropping it would make every
                 lane-detection result depend on the sun angle.
-  Barrels     : 8, collision ON - RQ-11 is OPEN.
-                Isaac's generated field.usd gives obstacles NO collision at all,
-                so there the robot drives through them. Solid is the default
-                here; the no-barrel-collision flag matches Isaac instead.
+  Barrels     : 8, collision ON - RQ-11 decided 2026-10-01:
+                static and solid. Isaac's generated field.usd gives obstacles
+                NO collision at all, so there the robot drives through them;
+                the no-barrel-collision flag matches Isaac instead. With
+                collision on, each barrel reports touches on /sim/barrel_contacts.
                 (An XML comment cannot contain a double hyphen, so the flag is
                 named without its leading dashes.)
   Robot start : x=-11.8816 y=0.4516 yaw=2.356194 rad (135.0 deg)
@@ -44,6 +45,8 @@
     </plugin>
     <plugin filename="gz-sim-imu-system"
             name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-contact-system"
+            name="gz::sim::systems::Contact"/>
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
@@ -3776,6 +3779,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.3444</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.3444</radius><length>0.9</length></cylinder></geometry>
           <material>
@@ -3792,6 +3802,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.3458</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.3458</radius><length>0.9</length></cylinder></geometry>
           <material>
@@ -3808,6 +3825,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.2930</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.2930</radius><length>0.9</length></cylinder></geometry>
           <material>
@@ -3824,6 +3848,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.2770</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.2770</radius><length>0.9</length></cylinder></geometry>
           <material>
@@ -3840,6 +3871,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.3079</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.3079</radius><length>0.9</length></cylinder></geometry>
           <material>
@@ -3856,6 +3894,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.3030</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.3030</radius><length>0.9</length></cylinder></geometry>
           <material>
@@ -3872,6 +3917,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.3261</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.3261</radius><length>0.9</length></cylinder></geometry>
           <material>
@@ -3888,6 +3940,13 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.3051</radius><length>0.9</length></cylinder></geometry>
         </collision>
+        <sensor name="contact" type="contact">
+          <always_on>1</always_on>
+          <contact>
+            <collision>collision</collision>
+            <topic>/sim/barrel_contacts</topic>
+          </contact>
+        </sensor>
         <visual name="visual">
           <geometry><cylinder><radius>0.3051</radius><length>0.9</length></cylinder></geometry>
           <material>
