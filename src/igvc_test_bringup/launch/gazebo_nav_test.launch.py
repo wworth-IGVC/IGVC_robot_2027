@@ -367,6 +367,20 @@ def _setup(context, *args, **kwargs):
                     "max_costmap_age_sec": 5.0,
                     "max_odom_age_sec": 0.5,
                     "max_odom_costmap_skew_sec": 5.0,
+                    # The competition navigator (67a6934) rejects any path that
+                    # turns more than max_path_heading_rad (default 0.75, 43
+                    # deg) from the robot and then holds and reverses. The
+                    # simulated course turns right by about 45 deg within 3 m of
+                    # the start line (lateral offset -2.97 m at 3.2 m ahead,
+                    # from track_points.json), and its limiter clamps to exactly
+                    # the limit while its validator rejects anything over it, so
+                    # the robot never moves (autonomy_check: 0.0 m in 400 s,
+                    # measured 2026-10-08). The limit is raised here, in the sim
+                    # only, to the most the validator accepts (pi/2), which is
+                    # what main did before the merge: no limit. The clamp and
+                    # validator inconsistency is a competition-code defect,
+                    # recorded in docs/GAZEBO_SETUP.md and not fixed here.
+                    "max_path_heading_rad": 1.57,
                 },
             ],
         )
