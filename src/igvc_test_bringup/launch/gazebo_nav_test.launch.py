@@ -91,6 +91,13 @@ Arguments
                    robot should hit any in its path (a negative control)
         nav2_scan  as none, plus Nav2's obstacle_layer on /scan alone, merged
                    from config/gazebo_nav_test_nav2_obstacle_scan.yaml
+        lidar_map  as none, plus the competition's lidar_obstacle_costmap_node
+                   (67a6934) on /scan, publishing /lidar_obstacle_map in odom,
+                   which the competition navigator overlays onto the lane
+                   region it searches (navigator_config.yaml
+                   obstacle_map_topic). The node's parameters and the lidar
+                   mount are the ones igvc_fused_drive.launch.py uses, the
+                   mount read from the URDF by that file's own function.
 """
 
 import json
@@ -127,7 +134,7 @@ def _find(rel_from_repo: str, pkg: str, rel_from_share: str) -> str:
 
 
 # ── obstacle_source: where the planner's barrels come from ───────────────────
-OBSTACLE_SOURCES = ("gt", "none", "nav2_scan")
+OBSTACLE_SOURCES = ("gt", "none", "nav2_scan", "lidar_map")
 
 
 def _track_without_obstacles(track_file: str) -> str:
@@ -173,6 +180,28 @@ def _merged_overrides(base_file: str, extra_file: str) -> str:
     with open(out, "w", encoding="utf-8") as fh:
         yaml.safe_dump(_merge(base, extra), fh, default_flow_style=None)
     return out
+
+
+def _branch_lidar_mount() -> tuple:
+    """The top lidar's (x, y, yaw) the competition computes from the URDF.
+
+    igvc_fused_drive.launch.py reads test_robot.urdf.xacro for the rplidar_c1
+    macro's origin and hands it to lidar_obstacle_costmap_node. This calls that
+    file's own function rather than copying it, so the simulator cannot drift
+    from the way the competition stack gets its mount. Importing the launch
+    file only defines functions; generate_launch_description is not called.
+    """
+    import importlib.util
+
+    path = _find(
+        os.path.join("src", "igvc_test_bringup", "launch",
+                     "igvc_fused_drive.launch.py"),
+        "igvc_test_bringup",
+        os.path.join("launch", "igvc_fused_drive.launch.py"))
+    spec = importlib.util.spec_from_file_location("igvc_fused_drive_launch", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._top_lidar_mount_from_urdf()
 
 
 def _setup(context, *args, **kwargs):
@@ -300,6 +329,47 @@ def _setup(context, *args, **kwargs):
 
     actions = [sim, gt_node, gt_bridge_node, localization_node]
 
+    # ── obstacles from the lidar, the way the 2026 robot got them ────────────
+    #
+    # Parameters are igvc_fused_drive.launch.py:246-275, unchanged except that
+    # the odometry topic is this launch's. The grid is in odom, which in the
+    # simulator is world-aligned with its origin at the spawn point
+    # (gazebo_odom_shim), and the course lies well inside its 100 x 100 m.
+    lidar_mount = None
+    if obstacle_source == "lidar_map":
+        lidar_mount = _branch_lidar_mount()
+        actions.append(Node(
+            package="igvc_lane_detection",
+            executable="lidar_obstacle_costmap_node",
+            name="lidar_obstacle_costmap_node",
+            output="screen",
+            parameters=[{
+                "use_sim_time": use_sim_time,
+                "frame_id": "odom",
+                "scan_topic": "/scan",
+                "output_topic": "/lidar_obstacle_map",
+                "use_odom_pose": True,
+                "odom_topic": odom_topic,
+                "max_odom_age_sec": 2.0,
+                "lidar_x_m": lidar_mount[0],
+                "lidar_y_m": lidar_mount[1],
+                "lidar_yaw_rad": lidar_mount[2],
+                "width_m": 100.0,
+                "height_m": 100.0,
+                "origin_x": -50.0,
+                "origin_y": -50.0,
+                "resolution": 0.10,
+                "min_range_m": 0.15,
+                "max_range_m": 10.0,
+                "hit_weight": 5.0,
+                "free_weight": 0.5,
+                "hit_threshold": 4.0,
+                "free_threshold": 3.0,
+                "inflate_radius_m": 0.20,
+                "publish_hz": 5.0,
+            }],
+        ))
+
     # ── Nav2 and the navigator: the part that makes the robot drive itself ───
     use_nav2 = cfg("nav2").lower() in ("true", "1", "yes")
     nav2_overrides = _find(
@@ -410,6 +480,9 @@ def _setup(context, *args, **kwargs):
     print("  nav2          : %s" % ("on" if use_nav2 else "off"))
     print("  obstacles     : %s (planner track file %s; nav2 overrides %s)"
           % (obstacle_source, bridge_track, nav2_overrides))
+    if lidar_mount is not None:
+        print("  lidar mount   : x %.3f y %.3f yaw %.4f (from the URDF, as "
+              "igvc_fused_drive.launch.py reads it)" % lidar_mount)
 
     return actions
 
@@ -461,8 +534,9 @@ def generate_launch_description():
             description="Where the planner's barrels come from: gt (stamped "
                         "from track_points.json, the default), none (not at "
                         "all; a negative control), nav2_scan (Nav2's "
-                        "obstacle_layer on /scan alone). The barrels stay in "
-                        "the world in every case."),
+                        "obstacle_layer on /scan alone), lidar_map (the "
+                        "competition's lidar_obstacle_costmap_node). The "
+                        "barrels stay in the world in every case."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),

@@ -1892,3 +1892,49 @@ not been approved. The simulator now cannot see it.
 **Not yet in the loop:** the branch's lidar obstacle map (`/lidar_obstacle_map`)
 is not started by the simulator, so the navigator's overlay of it is inert and
 barrels still come from `track_points.json`. That is the next section's work.
+
+### 10.16 Obstacles from the lidar map, in the loop: measured, not yet passing (2026-10-08)
+
+`gazebo_nav_test.launch.py obstacle_source:=lidar_map` removes the barrels from
+the planner's ground-truth grid (as `none` does) and starts the competition's
+`lidar_obstacle_costmap_node` with exactly the parameters
+`igvc_fused_drive.launch.py:246-275` uses: `/scan` to `/lidar_obstacle_map` in
+`odom`, 100 x 100 m at 0.10 m, inflation 0.20 m. The lidar mount comes from that
+launch file's own `_top_lidar_mount_from_urdf()` (imported, not copied): x 0.345,
+y 0, yaw 0, which equals TF `base_link -> top_rplidar_c1_link` exactly. The
+merged navigator overlays the map's lethal cells onto the region it searches
+(`navigator_config.yaml` `obstacle_map_topic: /lidar_obstacle_map`).
+
+**Measured, one simulator, `autonomy_check.sh` with `LAUNCH_ARGS`:**
+
+| Run | Barrels | MOVED / PROGRESS / ON THE SLAB | `LANE` | Map live (a counter, 30 s) |
+| --- | --- | --- | --- | --- |
+| C3 `lidar_map` 1 | **PASS**, no contact (8 sensors) | PASS, 87.4 m | **FAIL**, -0.390 m, 2.6% over | 1 publisher, 63 msgs |
+| C3 `lidar_map` 2 | **PASS** | PASS, 86.8 m | **FAIL**, -0.696 m, 5.4% over | 1 publisher, 67 msgs |
+| C3 `lidar_map` 3 | **PASS** | PASS, 87.0 m | **FAIL**, -0.144 m, 1.8% over | 1 publisher, 73 msgs |
+| C1 `none` (negative control, same session) | **FAIL**: touched `barrel_4` at 35.3 s, about 76 s in contact | readings void after 35.3 s | (void) | n/a |
+
+So the competition's lidar obstacle path, in the loop, **does avoid every
+barrel** (the same robot without it pins on barrel 4), **but it crosses the
+paint** while doing so. Where (`scripts/gazebo/measurements/lane_crossings.py`,
+the gate's own arithmetic, per span of negative clearance):
+every run squeezes between barrel 4 and the right-hand line at 34 to 37 s of
+sim time, 0.24 to 0.31 m from the barrel's surface and 0.07 to 0.14 m over the
+paint; runs 1 and 2 also cross once more on the left (near barrel 3, -0.390 m;
+near barrel 1, -0.696 m). With barrels from ground truth the same navigator
+never crossed the paint in four laps (worst clearance +0.100 to +0.173 m,
+10.15), so the difference is the lidar map, not the navigator alone.
+
+**Not tuned, by rule.** Candidate causes, each with the test that separates it,
+for the next session: the map's 0.20 m inflation is smaller than the
+ground-truth bridge's, so the gap beside barrel 4 looks passable (vary
+`inflate_radius_m` in the sim only and see whether the robot chooses the other
+side); the map decays and ray-clears, so a barrel seen side-on may thin out
+(count lethal cells around barrel 4 while passing it); and the navigator does
+not count the painted lines as harder than barrels (compare the costs it
+assigns). All three touch competition code or its parameters, which this task
+does not change.
+
+Reproduce: `LAUNCH_ARGS="obstacle_source:=lidar_map" bash
+scripts/gazebo/autonomy_check.sh`. Evidence:
+`local-notes/oneshot_evidence/task4_lidar_map_2026-10-08/`.

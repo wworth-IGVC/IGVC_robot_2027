@@ -247,6 +247,12 @@ Verified means a command was run and a number came back. Nothing below is
       unchanged submodule, so `main` has the same property; the gates do not
       build it. Add it to `docker/Dockerfile.gazebo-jazzy` only if the team wants
       "build every package" to work in that image.
+- [ ] **Obstacles from the lidar map are in the loop but cross the paint**
+      (`obstacle_source:=lidar_map`, 2026-10-08, `GAZEBO_SETUP.md` 10.16): 3 of 3
+      runs touch no barrel (the `none` control pins on barrel 4), and 3 of 3 FAIL
+      `LANE` (-0.144 to -0.696 m), each squeezing between barrel 4 and the right
+      line. Next: separate the causes listed there (inflation, decay, line cost);
+      any fix is competition code or parameters, so it needs Liam's approval.
 - [ ] **The robot USD and the URDF now disagree further** (new front ZED 2i link,
       lidar and mast, side cameras at 45 degrees; research pass 3, RQ-09). Which
       is the real robot is a tape-measure question for Aidan.
