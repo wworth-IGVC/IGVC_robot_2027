@@ -18,11 +18,19 @@ final waypoint reached, after which the planner publishes
 
 GPS ↔ odom conversion
 ---------------------
-We treat the *first valid GPS fix* received as the origin of the
-ENU frame, which (by design — see ``static_map_to_odom`` in
-``lane_segmentation.launch.py``) coincides with the odom origin.
-Waypoint lat/lon → (x, y) is then ``gps_to_map`` (WGS-84 flat-earth)
-into the ``odom`` frame.
+Waypoints are entered as latitude/longitude before each run, in one file
+(``config/mission_planner_config.yaml``; ``docs/GPS_WAYPOINTS.md``).  The planner
+watches ``/fix`` and waits until the robot is within
+``gps_start_match_radius_m`` metres of the ``start`` waypoint, for
+``gps_start_match_required_fixes`` fixes in a row.  (Until 2026-10-08 this was a
+match of the first three DIGITS of latitude and longitude, which accepted a fix
+6 km away and rejected one 20 cm away across a digit boundary.)  The first such
+fix becomes the ENU origin and is paired with the robot's odom position at that
+moment, so a waypoint east ``e`` and north ``n`` of it lands at odom
+``(x0 + e, y0 + n)`` with ``(x0, y0)`` the robot's odom position then.  Before
+2026-10-08 the odom origin was assumed to be the fix, which is only true if the
+robot has not moved since boot.  Lat/lon → east/north is ``gps_to_map``
+(WGS-84 flat-earth).  The odom axes are still assumed to point east and north.
 
 Topics
 ------
@@ -147,8 +155,13 @@ class MissionPlannerNode(Node):
         self._arrival_tolerance  = float(p('arrival_tolerance_m', 1.0).value)
         self._gps_start_match_enabled = bool(
             p('gps_start_match_enabled', True).value)
-        self._gps_start_match_digits = max(
-            1, int(p('gps_start_match_digits', 3).value))
+        # Metres.  The robot has "reached" the start waypoint when a valid fix
+        # is this close to it.  GPS is good to a few metres, and the waypoint
+        # marker is judged at 2 m (2026 rules p.8), so 10 m is generous on
+        # purpose: the mission should start as the lane navigator brings the
+        # robot to the entrance, not when it is exactly on it.
+        self._gps_start_match_radius_m = float(
+            p('gps_start_match_radius_m', 10.0).value)
         self._gps_start_match_required_fixes = max(
             1, int(p('gps_start_match_required_fixes', 1).value))
 
@@ -203,6 +216,9 @@ class MissionPlannerNode(Node):
         self._state = STATE_IDLE
         self._origin_lat: Optional[float] = None
         self._origin_lon: Optional[float] = None
+        # The robot's odom position when the origin was anchored.  (0, 0) for a
+        # pinned origin_lat/origin_lon, which assumes odom started there.
+        self._origin_xy: tuple = (0.0, 0.0)
         self._gps_start_match_count = 0
         self._gps_start_area_confirmed = not self._gps_start_match_enabled
         if (math.isfinite(self._origin_lat_param)
@@ -280,27 +296,34 @@ class MissionPlannerNode(Node):
         self.get_logger().info(
             f'mission_planner_node: {len(self._waypoints)} waypoints '
             f'(kinds={[w.kind for w in self._waypoints]}), '
-            f'auto_start={self._auto_start}, frame={self._frame}')
+            f'auto_start={self._auto_start}, frame={self._frame}, start gate '
+            f'{self._gps_start_match_radius_m:.0f} m')
+        if self._gps_start_match_enabled and self._start_is_placeholder():
+            self.get_logger().error(
+                'mission_planner: the start waypoint is (0, 0), the placeholder '
+                'in mission_planner_config.yaml.  The mission cannot start '
+                'until the day\'s waypoints are entered (docs/GPS_WAYPOINTS.md).')
 
     # ── Origin / waypoint setup ───────────────────────────────────────────
 
     def _anchor_waypoints(self) -> None:
         assert self._origin_lat is not None and self._origin_lon is not None
+        ox, oy = self._origin_xy
         for wp in self._waypoints:
-            wp.x, wp.y = gps_to_map(
+            east, north = gps_to_map(
                 wp.lat, wp.lon, self._origin_lat, self._origin_lon)
+            wp.x, wp.y = ox + east, oy + north
         self.get_logger().info(
             f'mission_planner: origin anchored at '
-            f'({self._origin_lat:.6f}, {self._origin_lon:.6f}); '
+            f'({self._origin_lat:.6f}, {self._origin_lon:.6f}) = odom '
+            f'({ox:.2f}, {oy:.2f}); '
             + ', '.join(f'wp{i}({w.kind})=({w.x:.1f},{w.y:.1f})'
                         for i, w in enumerate(self._waypoints)))
         self._publish_virtual_obstacles()
 
-    @staticmethod
-    def _coord_prefix(value: float, digits: int) -> str:
-        sign = '-' if value < 0.0 else '+'
-        numeric = ''.join(ch for ch in f'{abs(value):.8f}' if ch.isdigit())
-        return sign + numeric[:max(1, digits)]
+    def _start_is_placeholder(self) -> bool:
+        ref = self._start_reference_waypoint()
+        return ref is not None and ref.lat == 0.0 and ref.lon == 0.0
 
     def _start_reference_waypoint(self) -> Optional[_Waypoint]:
         for wp in self._waypoints:
@@ -319,18 +342,23 @@ class MissionPlannerNode(Node):
                 throttle_duration_sec=5.0)
             return False
 
-        digits = self._gps_start_match_digits
-        current_lat_prefix = self._coord_prefix(lat, digits)
-        current_lon_prefix = self._coord_prefix(lon, digits)
-        goal_lat_prefix = self._coord_prefix(ref.lat, digits)
-        goal_lon_prefix = self._coord_prefix(ref.lon, digits)
-        if (current_lat_prefix != goal_lat_prefix
-                or current_lon_prefix != goal_lon_prefix):
+        if self._start_is_placeholder():
             self._gps_start_match_count = 0
             self.get_logger().warn(
-                'mission_planner: ignoring GPS fix until current lat/lon '
-                f'prefixes ({current_lat_prefix}, {current_lon_prefix}) match '
-                f'start waypoint prefixes ({goal_lat_prefix}, {goal_lon_prefix})',
+                'mission_planner: the start waypoint is (0, 0), the placeholder '
+                'in mission_planner_config.yaml; enter the day\'s waypoints '
+                '(docs/GPS_WAYPOINTS.md).  Ignoring GPS fixes.',
+                throttle_duration_sec=5.0)
+            return False
+
+        east, north = gps_to_map(lat, lon, ref.lat, ref.lon)
+        dist = math.hypot(east, north)
+        if dist > self._gps_start_match_radius_m:
+            self._gps_start_match_count = 0
+            self.get_logger().info(
+                f'mission_planner: waiting for the start waypoint: the robot '
+                f'is {dist:.0f} m away, the mission starts within '
+                f'{self._gps_start_match_radius_m:.0f} m',
                 throttle_duration_sec=5.0)
             return False
 
@@ -358,8 +386,14 @@ class MissionPlannerNode(Node):
             self._gps_start_area_confirmed = True
 
         if self._origin_lat is None:
+            if self._robot_xy is None:
+                self.get_logger().warn(
+                    'mission_planner: at the start waypoint but no odometry '
+                    'yet; waiting to anchor', throttle_duration_sec=5.0)
+                return
             self._origin_lat = msg.latitude
             self._origin_lon = msg.longitude
+            self._origin_xy = self._robot_xy
             self._anchor_waypoints()
 
     def _on_odom(self, msg: Odometry) -> None:

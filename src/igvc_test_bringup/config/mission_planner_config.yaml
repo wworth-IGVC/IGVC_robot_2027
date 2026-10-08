@@ -15,15 +15,22 @@ mission_planner_node:
     origin_lat: .nan
     origin_lon: .nan
     arrival_tolerance_m: 1.0
-    # Bad receiver startup fixes can be wildly wrong.  Do not anchor the
-    # GPS->odom mission frame, stamp virtual obstacles, or start Nav2 until
-    # the current fix is in the same coarse area as the configured start goal.
+    # The mission starts by itself when the robot REACHES the start waypoint:
+    # the first fix within gps_start_match_radius_m metres of it (for
+    # gps_start_match_required_fixes fixes in a row) anchors the GPS->odom
+    # frame, stamps the virtual obstacles and starts Nav2.  Bad receiver
+    # start-up fixes, which can be kilometres off, are ignored until then.
+    # (Until 2026-10-08 this matched the first three digits of latitude and
+    # longitude instead of a distance.)
     gps_start_match_enabled: true
-    gps_start_match_digits: 3
+    gps_start_match_radius_m: 10.0
     gps_start_match_required_fixes: 1
-    # Four-waypoint AutoNav mission.  Replace these with the real survey
-    # values before each run; the second and third waypoints are the
-    # virtual obstacles to avoid.
+    # ENTER THE DAY'S WAYPOINTS HERE, in this one file, before each run, in
+    # degrees (decimal, south and west negative): see docs/GPS_WAYPOINTS.md.
+    # The shipped (0, 0) is a placeholder and the planner says so loudly and
+    # will not start until it is replaced.  Waypoint 1 is the start (mission
+    # entry); the second and third are virtual obstacles to avoid; the last is
+    # the end, a real Nav2 goal.
     waypoint_lats: [0.0, 0.0, 0.0, 0.0]
     waypoint_lons: [0.0, 0.0, 0.0, 0.0]
     waypoint_kinds: ["start", "obstacle", "obstacle", "end"]

@@ -1989,3 +1989,37 @@ separates it:
 
 Evidence: `local-notes/oneshot_evidence/task6_comp_yolopv2_2026-10-08/`;
 harness `local-notes/oneshot_evidence/scripts/yolo_eval2.sh`.
+
+### 10.18 GPS: making the 2026 mission planner work as intended (2026-10-08)
+
+GPS failed completely at the 2026 competition. Liam's instruction: take what it
+was evidently meant to do as the goal, fix one link at a time, each with a
+simulator test that fails on the old code first. The intended function: the
+waypoints are entered before the run, the robot lane-follows, and the GPS
+mission starts **by itself** when the robot reaches the start waypoint. Where
+the waypoints go: `docs/GPS_WAYPOINTS.md`.
+
+**(a) The start-area gate (2026-10-08).** The planner compared the first three
+DIGITS of latitude and longitude with the start waypoint's: anything inside a
+tenth of a degree (about 11 km) matched, a fix 20 cm away across a digit
+boundary did not, and the shipped placeholder waypoints `(0, 0)` rejected every
+real fix with a message about "prefixes (+424, -831)". It also took the first
+fix as the odom origin, true only if the robot had not moved since boot. Now
+the gate is a distance (`gps_start_match_radius_m`, 10 m), the anchor pairs the
+fix with the robot's odom position at that moment, and placeholders are named
+in the log.
+
+`scripts/gazebo/measurements/gps_start_check.sh` (robot spawned at the course
+centre facing east, start waypoint 8 m ahead, gate 4 m, the real
+`mission_planner_node` on the simulator's `/fix` and odometry):
+
+| Arm | Must | Old code (`PLANNER_PYTHONPATH`) | New code |
+| --- | --- | --- | --- |
+| P shipped placeholders | never anchor, and say why | FAIL: did not anchor, log only about prefixes | **PASS** |
+| F 8 m away, at rest | not anchor | **FAIL: anchored on the first fix** | **PASS** |
+| N driven at the waypoint | anchor within the gate, obstacles within 0.5 m of truth | FAIL: anchored 8 m away, before moving | **PASS**: at 4.0 m, after 4.0 m of driving, obstacles 0.24 m off |
+
+Unit tests (`test_mission_planner_gps_gate.py`, rewritten for the distance
+gate): 12 pass on the new code, 11 fail on the old. The 0.22 to 0.24 m residual
+is the GPS antenna's offset from `base_link` (0.177, -0.133 m), which the
+planner does not correct; recorded, not fixed.
