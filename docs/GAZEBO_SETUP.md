@@ -1938,3 +1938,54 @@ does not change.
 Reproduce: `LAUNCH_ARGS="obstacle_source:=lidar_map" bash
 scripts/gazebo/autonomy_check.sh`. Evidence:
 `local-notes/oneshot_evidence/task4_lidar_map_2026-10-08/`.
+
+### 10.17 Does the simulator reproduce "missed lines"? A baseline for the competition detector (2026-10-08)
+
+The lane detector that competed (the merged `lane_segmentation.py`: YOLOPv2 on
+the front camera, lane pixels projected through the organised point cloud), run
+open loop in `igvc_dev_jazzy` beside the simulator while the robot drove itself
+on ground truth. Hough and the ground truth were scored in the same drive by
+`lane_eval_sim.py` (0.25 m tolerance). No tuning, no code change. The point cloud
+was the re-stamped, paced one (10.13), stamped
+`front_zed_camera_x_left_camera_frame`, with TF found.
+
+| Detector | Hit rate | Coverage, observed | Coverage, whole window | Placement error, median / 90th |
+| --- | --- | --- | --- | --- |
+| **Competition YOLOPv2, 2026-10-08** | **0.424** | **0.845** | 0.390 | **0.300 / 0.827 m** |
+| `main`'s YOLOPv2, 2026-09-29 (for comparison) | 0.166 | 0.762 | 0.266 | 0.768 / 1.683 m |
+| Hough, same drive | 0.419 | 0.490 | 0.066 | 0.321 / 2.326 m |
+| Ground truth, same drive (the ceiling of this metric) | 0.676 | 0.996 | 0.996 | 0.096 / 1.555 m |
+
+**Conditions, which matter:** real-time factor **0.41** over the window (the
+simulator, the detector on the GPU, Hough and four evaluators in one
+container; nvidia-smi showed P8), and the cloud reached a best-effort
+subscriber at **0.794** of the camera's frames, with 9171 receive-buffer errors:
+the pacing of 10.13 is not enough at this load. The detector logged 7 "Dropping
+stale synced frame ... lane model/input is behind camera rate" (ages 2.0 to
+5.7 s) and twice "yolopv2 produced 0 projected points" while its raw mask held
+932 and 1219 lane pixels ("post_mask_px lane=0").
+
+**So "missed lines" is reproducible in kind but not yet attributable.** The
+competition detector misses a large share of the paint (coverage of the whole
+window 0.390, against the ground truth's 0.996) while what it does report is
+mostly in the right place. Candidate causes, each with the measurement that
+separates it:
+
+1. **Throughput.** Stale frames are dropped at an RTF of 0.41. Separate: count
+   frames received, processed and dropped by the node, alone in the container
+   at RTF near 1, against the same numbers under today's load.
+2. **The projection drops what the model saw.** Raw lane pixels became zero
+   after masking. Separate: log, per frame, raw lane pixels and projected
+   points, and vary one gate at a time offline on saved frames: depth range
+   (`min/max_detection_depth_m` 0.3 to 5.0 m), the ground-plane z gates, the
+   chassis mask.
+3. **Range.** A 5.0 m depth limit cannot cover paint further out, which caps
+   coverage of the whole window whatever the model does. Separate: coverage
+   within 5 m against beyond 5 m in the same run.
+4. **Cloud loss under load** (0.794 here). Separate: the synced image and cloud
+   pairs per second the node receives, with and without the evaluators.
+5. **Resolution and lens.** 640x360 against thresholds tuned on the real camera.
+   Separate: one run at 1280x720 (`sim_camera_width/height`), one camera.
+
+Evidence: `local-notes/oneshot_evidence/task6_comp_yolopv2_2026-10-08/`;
+harness `local-notes/oneshot_evidence/scripts/yolo_eval2.sh`.
