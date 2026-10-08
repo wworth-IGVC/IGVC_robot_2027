@@ -41,7 +41,7 @@ CAMERAS="${CAMERAS:-front}"
 # igvc_test_bringup carries the launch files and gazebo_odom_shim;
 # igvc_lane_detection carries the ground-truth nodes PART 4 runs. All are
 # install-only, so this is seconds rather than a real build.
-echo "--- building the four packages the bringup needs ---"
+echo "--- building the five packages the bringup needs ---"
 igvc_build || exit 1
 echo "  installed at: $(ros2 pkg prefix igvc_test_description 2>/dev/null)"
 

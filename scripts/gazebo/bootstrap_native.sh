@@ -17,7 +17,7 @@
 #
 #   1. sanity: right repo, inside the pixi environment, supported machine, disk
 #   2. git submodule update --init --recursive
-#   3. colcon build the four packages the simulator needs
+#   3. colcon build the five packages the simulator needs
 #   4. render_check.sh        is the GPU rendering, and which tier is this
 #   5. bringup_smoke_test.sh  does the topic contract hold, does it drive
 #
@@ -135,7 +135,7 @@ if ! igvc_build; then
     FAILED="The log above is /tmp/colcon.log. A missing compiler usually means 'pixi install' did not finish."
     fail "colcon build failed"
 fi
-pass "four packages built in $(( $(date +%s) - T0 )) s, workspace at $WS"
+pass "five packages built in $(( $(date +%s) - T0 )) s, workspace at $WS"
 
 if [ "$BUILD_ONLY" = "1" ]; then
     say "  Build complete. Next: pixi run bootstrap (or pixi run smoke)."

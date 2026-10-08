@@ -65,11 +65,16 @@ igvc_source_ws () {
     [ -f "$WS/install/setup.bash" ] && source "$WS/install/setup.bash"
 }
 
-# The four packages the simulator needs, and ONLY those. zed_description is
+# The five packages the simulator needs, and ONLY those. zed_description is
 # the one people leave out; the robot description includes its meshes by
 # package name, so without it the build fails on a package nobody touched.
-# All four are install-only (no C++ is compiled), so this takes seconds.
-IGVC_SIM_PACKAGES="zed_description igvc_test_description igvc_test_bringup igvc_lane_detection"
+# yolo_msgs since the competition branch was merged (2026-10-08): its
+# igvc_lane_detection declares it (obstacle_costmap.py's optional YOLO input),
+# and colcon --packages-select refuses to build a package whose workspace
+# dependency was never built ("Failed to find .../yolo_msgs/package.sh"). It
+# is the only one that compiles C++ (generated message code), so the FIRST
+# build takes about a minute; after that, seconds.
+IGVC_SIM_PACKAGES="zed_description yolo_msgs igvc_test_description igvc_test_bringup igvc_lane_detection"
 
 igvc_build () {   # optional args: a subset of packages
     local pkgs="${*:-$IGVC_SIM_PACKAGES}" rc

@@ -48,7 +48,7 @@ echo "=============================================================="
 echo " IGVC Gazebo simulation"
 echo "=============================================================="
 
-echo "--- building the four packages the bringup needs ---"
+echo "--- building the five packages the bringup needs ---"
 igvc_build || exit 1
 echo "    ok"
 

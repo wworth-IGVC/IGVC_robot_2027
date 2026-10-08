@@ -514,7 +514,7 @@ Expect, on tier A:
   PASS  igvc_gazebo is up
 
 ==> step 5: building the workspace
-  PASS  four packages built
+  PASS  five packages built
 
 ==> step 6: render_check.sh: which GPU tier is this machine
         ADAPTER: D3D12 (NVIDIA GeForce RTX 5070 Ti Laptop GPU)

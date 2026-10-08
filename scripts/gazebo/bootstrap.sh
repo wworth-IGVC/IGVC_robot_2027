@@ -16,7 +16,7 @@
 #   2. git submodule update --init --recursive
 #   3. the image: pull it from GHCR (no login needed, the package is public)
 #   4. start the container
-#   5. colcon build the four packages the bringup needs
+#   5. colcon build the five packages the bringup needs
 #   6. render_check.sh      which GPU tier is this machine, if any
 #   7. bringup_smoke_test.sh  does the topic contract hold, does it drive
 #
@@ -221,7 +221,7 @@ if ! docker exec "$CONTAINER" bash -c '
     cd /root/ros2_ws || exit 1
     colcon build --symlink-install \
         --base-paths '"$REPO_IN_CONTAINER"'/src \
-        --packages-select zed_description igvc_test_description \
+        --packages-select zed_description yolo_msgs igvc_test_description \
                           igvc_test_bringup igvc_lane_detection \
         > /tmp/bootstrap_colcon.log 2>&1
     RC=$?
@@ -234,7 +234,7 @@ if ! docker exec "$CONTAINER" bash -c '
     FAILED="The colcon output above is the real error. A missing submodule shows up here first."
     fail "the workspace build failed"
 fi
-pass "four packages built"
+pass "five packages built"
 
 # ---------------------------------------------------------------------------
 step "render_check.sh: which GPU tier is this machine"

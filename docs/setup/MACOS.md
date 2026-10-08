@@ -128,7 +128,7 @@ same.
 | Command | Expect | Dry-run measurement |
 | --- | --- | --- |
 | `pixi install` (first run) | `The default environment has been installed.` | 118 s, 5.8 GB |
-| build (inside `bootstrap`) | `PASS  four packages built` | 4 s |
+| build (inside `bootstrap`) | `PASS  five packages built` | 4 s |
 | `render_check.sh` | `YOUR TIER: M` and `HARDWARE RENDERING (Apple GPU, Metal)` on a Mac. `YOUR TIER: C` in the dry run | camera and gpu_lidar both `PUBLISHING` |
 | smoke test | `topic checks passed: 18   failed: 0`, `DRIVE TEST : PASS`, `FRAME TEST : PASS` | 18 of 18, heading 0.13 deg, ratio 0.9970; whole bootstrap 161 s |
 | `pixi run autonomy` | `AUTONOMY CHECK: PASS` | PASS, 89.2 m over 100.0 s of sim time, 378 s of wall time at 0.29x real time |

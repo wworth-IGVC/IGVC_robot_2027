@@ -129,7 +129,7 @@ ACTUAL
 time pixi run build
 ```
 
-**Good:** `PASS  four packages built`. On Linux: 4 s.
+**Good:** `PASS  five packages built`. On Linux: 4 s.
 
 ```text
 ACTUAL
