@@ -1,29 +1,86 @@
+import os
+import xml.etree.ElementTree as ET
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit('}', 1)[-1]
+
+
+def _parse_triplet(value: str, field_name: str) -> tuple[float, float, float]:
+    parts = value.split()
+    if len(parts) != 3:
+        raise RuntimeError(f'Expected 3 values for LiDAR {field_name}, got: {value!r}')
+    return float(parts[0]), float(parts[1]), float(parts[2])
+
+
+def _top_lidar_mount_from_urdf() -> tuple[float, float, float]:
+    description_pkg = get_package_share_directory('igvc_test_description')
+    robot_xacro = os.path.join(
+        description_pkg, 'urdf', 'robots', 'test_robot.urdf.xacro')
+
+    root = ET.parse(robot_xacro).getroot()
+    for element in root.iter():
+        if _xml_local_name(element.tag) != 'rplidar_c1':
+            continue
+        if element.attrib.get('prefix') != 'top':
+            continue
+        for child in element:
+            if _xml_local_name(child.tag) != 'origin':
+                continue
+            xyz = _parse_triplet(child.attrib.get('xyz', '0 0 0'), 'xyz')
+            rpy = _parse_triplet(child.attrib.get('rpy', '0 0 0'), 'rpy')
+            return xyz[0], xyz[1], rpy[2]
+
+    raise RuntimeError(
+        f'Could not find top rplidar_c1 origin in {robot_xacro}')
 
 
 
 def generate_launch_description() -> LaunchDescription:
     bringup = FindPackageShare('igvc_test_bringup')
+    yolo_ros_pkg = FindPackageShare('yolo_bringup')
     ublox_gps_pkg = FindPackageShare('ublox_gps')
+    lidar_pkg = FindPackageShare('sllidar_ros2')
+    lidar_x_m, lidar_y_m, lidar_yaw_rad = _top_lidar_mount_from_urdf()
 
     use_sim_time = LaunchConfiguration('use_sim_time')
     gps_enabled = LaunchConfiguration('gps_enabled')
     hardware_interface = LaunchConfiguration('hardware_interface')
-    gps_config = PathJoinSubstitution([bringup, 'config', 'zed_f9p.yaml'])
+    sim_camera_ports = LaunchConfiguration('sim_camera_ports')
+    sim_camera_address = LaunchConfiguration('sim_camera_address')
+    model_weights = LaunchConfiguration('model_weights')
+    is_isaac_drive = PythonExpression([
+        "'", hardware_interface, "' == 'IsaacDriveHardware'"
+    ])
     
 
     zed_multi_fused_odom = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([bringup, 'launch', 'zed_multi_fused_odom.launch.py'])
         ),
+        condition=UnlessCondition(is_isaac_drive),
         launch_arguments={
             'use_sim_time': use_sim_time,
+        }.items(),
+    )
+
+    zed_multi_sim = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([bringup, 'launch', 'zed_multi_sim.launch.py'])
+        ),
+        condition=IfCondition(is_isaac_drive),
+        launch_arguments={
+            'sim_ports': sim_camera_ports,
+            'sim_address': sim_camera_address,
         }.items(),
     )
 
@@ -53,6 +110,7 @@ def generate_launch_description() -> LaunchDescription:
             'gps_enabled': gps_enabled,
             'force_identity_map_to_odom': 'true',
             'use_sim_time': use_sim_time,
+            'model_weights': model_weights,
         }.items(),
     )
 
@@ -93,18 +151,7 @@ def generate_launch_description() -> LaunchDescription:
             {'warn_odom_age_sec': 0.5},
         ],
     )
-    gps_node = Node(
-        package='ublox_gps',
-        executable='ublox_gps_node',
-        name='ublox_gps_node',
-        output='screen',
-        parameters=[
-            {'use_sim_time': use_sim_time},
-            {'publish_odom': True},
-            # {'publish_tf': True},
-            gps_config,
-        ],
-    )
+
      # Bridge Nav2 Twist output to the stamped cmd_vel expected by ros2_control.
     twist_stamper_node = Node(
         package='twist_stamper',
@@ -118,6 +165,113 @@ def generate_launch_description() -> LaunchDescription:
         remappings=[
             ('cmd_vel_in', '/diff_drive_controller/cmd_vel_unstamped'),
             ('cmd_vel_out', '/diff_drive_controller/cmd_vel'),
+        ],
+    )
+    yolo_ros = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([yolo_ros_pkg, 'launch', 'yolo.launch.py'])
+        ),
+        launch_arguments={
+            'use_sim_time': use_sim_time,
+            'namespace': 'yolo_ros',
+            'use_3d': 'True',
+            'model': '/home/nitin-5090/Documents/DevEnv/jazzy_ws/IGVC_robot_2026/models/yolov26n.pt',
+            'target_frame': 'map',
+            'input_image_topic': '/front_zed_camera_x/zed_node/rgb/color/rect/image',
+            'input_depth_topic': '/front_zed_camera_x/zed_node/depth/depth_registered',
+            'input_depth_info_topic': '/front_zed_camera_x/zed_node/depth/camera_info',
+            'depth_image_units_divisor': '1',
+        }.items(),
+    )
+    # YOLO bounding-box obstacle costmap disabled — large merged boxes were
+    # covering the entire track.  Replaced by lidar + depth-based costmaps.
+    # object_detection_to_costmap_node = Node(
+    #     package='igvc_lane_detection',
+    #     executable='obstacle_costmap_node',
+    #     name='obstacle_costmap_node',
+    #     output='screen',
+    #     parameters=[
+    #         {'use_sim_time': use_sim_time},
+    #         {'frame_id': 'odom'},
+    #         {'width_m': 100.0},
+    #         {'height_m': 100.0},
+    #         {'resolution': 0.2},
+    #         {'obstacle_lifetime_sec': 300.0},
+    #         {'detections_topic': '/yolo_ros/detections_3d'},
+    #     ],
+    # )
+
+    depth_obstacle_costmap_node = Node(
+        package='igvc_lane_detection',
+        executable='depth_obstacle_costmap_node',
+        name='depth_obstacle_costmap_node',
+        output='screen',
+        parameters=[
+            {'use_sim_time': use_sim_time},
+            {'frame_id': 'odom'},
+            {'depth_topic': '/front_zed_camera_x/zed_node/depth/depth_registered'},
+            {'info_topic': '/front_zed_camera_x/zed_node/depth/camera_info'},
+            {'output_topic': '/depth_obstacle_map'},
+            {'use_odom_pose': True},
+            {'odom_topic': '/front_zed_camera_x/zed_node/odom'},
+            {'camera_x_m': 0.44},
+            {'camera_y_m': 0.06},
+            {'camera_z_m': 0.21},
+            {'camera_roll_rad': 0.0},
+            {'camera_pitch_rad': 0.0},
+            {'camera_yaw_rad': 0.0},
+            {'width_m': 100.0},
+            {'height_m': 100.0},
+            {'origin_x': -50.0},
+            {'origin_y': -50.0},
+            {'resolution': 0.10},
+            {'min_depth_m': 0.40},
+            {'max_depth_m': 5.5},
+            {'min_height_m': 0.25},
+            {'max_height_m': 2.20},
+            {'stride': 6},
+            {'hit_weight': 1.0},
+            {'decay': 0.97},
+            {'decay_every_n_frames': 1},
+            {'hit_threshold': 14.0},
+            {'min_points_per_cell': 2},
+            {'min_component_cells': 8},
+            {'inflate_radius_m': 0.10},
+            {'publish_hz': 5.0},
+            {'use_latest_tf': True},
+            {'max_frame_age_sec': 2.0},
+            {'depth_frame_convention': 'auto'},
+        ],
+    )
+    lidar_obstacle_costmap_node = Node(
+        package='igvc_lane_detection',
+        executable='lidar_obstacle_costmap_node',
+        name='lidar_obstacle_costmap_node',
+        output='screen',
+        parameters=[
+            {'use_sim_time': use_sim_time},
+            {'frame_id': 'odom'},
+            {'scan_topic': '/scan'},
+            {'output_topic': '/lidar_obstacle_map'},
+            {'use_odom_pose': True},
+            {'odom_topic': '/front_zed_camera_x/zed_node/odom'},
+            {'max_odom_age_sec': 2.0},
+            {'lidar_x_m': lidar_x_m},
+            {'lidar_y_m': lidar_y_m},
+            {'lidar_yaw_rad': lidar_yaw_rad},
+            {'width_m': 100.0},
+            {'height_m': 100.0},
+            {'origin_x': -50.0},
+            {'origin_y': -50.0},
+            {'resolution': 0.10},
+            {'min_range_m': 0.15},
+            {'max_range_m': 10.0},
+            {'hit_weight': 5.0},
+            {'free_weight': 0.5},
+            {'hit_threshold': 4.0},
+            {'free_threshold': 3.0},
+            {'inflate_radius_m': 0.20},
+            {'publish_hz': 5.0},
         ],
     )
 
@@ -139,13 +293,25 @@ def generate_launch_description() -> LaunchDescription:
             default_value='CanInterface',
             description='Hardware interface used by motor controllers.',
         ),
+        DeclareLaunchArgument(
+            'model_weights',
+            default_value=EnvironmentVariable('LANE_MODEL_WEIGHTS', default_value=''),
+            description=(
+                'Absolute path to the selected lane model checkpoint. If empty, '
+                'lane_segmentation_node chooses $UFLDV2_WEIGHTS or $YOLOPV2_WEIGHTS '
+                'from detection_mode.')
+        ),
         # zed_multi_fused_odom,
         # teleop,
         motor_controllers,
         # lane_follower,
         lane_segmentation,
-        gps_node,
+        # gps_node,
         odom_tf_bridge_node,
         # zed_f9p_launch,
         twist_stamper_node,
+        # object_detection_to_costmap_node,  # disabled: YOLO bbox obstacles
+        # yolo_ros,  # disabled: only fed obstacle_costmap_node
+        lidar_obstacle_costmap_node,  # /scan ray-cast obstacle evidence -> /lidar_obstacle_map
+        # depth_obstacle_costmap_node,
     ])

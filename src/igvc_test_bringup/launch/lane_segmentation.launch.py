@@ -2,9 +2,10 @@
 lane_segmentation.launch.py
 
 Runs the YOLOPv2 segmentation-based lane node alongside the usual IGVC
-stack (localization, navigator, Nav2).  This is a drop-in alternative to
-``lane_follower.launch.py`` — it keeps the same navigation pipeline but
-swaps the Hough lane detector for the deep segmentation model.
+stack (static map↔odom, obstacle costmap, mission planner, navigator,
+Nav2).  This is a drop-in alternative to ``lane_follower.launch.py`` —
+it keeps the same navigation pipeline but swaps the Hough lane detector
+for the deep segmentation model.
 
 Typical usage:
 
@@ -21,9 +22,11 @@ Arguments
     gps_enabled                  true | false       default: false
     force_identity_map_to_odom   true | false       default: true
     use_sim_time                 true | false       default: false
-    model_weights                absolute path      default: $YOLOPV2_WEIGHTS
+    model_weights                absolute path      default: $LANE_MODEL_WEIGHTS
     model_device                 cpu | cuda:N       default: cuda:0
     model_half                   true | false       default: true
+    ufldv2_root                  path to upstream repo, default: $UFLDV2_ROOT
+    ufldv2_config                upstream config, default: $UFLDV2_CONFIG
     publish_overlay              true | false       default: true
 """
 
@@ -54,17 +57,26 @@ def generate_launch_description() -> LaunchDescription:
 
     model_weights_arg = DeclareLaunchArgument(
         'model_weights',
-        default_value=EnvironmentVariable('YOLOPV2_WEIGHTS', default_value=''),
+        default_value=EnvironmentVariable('LANE_MODEL_WEIGHTS', default_value=''),
         description=(
-            'Absolute path to yolopv2.pt TorchScript weights. Falls back to '
-            '$YOLOPV2_WEIGHTS. Fetch with '
-            'src/igvc_lane_detection/scripts/fetch_yolopv2_weights.sh.'))
+            'Absolute path to the selected lane model checkpoint. If empty, '
+            'the node uses $UFLDV2_WEIGHTS for detection_mode=ufldv2 or '
+            '$YOLOPV2_WEIGHTS for detection_mode=yolopv2.'))
     model_device_arg = DeclareLaunchArgument(
         'model_device', default_value='cuda:0',
         description='Torch device string (cpu, cuda:0, …).')
     model_half_arg = DeclareLaunchArgument(
         'model_half', default_value='true', choices=['true', 'false'],
         description='Run the network in FP16 on CUDA devices.')
+    ufldv2_root_arg = DeclareLaunchArgument(
+        'ufldv2_root',
+        default_value=EnvironmentVariable('UFLDV2_ROOT', default_value=''),
+        description='Path to the cloned Ultra-Fast-Lane-Detection-v2 repo.')
+    ufldv2_config_arg = DeclareLaunchArgument(
+        'ufldv2_config',
+        default_value=EnvironmentVariable(
+            'UFLDV2_CONFIG', default_value='configs/culane_res18.py'),
+        description='UFLDv2 config path, absolute or relative to ufldv2_root.')
     publish_overlay_arg = DeclareLaunchArgument(
         'publish_overlay', default_value='true', choices=['true', 'false'])
 
@@ -74,6 +86,8 @@ def generate_launch_description() -> LaunchDescription:
     model_weights = LaunchConfiguration('model_weights')
     model_device  = LaunchConfiguration('model_device')
     model_half    = LaunchConfiguration('model_half')
+    ufldv2_root   = LaunchConfiguration('ufldv2_root')
+    ufldv2_config = LaunchConfiguration('ufldv2_config')
     publish_overlay = LaunchConfiguration('publish_overlay')
 
     bringup = FindPackageShare('igvc_test_bringup')
@@ -86,6 +100,47 @@ def generate_launch_description() -> LaunchDescription:
     }
 
     # ── YOLOPv2 lane segmentation ─────────────────────────────────────
+    pointcloud_merger_node = Node(
+        package='igvc_pointcloud_tools',
+        executable='pointcloud_merger_node',
+        name='zed_pointcloud_merger',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'input_topics': [
+                '/front_zed_camera_x/zed_node/point_cloud/cloud_registered',
+                '/left_zed_camera_x/zed_node/point_cloud/cloud_registered',
+                '/right_zed_camera_x/zed_node/point_cloud/cloud_registered',
+            ],
+            'output_topic': '/zed/point_cloud/merged_registered',
+            'target_frame': 'base_link',
+            'max_stamp_delta_sec': 0.25,
+            'transform_timeout_sec': 0.05,
+            'publish_hz': 15.0,
+            'drop_invalid': False,
+            'preserve_organized': True,
+            # ── One-shot ICP geometric calibration ──────────────────
+            # Accumulate N frames per input (already transformed to
+            # base_link via URDF), then run ICP from each non-reference
+            # camera against the reference (index 0 = front).  The
+            # refined source→base_link transform is cached and reused
+            # forever — URDF is no longer consulted after calibration
+            # completes.  Translation/rotation/fitness sanity caps
+            # cause a per-camera fallback to URDF if ICP misbehaves.
+            'calibrate_on_startup': True,
+            'calibration_method': 'icp',
+            'calibration_reference_index': 0,        # front camera
+            'calibration_frames_per_input': 10,
+            'calibration_voxel_size_m': 0.10,
+            'calibration_max_correspondence_m': 0.30,
+            'calibration_max_iterations': 50,
+            'calibration_max_points_per_input': 200000,
+            'calibration_max_translation_m': 0.30,
+            'calibration_max_rotation_deg': 15.0,
+            'calibration_max_fitness': 0.10,
+        }],
+    )
+
     lane_segmentation_node = Node(
         package='igvc_lane_detection',
         executable='lane_segmentation_node',
@@ -103,18 +158,56 @@ def generate_launch_description() -> LaunchDescription:
                 'model_weights': model_weights,
                 'model_device': model_device,
                 'model_half': model_half,
+                'ufldv2_root': ufldv2_root,
+                'ufldv2_config': ufldv2_config,
                 'publish_overlay': publish_overlay,
             },
         ],
     )
 
-    # ── Localization ──────────────────────────────────────────────────
-    localization_node = Node(
+    # ── Static map → odom identity TF ─────────────────────────────────
+    # We treat the odom origin (where the robot booted) as the map
+    # origin. The mission planner is responsible for any GPS↔odom
+    # conversions on top of this anchor.
+    static_map_to_odom = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_map_to_odom',
+        output='log',
+        arguments=[
+            '--x', '0', '--y', '0', '--z', '0',
+            '--roll', '0', '--pitch', '0', '--yaw', '0',
+            '--frame-id', 'map', '--child-frame-id', 'odom',
+        ],
+        parameters=[{'use_sim_time': use_sim_time}],
+    )
+
+    # ── Obstacle costmap: YOLO 3D detections disabled (large merged bounding
+    #    boxes were covering the entire track). Now using lidar_obstacle_costmap
+    #    and depth_obstacle_costmap nodes launched from igvc_fused_drive.launch.py.
+    # obstacle_costmap_node = Node(
+    #     package='igvc_lane_detection',
+    #     executable='obstacle_costmap_node',
+    #     name='obstacle_costmap_node',
+    #     output='screen',
+    #     parameters=[
+    #         shared_params,
+    #         PathJoinSubstitution(
+    #             [bringup, 'config', 'obstacle_costmap_config.yaml']),
+    #     ],
+    # )
+
+    # ── Mission planner (GPS waypoint mission) ────────────────────────
+    mission_planner_node = Node(
         package='igvc_lane_detection',
-        executable='localization_node',
-        name='igvc_localization',
+        executable='mission_planner_node',
+        name='mission_planner_node',
         output='screen',
-        parameters=[shared_params],
+        parameters=[
+            shared_params,
+            PathJoinSubstitution(
+                [bringup, 'config', 'mission_planner_config.yaml']),
+        ],
     )
 
     # ── Navigator ─────────────────────────────────────────────────────
@@ -148,10 +241,14 @@ def generate_launch_description() -> LaunchDescription:
         model_weights_arg,
         model_device_arg,
         model_half_arg,
+        ufldv2_root_arg,
+        ufldv2_config_arg,
         publish_overlay_arg,
+        # pointcloud_merger_node,
         lane_segmentation_node,
-        localization_node,
-        # static_map_to_odom,
-        navigator_node,
-        nav2_launch,
+        static_map_to_odom,
+        # obstacle_costmap_node,  # disabled: YOLO bbox obstacles
+        mission_planner_node,   # ramp align/climb + GPS waypoint mission
+        navigator_node,         # lane-follow Nav2 driver
+        nav2_launch,            # controller / planner / collision_monitor stack
     ])

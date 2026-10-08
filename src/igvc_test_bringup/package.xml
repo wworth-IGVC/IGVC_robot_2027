@@ -57,6 +57,15 @@
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
 
+  <!-- The competition branch's GPS and heading launch files (merged
+       2026-10-08): zed2i_mag.launch.py / mag_heading.launch.py use
+       imu_filter_madgwick, nav2_gps_waypoint.py uses nav2_simple_commander.
+       Both resolve on Jazzy (ros-jazzy-imu-filter-madgwick,
+       ros-jazzy-nav2-simple-commander). The branch also declared zed_wrapper
+       here; it is NOT declared, see the note below. -->
+  <exec_depend>imu_filter_madgwick</exec_depend>
+  <exec_depend>nav2_simple_commander</exec_depend>
+
   <!-- Viewing, Isaac and debug launch files. -->
   <exec_depend>rviz2</exec_depend>
   <exec_depend>joint_state_publisher_gui</exec_depend>

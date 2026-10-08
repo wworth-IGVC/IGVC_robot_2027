@@ -81,7 +81,7 @@
             publish_imu: true
             publish_imu_raw: false
             publish_cam_imu_transf: true
-            publish_mag: false
+            publish_mag: true
             publish_baro: false
             publish_temp: false
 
@@ -154,7 +154,7 @@
             publish_cam_path: false
 
         gnss_fusion:
-            enable_gnss: true
+            enable_gnss: false
             gnss_fix_topic: '/fix'
             gnss_zero_altitude: false
             h_covariance_mul: 1.0

@@ -1,4 +1,4 @@
-"""Unit tests for costmap-to-centreline navigator behavior."""
+"""Unit tests for costmap-to-centerline navigator behavior."""
 
 from __future__ import annotations
 
@@ -86,6 +86,7 @@ def make_navigator(grid, *, lookahead=4.0, horizon=1.8):
     node._path_change_tolerance_m = 0.25
     node._path_change_tolerance_rad = 0.25
     node._max_path_lateral_jump_m = 0.5
+    node._max_path_heading_rad = 0.75
     node._goal_pending = False
     node._goal_handle = None
     node._next_goal_seq = 0
@@ -107,12 +108,12 @@ def make_navigator(grid, *, lookahead=4.0, horizon=1.8):
     return node
 
 
-def test_extract_centreline_follows_straight_corridor():
-    """The navigator should recover a centred straight lane corridor."""
+def test_extract_centerline_follows_straight_corridor():
+    """The navigator should recover a centerd straight lane corridor."""
     grid = make_corridor_costmap(centerline=0.0, lane_width_m=2.4)
     node = make_navigator(grid)
 
-    points = node._extract_centreline()
+    points = node._extract_centerline()
 
     assert points
     assert points[0][0] >= 0.25
@@ -120,7 +121,7 @@ def test_extract_centreline_follows_straight_corridor():
     assert max(abs(lateral) for _, lateral in points) <= 0.03
 
 
-def test_extract_centreline_follows_smooth_curve():
+def test_extract_centerline_follows_smooth_curve():
     """The navigator should follow a smooth local curve without drift."""
     def centerline(forward):
         return 0.45 * math.sin(forward / 4.0 * math.pi / 2.0)
@@ -128,7 +129,7 @@ def test_extract_centreline_follows_smooth_curve():
     grid = make_corridor_costmap(centerline=centerline, lane_width_m=2.4)
     node = make_navigator(grid)
 
-    points = node._extract_centreline()
+    points = node._extract_centerline()
 
     errors = [
         abs(lateral - centerline(forward))
@@ -139,7 +140,7 @@ def test_extract_centreline_follows_smooth_curve():
     assert max(errors) <= 0.08
 
 
-def test_extract_centreline_ignores_gt_obstacle_stamps():
+def test_extract_centerline_ignores_gt_obstacle_stamps():
     """GT obstacles are lethal cells but should not become lane boundaries."""
     grid = make_corridor_costmap(centerline=0.0, lane_width_m=2.4)
     data = list(grid.data)
@@ -156,26 +157,26 @@ def test_extract_centreline_ignores_gt_obstacle_stamps():
     grid.data = data
     node = make_navigator(grid)
 
-    points = node._extract_centreline()
+    points = node._extract_centerline()
 
     assert points
     assert points[-1][0] >= 3.5
     assert max(abs(lateral) for _, lateral in points) <= 0.04
 
 
-def test_extract_centreline_stops_at_blocked_gap_after_entering_lane():
+def test_extract_centerline_stops_at_blocked_gap_after_entering_lane():
     """The navigator should stop extending paths through sensed gaps."""
     grid = make_corridor_costmap(centerline=0.0, lane_width_m=2.4)
     grid = erase_rows(grid, 1.5, 1.8)
     node = make_navigator(grid)
 
-    points = node._extract_centreline()
+    points = node._extract_centerline()
 
     assert points
     assert points[-1][0] < 1.5
 
 
-def test_extract_centreline_rejects_large_lateral_jump():
+def test_extract_centerline_rejects_large_lateral_jump():
     """The navigator should not jump sideways into a disconnected band."""
     def centerline(forward):
         return 0.0 if forward < 1.6 else 0.8
@@ -183,15 +184,15 @@ def test_extract_centreline_rejects_large_lateral_jump():
     grid = make_corridor_costmap(centerline=centerline, lane_width_m=1.0)
     node = make_navigator(grid)
 
-    points = node._extract_centreline()
+    points = node._extract_centerline()
 
     assert points
     assert points[-1][0] < 1.65
     assert max(abs(lateral) for _, lateral in points) <= 0.05
 
 
-def test_lane_carrot_uses_first_centreline_point_at_horizon():
-    """The lane carrot should pick the first centreline point past horizon."""
+def test_lane_carrot_uses_first_centerline_point_at_horizon():
+    """The lane carrot should pick the first centerline point past horizon."""
     grid = make_corridor_costmap(
         centerline=lambda forward: 0.1 * forward,
         lane_width_m=2.4,
@@ -207,7 +208,7 @@ def test_lane_carrot_uses_first_centreline_point_at_horizon():
 
 
 def test_lane_path_from_costmap_exposes_controller_path():
-    """The navigator should expose centreline points as a Path message."""
+    """The navigator should expose centerline points as a Path message."""
     grid = make_corridor_costmap(
         centerline=lambda forward: 0.1 * forward,
         lane_width_m=2.4,
@@ -254,6 +255,32 @@ def test_path_validation_rejects_lateral_jump():
     node = make_navigator(grid)
     path = node._lane_path_from_costmap()
     path.poses[5].pose.position.y += 1.0
+
+    assert not node._path_is_valid(path)
+
+
+def test_conditioned_path_limits_sideways_slew_for_wide_lanes():
+    """Wide straight lanes should not produce sideways/U-turn-like path starts."""
+    grid = make_corridor_costmap(centerline=0.0, lane_width_m=4.5)
+    node = make_navigator(grid)
+    raw = [(0.05, 0.0), (0.10, 2.0), (1.0, 2.0), (2.0, 2.0)]
+
+    points = node._condition_path_points(raw)
+    headings = [
+        abs(math.atan2(b[1] - a[1], b[0] - a[0]))
+        for a, b in zip(points[:-1], points[1:])
+        if math.hypot(b[0] - a[0], b[1] - a[1]) > 1.0e-6
+    ]
+
+    assert headings
+    assert max(headings) <= node._max_path_heading_rad + 0.05
+
+
+def test_path_validation_rejects_sideways_heading():
+    """A path that starts by sweeping sideways should be blocked."""
+    grid = make_corridor_costmap(centerline=0.0, lane_width_m=2.4)
+    node = make_navigator(grid)
+    path = node._build_path([(0.0, 0.0), (0.10, 1.0), (1.0, 1.0)])
 
     assert not node._path_is_valid(path)
 

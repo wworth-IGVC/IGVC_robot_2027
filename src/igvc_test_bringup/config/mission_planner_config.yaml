@@ -1,0 +1,55 @@
+mission_planner_node:
+  ros__parameters:
+    frame_id: "odom"
+    gps_topic: "/fix"
+    odom_topic: "/front_zed_camera_x/zed_node/odom"
+    state_topic: "/mission/state"
+    virtual_obstacles_topic: "/mission/virtual_obstacles"
+    clear_virtual_obstacles_topic: "/mission/clear_virtual_obstacles"
+    # Set true to launch the mission as soon as the GPS origin anchors.
+    # Operationally we leave this false and let an operator call the
+    # ~/start_mission service once the robot is on the start line.
+    auto_start: false
+    # Optionally pin the GPS↔odom anchor instead of taking the first fix.
+    # NaN means "use first GPS fix" (default behaviour).
+    origin_lat: .nan
+    origin_lon: .nan
+    arrival_tolerance_m: 1.0
+    # Bad receiver startup fixes can be wildly wrong.  Do not anchor the
+    # GPS->odom mission frame, stamp virtual obstacles, or start Nav2 until
+    # the current fix is in the same coarse area as the configured start goal.
+    gps_start_match_enabled: true
+    gps_start_match_digits: 3
+    gps_start_match_required_fixes: 1
+    # Four-waypoint AutoNav mission.  Replace these with the real survey
+    # values before each run; the second and third waypoints are the
+    # virtual obstacles to avoid.
+    waypoint_lats: [0.0, 0.0, 0.0, 0.0]
+    waypoint_lons: [0.0, 0.0, 0.0, 0.0]
+    waypoint_kinds: ["start", "obstacle", "obstacle", "end"]
+
+    # ── Ramp alignment / climb ──────────────────────────────────────
+    # Detects the 15° course ramp from lane-seg ground-plane slope and the
+    # ZED IMU pitch, rotates the robot parallel to the fall line, then drives
+    # straight up under a closed-loop controller: a constant forward speed
+    # (so it never stalls on the incline) plus a proportional heading
+    # correction that keeps it parallel to the slope and off the edges.
+    # Commands go to the velocity-smoother input (cmd_vel_nav) so the
+    # collision monitor still guards them.  Suppressed while a GPS waypoint
+    # mission ("active"/"done") owns navigation.
+    ramp_enabled: true
+    ramp_status_topic: "/ramp/state"          # geometry_msgs/Vector3Stamped from lane-seg
+    imu_topic: "/front_zed_camera_x/zed_node/imu/data"
+    ramp_detect_slope_deg: 8.0                 # lane-seg forward slope that arms ramp mode
+    ramp_min_confidence: 0.3                   # min slope-reading confidence (Vector3.z)
+    ramp_confirm_pitch_deg: 5.0                # IMU pitch confirming we are on the ramp
+    ramp_exit_pitch_deg: 3.0                   # pitch below which the ramp is "cleared"
+    ramp_align_yaw_tol_deg: 8.0                # heading error to finish aligning → climb
+    ramp_climb_speed_mps: 1.5                  # constant forward speed while climbing
+    ramp_align_speed_mps: 0.0                  # forward speed while rotating to the fall line
+    ramp_yaw_kp: 1.8                           # heading-error → yaw-rate gain (rad/s per rad)
+    ramp_max_yaw_rate: 1.5                     # yaw-rate cap (rad/s)
+    ramp_cmd_topic: "cmd_vel_nav"              # velocity-smoother input (collision-monitor guarded)
+    ramp_cmd_rate_hz: 20.0                     # closed-loop control / publish rate
+    ramp_status_timeout_sec: 1.0              # ignore lane-seg slope older than this
+    ramp_exit_hold_sec: 1.5                    # pitch must stay low this long before exit
