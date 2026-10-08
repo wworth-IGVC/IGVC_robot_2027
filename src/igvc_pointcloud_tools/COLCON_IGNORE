@@ -1,0 +1,1 @@
+Not built in the simulator or dev images: needs libpcl-dev, which neither installs, and the competition did not use it (commented out in its launch files). See docs/JAZZY_MIGRATION.md section 4, verdict Drop.
