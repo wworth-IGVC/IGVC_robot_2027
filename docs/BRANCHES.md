@@ -152,6 +152,9 @@ they were written.**
   then was not what ran the cameras at all. Still inferred: nobody who was
   there has confirmed it. Asking whether `docker ps -a` on the Jetson shows
   `dazzling_easley` would settle it.
+- **Adopted 2026-10-08:** merged into the fork on branch `adopt-competition`
+  (merge `91a4a25`, results in `docs/GAZEBO_SETUP.md` 10.15). `main` is moved
+  by Liam, not by an agent.
 - **Which branch's code ran:** its scripts start the YOLOPv2 lane detector
   from `2026/more_diverging_changes`. Adopting that branch is a **merge with
   one trivial conflict and two fixups** (two conflicts as of 2026-10-07, see

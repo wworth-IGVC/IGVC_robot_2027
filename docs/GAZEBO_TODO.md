@@ -230,6 +230,27 @@ Verified means a command was run and a number came back. Nothing below is
 
 ## Not done
 
+### After the merge of the competition branch  *(2026-10-08, `GAZEBO_SETUP.md` 10.15)*
+
+- [x] **DONE:** `67a6934` merged on branch `adopt-competition`; every package
+      builds; render, smoke and autonomy pass three times (89.0 to 90.1 m, `LANE`
+      clearance +0.120 to +0.173 m). Moving `main` is Liam's.
+- [ ] **The competition navigator's path-heading clamp and validator disagree at
+      the boundary** (`navigator.py` `_limit_path_heading` and
+      `_path_invalid_reason`): a lane that turns more than `max_path_heading_rad`
+      (43 degrees) inside the look-ahead leaves the robot holding and reversing.
+      The simulator hides it with `max_path_heading_rad: 1.57` in
+      `gazebo_nav_test.launch.py`. Fixing it needs a unit test (a path at
+      exactly the limit must be accepted), a decision on the number, and Liam's
+      approval (protected package). Not started.
+- [ ] **`ublox_gps` needs `libasio-dev`, which the simulator image lacks.** An
+      unchanged submodule, so `main` has the same property; the gates do not
+      build it. Add it to `docker/Dockerfile.gazebo-jazzy` only if the team wants
+      "build every package" to work in that image.
+- [ ] **The robot USD and the URDF now disagree further** (new front ZED 2i link,
+      lidar and mast, side cameras at 45 degrees; research pass 3, RQ-09). Which
+      is the real robot is a tape-measure question for Aidan.
+
 ### P0, blocking the merge of `jazzy-only` into `main`
 
 - [x] **Done 2026-09-29 evening: the freeze rule is met** (report section

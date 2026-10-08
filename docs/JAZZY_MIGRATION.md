@@ -217,8 +217,9 @@ everything the branch's block does except `zed_wrapper` (deliberately absent:
 `rosdep resolve zed_wrapper` finds no rule on Jazzy), `imu_filter_madgwick` and
 `nav2_simple_commander`, and the last two do resolve
 (`ros-jazzy-imu-filter-madgwick`, `ros-jazzy-nav2-simple-commander`). That is a
-recommendation, not a tested resolution: the merge was aborted at the second
-conflict as the handoff required, and nothing was merged. The merge commit
+recommendation when first written; it was then adopted: **merged on 2026-10-08
+on branch `adopt-competition` (merge `91a4a25`), results in `GAZEBO_SETUP.md`
+10.15**, not yet on `main`. The merge commit
 also needs two fixups: keep `localization.py` and its entry point (the simulator
 launches `localization_node`, which the branch deletes), and keep `main`'s
 five submodule pointers (the branch's point backwards, and

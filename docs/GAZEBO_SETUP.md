@@ -1811,3 +1811,84 @@ Nothing in the simulator consumes `/fix` yet (`gps_enabled` is false in the
 sim launches, and `main`'s localisation reads `/gps/fix`, not `/fix`: a
 question for Aidan). This completes the sensor contract; it does not make
 anything use GPS.
+
+### 10.15 The competition branch is merged, on its own branch (2026-10-08)
+
+`2026/more_diverging_changes` (`67a6934`), the code that ran at the 2026
+competition, is merged into `sim-perception` on branch **`adopt-competition`**
+(merge `91a4a25`, then `a14e074`, then `2ebe5b6`). `main` has not moved and
+nothing is pushed. Liam approved it on 2026-10-07 and decided the two
+conflicts on 2026-10-08. It is **not known good** (GPS failed completely at the
+competition, lane detection missed lines), so anything wrong in it is fixed in
+a separate commit with a test, never in the merge.
+
+**Conflicts, two** (the 2026-09-24 count was one; `JAZZY_MIGRATION.md` 4):
+`test_robot.urdf.xacro` (main's `sim:=true` include kept, the branch's robot
+changes merged cleanly) and `igvc_test_bringup/package.xml` (main's rewritten
+list kept, plus `imu_filter_madgwick` and `nav2_simple_commander`; `zed_wrapper`
+dropped because rosdep has no rule for it on Jazzy). **Fixups:** `localization.py`
+and its entry point kept (the simulator launches it; the branch deletes it);
+all five submodule pointers the merge silently moved are back at main's
+(`isaac/exts` stays at `375eddd1b`, the branch's alternative is `72ff9c21e`).
+
+**Real-robot values the merge changes** (listed in the merge commit, expected):
+`controllers.yaml` `wheel_radius` 0.2032 to 0.1016 (settles the open question
+for the geometry; `wheel_separation` 0.5027 is unchanged and still differs from
+the simulator's 0.57633); the RPLidar C1 mount 0.225 0 0.46 to 0.345 0 0.52 and
+its mast; the side ZED X cameras from 95 to 45 degrees of yaw; and a **new
+front ZED 2i link** at -0.215 0 0.248 that the robot USD does not have.
+Navigation configs (`nav2_lane_follow_config.yaml`, `navigator_config.yaml`,
+`lane_segmentation_config.yaml`) changed too.
+
+**Build**, every package in `igvc_gazebo` (`colcon build --symlink-install
+--base-paths src/IGVC_robot_2026/src`): **23 packages, exit 0**, after two
+things that are not merge defects. `igvc_pointcloud_tools` needs `libpcl-dev`,
+which no image installs; its verdict was Drop and it now has a `COLCON_IGNORE`
+(`a14e074`). `ublox_gps` needs `libasio-dev`, absent from the simulator image
+(an unchanged submodule, so `main` has the same property); it was installed in
+the running container only. An existing build directory holds a dangling
+symlink to the renamed `zed_multi.launch.py` and fails `igvc_test_bringup`
+with "can't copy ... zed_multi.launch.py": delete that package's `build/` and
+`install/` directories (a fresh clone is unaffected).
+
+**Gates, before and after the merge** (default configuration, ground-truth
+lanes and barrels; the freeze rule asks for three):
+
+| Tree | Render | Smoke | Autonomy | Distance | `LANE` worst clearance | Yaw to lane mean / max |
+| --- | --- | --- | --- | --- | --- | --- |
+| `sim-perception` `3ba827b`, 2026-10-07 | PASS | 18/18 | PASS | 88.8 m | +0.086 m (and +0.014 m in the live D4 run) | 17.7 / 63.0 deg |
+| merged, no override | PASS | 18/18 | **FAIL**, `MOVED` and `PROGRESS` | **0.0 m** | not meaningful | n/a |
+| merged + sim override, run 1 | | | PASS | 90.1 m | +0.100 m | 9.3 / 32.8 deg |
+| merged + override, run 2 (with render, smoke) | PASS | 18/18 | PASS | 89.4 m | +0.173 m | 8.8 / 32.4 deg |
+| merged + override, run 3 | | | PASS | 89.0 m | +0.163 m | 8.7 / 29.5 deg |
+| merged + override, run 4 | | | PASS | 90.1 m | +0.120 m | 9.0 / 31.3 deg |
+
+No barrel contact in any run, 0 leftover processes. The merged navigator
+tracks the lane more tightly and keeps further from the paint than `main`'s did.
+
+**The one thing that had to change, in a sim-only file (`2ebe5b6`).** Without
+it the robot never moved. The navigator logged "No valid lane path visible (pose
+14 path heading 0.75rad > 0.75rad) - holding before reverse", then reversed 0.8
+m, then held again. Measured: the simulated course turns right by about 45
+degrees within 3 m of the start line (true centreline lateral offset -2.97 m at
+3.2 m ahead). The branch's navigator limits every path's heading to
+`max_path_heading_rad` (0.75 rad, 43 degrees). `_limit_path_heading` clamps the
+slope to exactly `tan(limit)`; `_path_invalid_reason` then rejects any pose over
+the limit, and smoothing and resampling push the clamped path a hair past it.
+Mission state was `lane_follow`, so the mission gate was not involved.
+`gazebo_nav_test.launch.py` now sets `max_path_heading_rad: 1.57`, the most the
+validator accepts, which restores `main`'s old behaviour (no limit), in the
+simulator only.
+
+**Recorded, not fixed: a competition-code defect.** The clamp and the validator
+disagree at the boundary, so any lane that turns more than 43 degrees inside the
+navigator's look-ahead leaves the robot holding and reversing, on the real
+robot as in the simulator. Whether 43 degrees is a sound limit is a separate
+question. A fix needs a unit test on `_limit_path_heading` and
+`_path_invalid_reason` together (a path at exactly the limit must be accepted)
+and a decision on the number; it touches protected `igvc_lane_detection` and has
+not been approved. The simulator now cannot see it.
+
+**Not yet in the loop:** the branch's lidar obstacle map (`/lidar_obstacle_map`)
+is not started by the simulator, so the navigator's overlay of it is inert and
+barrels still come from `track_points.json`. That is the next section's work.
