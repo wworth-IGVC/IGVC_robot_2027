@@ -206,9 +206,20 @@ repository and Aidan's call.
 ## 4. What the competition branch adds
 
 `2026/more_diverging_changes` (`67a6934`, 61 commits never merged to `main`)
-is Jazzy code. It merges into this fork with **one trivial conflict** (the
-Gazebo include at the end of `test_robot.urdf.xacro`) plus two fixups in the
-merge commit: keep `localization.py` and its entry point (the simulator
+is Jazzy code. **Measured as one conflict on 2026-09-24 and as two on
+2026-10-07.** The first count was one trivial conflict (the Gazebo include at
+the end of `test_robot.urdf.xacro`). `git merge --no-commit 67a6934` on
+`sim-perception` (`3ba827b`) on 2026-10-07 gave **two**: that one, and
+`src/igvc_test_bringup/package.xml`, where `main` rewrote the dependency list
+on 2026-09-24 and the branch edits the same block.
+The `package.xml` one is mechanical in practice: `main`'s side already declares
+everything the branch's block does except `zed_wrapper` (deliberately absent:
+`rosdep resolve zed_wrapper` finds no rule on Jazzy), `imu_filter_madgwick` and
+`nav2_simple_commander`, and the last two do resolve
+(`ros-jazzy-imu-filter-madgwick`, `ros-jazzy-nav2-simple-commander`). That is a
+recommendation, not a tested resolution: the merge was aborted at the second
+conflict as the handoff required, and nothing was merged. The merge commit
+also needs two fixups: keep `localization.py` and its entry point (the simulator
 launches `localization_node`, which the branch deletes), and keep `main`'s
 five submodule pointers (the branch's point backwards, and
 `IGVC_track_generator`'s would lose `track_points.json`). Bringing it in is
@@ -477,7 +488,7 @@ a second agent before being used.
 | Earlier statement | Where | Now |
 | --- | --- | --- |
 | "Do all 22 packages build on Jazzy?" is open | `DOCKER_CHANGES.md` section 8 item 13 | **Yes**, measured three times |
-| "Adopting the competition branch is a port, not a merge" | earlier notes, `BRANCHES.md` | true only for a wholesale checkout; a merge has 1 trivial conflict and two fixups (section 4) |
+| "Adopting the competition branch is a port, not a merge" | earlier notes, `BRANCHES.md` | true only for a wholesale checkout; a merge had 1 trivial conflict and two fixups on 2026-09-24, and **2 conflicts** (the xacro include and `igvc_test_bringup/package.xml`) on 2026-10-07 (section 4) |
 | "Which lane detector competed is unknown" | earlier notes | the branch tip runs the rewritten `lane_segmentation`, YOLOPv2 TorchScript, front camera |
 | The real robot's drive needs `twist_stamper` "on Jazzy" | the 2026-09-24 plan | it needed it on Humble too (6.1); the gap was packaging |
 | Switch the lidar to the `rplidar_ros` binary | the 2026-09-24 inventory | no: that release predates C1 support (2.1) |

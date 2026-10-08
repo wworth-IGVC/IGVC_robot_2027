@@ -154,7 +154,8 @@ they were written.**
   `dazzling_easley` would settle it.
 - **Which branch's code ran:** its scripts start the YOLOPv2 lane detector
   from `2026/more_diverging_changes`. Adopting that branch is a **merge with
-  one trivial conflict and two fixups**, not a port, unless it is checked out
+  one trivial conflict and two fixups** (two conflicts as of 2026-10-07, see
+  `docs/JAZZY_MIGRATION.md` section 4), not a port, unless it is checked out
   wholesale; `docs/JAZZY_MIGRATION.md` section 4 has the details. To run it
   without merging anything, `docs/COMPETITION_STACK.md`.
 
