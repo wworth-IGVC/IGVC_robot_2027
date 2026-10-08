@@ -82,9 +82,14 @@ Verified means a command was run and a number came back. Measured on Windows
   deliberate, so that when perception is added a failure can be blamed on
   perception rather than navigation, but it must not be reported as obstacle
   detection.
-- **The camera point cloud is rotated 90 degrees.** Measured, and deliberately
-  not fixed, because fixing it connects a Nav2 consumer that has never been
-  connected.
+- **The camera point cloud was rotated 90 degrees; fixed 2026-10-07.** The
+  bridge sends it to `/sim/<cam>_zed/points_optical_stamp` and
+  `gazebo_cloud_restamp` republishes it on the ZED contract name in the body
+  frame. Its Fast DDS pacing profile (`config/fastdds_sim_cloud_pacing.xml`)
+  matters: without it a best-effort subscriber received 15% to 34% of the
+  camera's frames. `scripts/gazebo/cloud_rate_check.py` is the check
+  (`docs/GAZEBO_SETUP.md` 10.13). Nav2's obstacle layer is still not
+  connected to it.
 - **YOLOPv2 does not run in the Gazebo image**: it needs torch. It **does**
   run against the simulator in the Jazzy dev image `igvc-dev-jazzy`, measured
   2026-09-29, and scores a hit rate of 0.166 at 0.25 m against a ground-truth

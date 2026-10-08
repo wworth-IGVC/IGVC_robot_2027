@@ -16,8 +16,20 @@ The four cases are 90 degrees apart, so this is not a marginal measurement:
   C  body data, stamped optical (THE BUG)     normal +X, plane at x = -0.096
   D  body data, BODY frame forced             normal +Z, plane at z = -0.229
 
-Run with no argument for the real test, and with the body frame name as the
-control: the control MUST fail, and its signature says which case holds.
+Usage:  cloud_frame_check.py [--topic TOPIC] [FORCED_FRAME]
+
+Since 2026-10-07 the bridge delivers the raw cloud to
+/sim/front_zed/points_optical_stamp and gazebo_cloud_restamp republishes it on
+the contract topic stamped with the BODY frame (case D). So:
+
+  * the contract topic, no argument            MUST PASS (case D)
+  * the contract topic, forced through the
+    optical frame front_zed_camera_x_left_camera_frame_optical
+                                               MUST FAIL with case C
+  * --topic /sim/front_zed/points_optical_stamp MUST FAIL with case C: the
+    raw cloud is still wrong, so the re-stamp is what fixes it
+
+A forced frame names the frame to transform through instead of the stamped one.
 """
 import math, sys, time
 import numpy as np
@@ -29,7 +41,13 @@ import sensor_msgs_py.point_cloud2 as pc2
 from tf2_ros import Buffer, TransformListener
 
 TOPIC = '/front_zed_camera_x/zed_node/point_cloud/cloud_registered'
-override = sys.argv[1] if len(sys.argv) > 1 else None
+args = sys.argv[1:]
+if args[:1] == ['--topic']:
+    if len(args) < 2:
+        print('usage: cloud_frame_check.py [--topic TOPIC] [FORCED_FRAME]')
+        sys.exit(2)
+    TOPIC, args = args[1], args[2:]
+override = args[0] if args else None
 
 rclpy.init()
 n = Node('cloud_check')
@@ -44,6 +62,7 @@ if 'm' not in got:
     print('  FAIL: no cloud in 30 s'); sys.exit(2)
 m = got['m']
 src = override or m.header.frame_id
+print('  topic               : %s' % TOPIC)
 print('  stamped frame       : %s' % m.header.frame_id)
 if override:
     print('  FORCED through      : %s   <-- control run' % override)
@@ -103,7 +122,7 @@ print('  normal axis         : %s        offset on that axis: %+.4f m' % (axis, 
 print('  angle to base_link +Z : %.2f deg' % ang)
 
 if axis == 'Z' and abs(off + 0.2290) < 0.05:
-    verdict = 'PASS  optical data, stamped optical: gz_frame_id is CORRECT'
+    verdict = 'PASS  the floor is the floor: frame id matches the data (case A or D)'
     rc = 0
 elif axis == 'X' and abs(off + 0.0960) < 0.08:
     verdict = 'FAIL  body data stamped optical: THE CLOUD IS ROTATED 90 deg'

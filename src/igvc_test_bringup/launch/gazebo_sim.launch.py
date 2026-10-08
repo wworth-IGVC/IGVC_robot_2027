@@ -255,11 +255,41 @@ def _setup(context, *args, **kwargs):
         os.path.join("config", "gazebo_bridge.yaml"),
     )
 
+    # ── pacing for the point cloud ───────────────────────────────────────────
+    #
+    # The cloud is 3.7 MB per message. Over the UDP-only Fast DDS the images
+    # set, it leaves a writer as a burst that overflows a reader's socket
+    # buffer, and a best-effort reader (the competition's lane_segmentation is
+    # one) then receives a fraction of the clouds. Measured 2026-10-07: 2.0 to
+    # 3.8 Hz of 7 to 13 Hz, and 99% once the cloud writers are paced. The
+    # profile paces only those writers; it is given only to the two kinds of
+    # process that publish them, via additional_env, so nothing else in the
+    # launch changes. A profile the environment already names is left alone.
+    # See config/fastdds_sim_cloud_pacing.xml and docs/GAZEBO_SETUP.md 10.13.
+    pacing_xml = _find(
+        os.path.join("src", "igvc_test_bringup", "config",
+                     "fastdds_sim_cloud_pacing.xml"),
+        "igvc_test_bringup",
+        os.path.join("config", "fastdds_sim_cloud_pacing.xml"),
+    )
+    pacing_env = {}
+    if os.environ.get("FASTRTPS_DEFAULT_PROFILES_FILE"):
+        pacing_note = ("NOT applied, FASTRTPS_DEFAULT_PROFILES_FILE is already "
+                       "set (%s): the cloud may lose frames"
+                       % os.environ["FASTRTPS_DEFAULT_PROFILES_FILE"])
+    elif not os.path.exists(pacing_xml):
+        pacing_note = "NOT applied, %s is missing" % pacing_xml
+    else:
+        pacing_env = {"FASTRTPS_DEFAULT_PROFILES_FILE": pacing_xml,
+                      "RMW_FASTRTPS_PUBLICATION_MODE": "AUTO"}
+        pacing_note = "Fast DDS flow controller from %s" % pacing_xml
+
     bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
         name="igvc_gz_bridge",
         output="screen",
+        additional_env=pacing_env,
         parameters=[{
             "config_file": bridge_cfg,
             "use_sim_time": use_sim_time,
@@ -298,6 +328,34 @@ def _setup(context, *args, **kwargs):
     # the world slides past. gazebo_sim.rviz is fixed to odom and adds the
     # laser, camera and odometry displays.
     actions = [gz, rsp, spawn, bridge, odom_shim]
+
+    # ── the point-cloud re-stamp, one per camera ─────────────────────────────
+    #
+    # One gz_frame_id stamps the image, depth, camera_info and cloud alike, and
+    # it names the OPTICAL frame, which is right for the first three. The
+    # cloud's data is in the camera's body convention, so stamped optical it
+    # turns the floor into a wall. The bridge sends the cloud to a private name
+    # and this node republishes it on the contract name with the body frame.
+    # See gazebo_bridge.yaml (CAMERAS) and docs/GAZEBO_SETUP.md 10.13.
+    cloud_cams = {"none": [], "front": ["front"],
+                  "all": ["front", "left", "right"]}[cams]
+    for cam in cloud_cams:
+        actions.append(Node(
+            package="igvc_test_bringup",
+            executable="gazebo_cloud_restamp",
+            name="gazebo_cloud_restamp_%s" % cam,
+            output="screen",
+            additional_env=pacing_env,
+            parameters=[{
+                "input_topic": "/sim/%s_zed/points_optical_stamp" % cam,
+                "output_topic":
+                    "/%s_zed_camera_x/zed_node/point_cloud/cloud_registered"
+                    % cam,
+                "frame_id": "%s_zed_camera_x_left_camera_frame" % cam,
+                "use_sim_time": use_sim_time,
+            }],
+        ))
+
     if on_macos and not headless:
         # The GUI half of point 1 above. It connects to the server over
         # gz-transport, so it can start at the same time.
@@ -328,6 +386,9 @@ def _setup(context, *args, **kwargs):
     print("  bridge    : %s" % bridge_cfg)
     print("  odom shim : rotating by %.6f rad (%.2f deg)"
           % (syaw, syaw * 180.0 / 3.141592653589793))
+    print("  cloud     : re-stamped to the body frame for %s"
+          % (", ".join(cloud_cams) or "no camera"))
+    print("  cloud DDS : %s" % pacing_note)
     print("  rviz      : %s" % ("on" if use_rviz else "off"))
 
     return actions

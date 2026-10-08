@@ -365,7 +365,17 @@ Verified means a command was run and a number came back. Nothing below is
       `igvc_lane_detection`. Once agreed: `obstacle_source:=lidar_map`, judged
       by `autonomy_check.sh` (0 barrel contacts, three runs) with
       `obstacle_source:=none` as the negative control.
-- [ ] **Fix the point-cloud frame, and expect it to change behaviour.**
+- [x] **DONE 2026-10-07: the point-cloud frame is fixed and the cloud arrives.**
+      `gazebo_cloud_restamp` republishes the cloud in the camera's body frame
+      (3 of 3 frame arms as predicted), and a Fast DDS flow controller on the
+      cloud writers (`config/fastdds_sim_cloud_pacing.xml`) makes a best-effort
+      subscriber receive it: 680 clouds against 680 camera frames in 60 s,
+      where unpaced it saw 15% to 34% of the camera's frames. The loss was never the Python node, it
+      was UDP datagrams dropped from a 3.7 MB burst. `scripts/gazebo/
+      cloud_rate_check.py` is the check; `GAZEBO_SETUP.md` 10.13 has the
+      diagnosis, the controls and what is not known. The original item
+      follows, kept for its reasoning.
+- [ ] **(superseded, see above) Fix the point-cloud frame, and expect it to change behaviour.**
       *(2026-10-01: on `main` it most likely will not, because nothing that
       moves the robot reads Nav2's costmaps, measured in the item above; the
       competition branch's YOLOPv2, which projects lane pixels through this

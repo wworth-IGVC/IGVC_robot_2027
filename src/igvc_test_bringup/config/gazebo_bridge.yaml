@@ -151,8 +151,18 @@
 #  ZED depth.
 #
 #  point_cloud/cloud_registered is not in the 3.7 table but is what
-#  nav2_lane_follow_config.yaml names for its voxel and obstacle layers, so it
-#  is bridged too.
+#  nav2_lane_follow_config.yaml names for its obstacle layer, so it is bridged
+#  too. NOT straight to that name: the cloud's data is in the camera's BODY
+#  frame while gz_frame_id stamps it optical, so the bridge delivers it to
+#  /sim/<cam>_zed/points_optical_stamp and gazebo_cloud_restamp republishes it
+#  on the contract name stamped <cam>_zed_camera_x_left_camera_frame, data
+#  untouched. The image, depth and camera_info keep the optical stamp, which is
+#  right for them. Measured: docs/GAZEBO_SETUP.md 10.6 and 10.13.
+#
+#  The raw cloud is 3.7 MB, and the bridge's writer for it is paced by a Fast
+#  DDS profile the launch supplies (config/fastdds_sim_cloud_pacing.xml). It is
+#  keyed on these topic names: rename one here and it must be renamed there, or
+#  a best-effort subscriber silently loses most of the clouds.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── front camera ─────────────────────────────────────────────────────────────
@@ -174,7 +184,7 @@
   gz_type_name: "gz.msgs.Image"
   direction: GZ_TO_ROS
 
-- ros_topic_name: "/front_zed_camera_x/zed_node/point_cloud/cloud_registered"
+- ros_topic_name: "/sim/front_zed/points_optical_stamp"
   gz_topic_name: "/front_zed/points"
   ros_type_name: "sensor_msgs/msg/PointCloud2"
   gz_type_name: "gz.msgs.PointCloudPacked"
@@ -199,7 +209,7 @@
   gz_type_name: "gz.msgs.Image"
   direction: GZ_TO_ROS
 
-- ros_topic_name: "/left_zed_camera_x/zed_node/point_cloud/cloud_registered"
+- ros_topic_name: "/sim/left_zed/points_optical_stamp"
   gz_topic_name: "/left_zed/points"
   ros_type_name: "sensor_msgs/msg/PointCloud2"
   gz_type_name: "gz.msgs.PointCloudPacked"
@@ -224,7 +234,7 @@
   gz_type_name: "gz.msgs.Image"
   direction: GZ_TO_ROS
 
-- ros_topic_name: "/right_zed_camera_x/zed_node/point_cloud/cloud_registered"
+- ros_topic_name: "/sim/right_zed/points_optical_stamp"
   gz_topic_name: "/right_zed/points"
   ros_type_name: "sensor_msgs/msg/PointCloud2"
   gz_type_name: "gz.msgs.PointCloudPacked"

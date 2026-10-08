@@ -1680,6 +1680,112 @@ is how the 2026 robot avoided obstacles in lane mode. Both files are in
 team decision; with it, `obstacle_source:=lidar_map` is the next step, judged
 by this check with `none` as its negative control.
 
+### 10.13 The point-cloud re-stamp, and why the cloud lost most of its frames (2026-10-07)
+
+**The frame.** The cloud's data is in the camera's body convention while
+`gz_frame_id` stamps it optical (10.6), and the same tag must stay optical for
+the image, depth and camera_info. So the bridge delivers the cloud to
+`/sim/<cam>_zed/points_optical_stamp` and `gazebo_cloud_restamp` republishes it
+on the contract name stamped `<cam>_zed_camera_x_left_camera_frame`, one node
+per camera, data untouched (it edits the `frame_id` inside the serialized
+bytes and checks the first cloud decodes identically apart from that string).
+The frame was right the first time; the rate was the problem.
+
+| Frame test (640x360, `igvc_gazebo`) | Prediction | Result |
+| --- | --- | --- |
+| `cloud_frame_check.py` on the contract topic | PASS, floor on Z near -0.229 m | **PASS**, Z, -0.2311 m, 0.39 deg |
+| Same, forced through the optical frame | FAIL, case C | **FAIL**, X, -0.0994 m, 89.78 deg |
+| `--topic` on the raw private topic | FAIL, case C | **FAIL**, X, -0.0994 m, 89.78 deg |
+
+**The rate, and where the loss really was.** The first version delivered 2.47
+Hz of 10.51 Hz (23.5%) to a best-effort counter. The handoff suspected Python
+and proposed a C++ node. Each step below changed one thing and was measured;
+"in" and "out" are in the node, `RcvbufErrors` is the kernel's count of
+datagrams dropped because a receiving socket's buffer was full
+(`/proc/net/snmp`), and the real-time factor varied between runs from 0.62 to
+0.91, so compare within a row, not down a column.
+
+| Run | What changed | Result |
+| --- | --- | --- |
+| A | The node counts clouds in and out every 10 s | **In = out, every report, 10.0 to 12.9 Hz.** The node drops nothing. The counter saw raw 11.80 Hz and the re-stamped cloud 2.03 Hz (17%) |
+| B1 | Raw and re-stamped counted in separate processes | raw 9.25 Hz, out 2.72 Hz. Not the counter sharing a thread |
+| B3 | The counter subscribes RELIABLE | raw 10.89 Hz, out 11.20 Hz. The node publishes everything; a reliable reader gets it all |
+| E3 | The node publishes best-effort instead | out 4.38 Hz against raw 11.60 Hz. Not the QoS pairing |
+| E4 | No raw counter, only the out counter | out 3.80 Hz, and the node's own **input** fell to 6.7 to 7.9 Hz. The hop from the bridge to the node loses clouds too |
+| C0 | Baseline with the kernel counter | out 3.60 Hz, **2198 `RcvbufErrors`** over 329,689 datagrams in the window |
+
+So the node is not the bottleneck and a C++ node was not built: it would send
+the same burst. (That is a judgement, not a measurement; no C++ node was tried.)
+The cause is the transport. The compose files set `FASTDDS_BUILTIN_TRANSPORTS=UDPv4`
+(shared memory fails quietly, see `docker-compose.mac.yml`), so a 3.7 MB cloud crosses the loopback as a burst of datagrams sent back to
+back. That overflows the receiving socket's buffer, the kernel drops
+datagrams, and losing one loses the whole cloud for a best-effort reader. The
+competition's `lane_segmentation` is one: it subscribes to the cloud with
+`qos_profile_sensor_data` (`67a6934`, `lane_segmentation.py:628`). A reliable
+reader gets repairs, which is why B3 saw everything.
+
+**The fix, in configuration.** `config/fastdds_sim_cloud_pacing.xml` is a Fast
+DDS profile with a flow controller (`cloud_pacer`: at most 131072 bytes every
+1 ms, 128 MB/s against the 51 MB/s that 13.7 Hz of clouds needs) attached by
+topic name to the six cloud writers (the raw and the re-stamped topic for each
+camera) as `ASYNCHRONOUS`. `gazebo_sim.launch.py` hands it, with
+`RMW_FASTRTPS_PUBLICATION_MODE=AUTO`, to the bridge and to the re-stamp nodes
+only (`additional_env`), so no other process and no other writer in them
+changes; the launch prints which it did. A profile the environment already
+names is left alone, with a warning. Two other forms were tried. Without the env
+var the rmw forces synchronous publication and Fast DDS refuses the flow
+controller ("Cannot use a flow controller in synchronously publication mode"),
+which killed `robot_state_publisher` in the first attempt (C1). A default
+profile that paces every writer, with `RMW_FASTRTPS_PUBLICATION_MODE=ASYNCHRONOUS`,
+also worked (C2), but then everything in those processes shares one pacer; whether
+that delays `/clock` behind a cloud was not measured, and the per-topic form
+avoids the question.
+
+| Run | Setup | out (best-effort subscriber) | `RcvbufErrors` |
+| --- | --- | --- | --- |
+| C2 | all writers paced | 13.64 Hz, node in 13.7 Hz | 12 |
+| C3 | per-topic profile, mode AUTO | 13.55 Hz, node in 13.4 to 13.7 Hz | 12 |
+
+**The check had a flaw, found by the first run of the fix.** The first
+`cloud_rate_check.py` counted the raw cloud as "in" with a second best-effort
+subscription in the same process. That subscription starved itself: it counted
+0.70 Hz while the re-stamped cloud arrived at 12.45 Hz, which is exactly the
+camera's 15 Hz times the real-time factor (747 clouds in 49.8 s of sim time),
+and out/raw = 17.8 "passed". A test that passes when its denominator collapses
+is not a test. It now counts the cloud against the camera's own frames, the
+per-frame `camera_info` (small, not lost) with the 15 Hz times sim seconds
+alongside, and prints the raw cloud only on request, as information.
+
+**Final measurements** (`stage2.sh final2`, then `rate_only.sh`, 2026-10-07;
+evidence `local-notes/oneshot_evidence/stage2_final_2026-10-07/` and
+`gates_2026-10-07_stage2_final/`):
+
+| Test | Must | Result |
+| --- | --- | --- |
+| Frame arms (table above) | as predicted | **3 of 3** |
+| `cloud_rate_check.py`, 60 s, best-effort | cloud >= 95% of `camera_info` | **PASS: 680 clouds against 680 frames (1.000)**; 673 by the clock (1.010); real-time factor 0.75; node in = out; `RcvbufErrors` 7 |
+| Negative control: the plain UDP profile the competition compose sets (`fastdds_udp.xml`), so pacing is not applied (the launch says so) | FAIL | **FAIL: 77 clouds against 524 frames (0.147)**; `RcvbufErrors` 4125 |
+| A RELIABLE consumer on the paced cloud, 45 s | all frames | **417 clouds = 15 Hz x 27.8 s sim** (real-time factor 0.62) |
+| `fix_check.py`, and its 90 deg control | PASS, FAIL | **PASS** 0.002 m; **FAIL** 18.8 m |
+| Gates on this tree | all pass | render **PASS**; smoke **18 passed, 0 failed**; autonomy **PASS**, 88.8 m, `LANE` worst clearance +0.086 m, no barrel contact, 0 leftovers |
+
+**Not known, and not claimed.**
+
+- One run (B2, the first RELIABLE-consumer run) ran at a real-time factor of
+  0.06 (3.9 s of sim time in 60 s). It did not recur in B3 or in the paced
+  reliable run, and its cause is not established. If a run suddenly crawls,
+  that is the first thing to suspect.
+- The RGB image (0.7 MB) and the depth image (0.9 MB) are subject to the same
+  mechanism and are not paced here. Nothing has measured their loss. Count them
+  with a best-effort subscriber before stage 3 relies on the camera.
+- Whether the real robot's ZED cloud meets the same loss on its own network
+  path, with `lane_segmentation` reading it best-effort, is not measured. A
+  `RcvbufErrors` delta beside a run on the robot would say. A question for
+  Aidan.
+
+Reproduce: `bash scripts/gazebo/start_sim.sh` in one shell, then
+`python3 scripts/gazebo/cloud_rate_check.py --seconds 60` in another.
+
 ### 10.14 GPS `/fix`, published and checked (2026-10-07)
 
 The world now has `<spherical_coordinates>` (WGS84, ENU, heading 0, so world
