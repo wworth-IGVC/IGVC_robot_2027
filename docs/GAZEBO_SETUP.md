@@ -2347,3 +2347,86 @@ are not in the repository.
 Reproduce: `LAUNCH_ARGS="obstacle_source:=gt_map" bash
 scripts/gazebo/autonomy_check.sh`; U1: `python3
 scripts/gazebo/measurements/gt_obstacle_map_check.py`.
+
+**P3b, Hough lanes in the loop with ground-truth barrels (2026-10-09): measured,
+not passing, 0 of 3.** `LAUNCH_ARGS="lane_source:=hough"` (barrels promoted to
+`gt_map`, so the lane detector is the only perceived input), `autonomy_check.sh`,
+`lane_source_probe.py` beside every run. Fixed before the first run: REF = 91.66 m
+(10.21 above), so the D12 bar is an arc of at least 0.8 x REF = **73.3 m** per run;
+void rule D20 (a lifecycle bring-up abort and no motion): no run was void.
+Evidence: `local-notes/oneshot_evidence/P3b_hough_loop_2026-10-09/` (`main_c` is
+the final copy of the batch; `main_partial` and `main_b` are earlier partial
+copies of it).
+
+| Run | Distance | Arc (bar 73.3 m) | `LANE` worst clearance, over the line | `ON THE SLAB` | First crossing (robot first moved) | `/lane_costmap` lethal cells, msgs per sim s | W1 to W6 | RTF |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| diagnostic | 90.0 m | 1.53 m | -6.92 m, 98.0% | FAIL | 14.3 s (11.2 s) | 800 in every message, 14.6 | W4 FAIL, rest PASS | 0.31 |
+| C2 1 | 88.0 m | 1.45 m | -85.65 m, 98.1% | FAIL | 14.6 s (11.6 s) | 800 (min 0), 14.8 | 15 PASS | 0.29 |
+| C2 2 (`lane_eval` beside) | 79.4 m | 1.53 m | -18.49 m, 97.9% | FAIL | 11.0 s (7.9 s) | 800, 14.9 | 15 PASS | 0.31 |
+| C2 3 | 88.1 m | 3.97 m | -17.80 m, 94.3% | FAIL | 11.0 s (8.0 s) | 800, 15.2 | W4 FAIL, rest PASS | 0.34 |
+| N1 `sim_cameras:=none` | 89.5 m | 2.02 m | -62.93 m, 97.7% | FAIL | 15.4 s (11.4 s) | **0 in all 119 messages**, 0.9 | W3 and W5 FAIL (no evidence), rest PASS | 0.44 |
+| A1 `gt_outputs:=false` | 64.2 m | 1.53 m | -58.23 m, 96.8% | FAIL | 10.4 s (7.3 s) | 800 (min 0), 15.2 | 14 PASS, W2 NA | 0.33 |
+
+`MOVED`, `PROGRESS` (the script's own span test) and `BARRELS` (8 sensors live, no
+contact) PASS in every run; `LANE` and `ON THE SLAB` FAIL in every run. The
+script's `PROGRESS` passes because the robot ranged 20 to 88 m over the ground;
+`course_progress.py` shows it advanced 1.5 to 4.0 m along the course, which is why
+D12 requires the arc. RTF is sim seconds over wall seconds across the watch window
+(first 0.3 m of motion to the end of `DURATION`), from a passive `/clock` log with
+wall stamps, not from `/stats`; laptop numbers, not Jetson numbers. `lane_warmup`
+was not raised (W5 held in every run, evidence first by 1.2 to 4.1 s); the Hough
+`grid_width`/`grid_height` knob was not used (RTF is below 0.5 but the failure is
+not about speed).
+
+**The controls.** N1 is a valid control by D13: `AUTONOMY CHECK` FAIL, zero cells
+at or above 90 in every one of its 119 messages (a 400 x 400 grid of unknown,
+re-stamped every sim second, stamp age median 0.00 s), arc 2.02 m, below the bar.
+It is also the F12 prediction confirmed: **a blind Hough grid is read as open road
+and the robot drives away from the course** (89.5 m, off the slab at height
+-40251 m), with `MOVED` and `PROGRESS` passing. A1 gives the same verdict as C2
+(MOVED and PROGRESS PASS, LANE and ON THE SLAB FAIL), so nothing read the ground
+truth: the ground-truth nodes were absent from its graph and it behaved the same.
+The planner's early-exit amendment (stop after the first failing C2 run, skip A1)
+reached the session after the three C2 runs had finished and A1 was in its last
+minute, so all of them are reported.
+
+**Diagnosis, one paragraph with numbers.** The camera is not blind in C2: its grid
+holds 800 lethal cells (two lines of 400 columns, 20 m at 0.05 m) in 100% of 1748
+to 1797 messages at 14.6 to 15.2 per sim second, stamp age (diagnostic run)
+median 0.13 s, 95th percentile 0.69 s, correct geometry and values in all. What it holds is wrong beyond
+about 3.5 m. `map_compare.py` (Hough `/lane_costmap` against the ground truth
+`/gt/lane_costmap` in the robot frame) at sim 8.0 s, robot still at the start:
+the Hough lines sit at +2.0 and -1.0 m lateral from 0.6 to 2.0 m ahead (its left
+line within 0.4 m of the painted left line), then bend to +0.9 and -2.1 m by 3.5 m ahead and stay at
+exactly those lateral positions from 3.5 m to the end of the grid (to 5.8 m
+shown; to 20 m stored), while the true left line goes from +0.8 m at 4.0 m to
+-0.6 m at 5.0 m and -2.0 m at 5.8 m, a 1.5 m miss at 5.0 m and 2.9 m at 5.8 m. That is R1 M12, the
+constant lateral extrapolation beyond the last seen point
+(`lane_detection.py:891-894`): the course turns right about 45 degrees within 3 m
+of the start, the detector sees only the first 3.5 m, and paints a straight
+corridor ahead. The navigator searches that corridor, drives straight, and the
+chassis crosses the real left paint 3.0 to 3.1 s after the robot first moves in
+every Hough run (first crossings above), as the blind N1 robot does (4.0 s). From there the
+robot is off the course (yaw to lane 66 to 86 degrees on average in the Hough
+runs) and runs 64 to 90 m until it leaves the slab; the grid keeps 800 lethal cells
+and a stamp age under 1 s throughout, which is consistent with straight
+extrapolated lines in a fresh-looking grid (F12) but was not captured after the
+crossing. The detector's own map scored
+against the paint (run C2 2, 150 s of wall time, `--expect-node
+lane_detection_node` passed): hit rate 0.391 at 0.25 m, coverage of all paint in
+the window 0.015, observed coverage 0.478 of 23 reference points, placement
+median 0.315 m; the ground-truth ceiling (`/gt/lane_map`, `--expect-node
+gt_nav_bridge_node`): hit rate 0.996, coverage 0.996. Those scores describe what
+the camera saw from a robot that had left the course within 3 seconds, so they are
+not the open-loop re-baseline (P2, deferred). Nothing was tuned.
+
+**W4, the TF race, is intermittent and is not the cause.** The Hough log showed
+"No TF from ... falling back to pinhole projection" in 2 of 6 runs (the
+diagnostic: 1 line; C2 3: 2 lines), none in the other four, always in the first
+0.4 to 2.7 s after the detector started and before the navigator's first goal
+(6 s later in C2 3). The runs with zero such lines (C2 1, C2 2, N1, A1) failed the
+same way. By the letter W4 FAILS in 2 of 6; a launch fix was not attempted: the
+detector's own TF listener starts empty whenever it is started, so a later start
+does not remove it, and a candidate (start the detector before Nav2's bring-up
+load, not with it) would need about four more runs to show an effect on a race
+that appears in a third of runs and does not explain the result.

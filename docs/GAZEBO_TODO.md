@@ -268,6 +268,15 @@ Verified means a command was run and a number came back. Nothing below is
       `/gt/*` in camera modes. U1, packaging, L1/L2/L4, G0a, N4, probe smoke pass;
       `gt_map` autonomy 3 of 3 PASS; default 2 of 3 (one Nav2 start-up abort).
       Not yet: any camera mode run, L3 (needs `igvc_dev_jazzy`, do at P6).
+- [ ] **Hough lanes in the loop: measured, not passing (P3b, 2026-10-09,
+      `GAZEBO_SETUP.md` 10.21).** `lane_source:=hough` with ground-truth barrels:
+      0 of 3 (arc 1.5 to 4.0 m against a 73.3 m bar, `LANE` and `ON THE SLAB`
+      FAIL). Cause: the detector sees the lane for about 3.5 m and extends it
+      straight (M12) while the course turns right 45 degrees within 3 m; the
+      chassis crosses the left paint 3 s after the first motion. The blind control
+      (`sim_cameras:=none`, zero lethal cells) fails the same way (F12). Next: the
+      open-loop re-baseline (P2), then YOLOPv2 (P6); no competition code was
+      changed or tuned.
 - [ ] **The robot USD and the URDF now disagree further** (new front ZED 2i link,
       lidar and mast, side cameras at 45 degrees; research pass 3, RQ-09). Which
       is the real robot is a tape-measure question for Aidan.
