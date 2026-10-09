@@ -262,6 +262,12 @@ Verified means a command was run and a number came back. Nothing below is
       navigator removes the barrel 1, 3 and 4 crossings but crosses at the barrel
       7 corner; saved as a patch, not committed. Next: the same rule over FREE
       cells only (unknown space beyond the paint is a suspect), 3 live runs.
+- [x] **DONE 2026-10-09 (P3a, `GAZEBO_SETUP.md` 10.21): the `lane_source` switch is
+      in the tree and ground truth is unchanged.** `lane_source:=gt|hough|yolopv2`,
+      `obstacle_source:=gt_map` (barrels on `/lidar_obstacle_map`), ground truth to
+      `/gt/*` in camera modes. U1, packaging, L1/L2/L4, G0a, N4, probe smoke pass;
+      `gt_map` autonomy 3 of 3 PASS; default 2 of 3 (one Nav2 start-up abort).
+      Not yet: any camera mode run, L3 (needs `igvc_dev_jazzy`, do at P6).
 - [ ] **The robot USD and the URDF now disagree further** (new front ZED 2i link,
       lidar and mast, side cameras at 45 degrees; research pass 3, RQ-09). Which
       is the real robot is a tape-measure question for Aidan.

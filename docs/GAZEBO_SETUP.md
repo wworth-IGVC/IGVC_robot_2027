@@ -2249,3 +2249,101 @@ lidar_min_range_m:=0.25 lidar_inflate_radius_m:=0.30" bash
 scripts/gazebo/autonomy_check.sh`. Corridors per barrel: `python3
 scripts/gazebo/measurements/barrel_gaps.py 0.20 0.30 0.40` (inside the container).
 
+
+### 10.21 `lane_source`: the switch is in the tree, ground truth unchanged, the barrels now their own overlay (2026-10-09)
+
+`gazebo_nav_test.launch.py` gains `lane_source:=gt|hough|yolopv2` (default `gt`),
+`lane_warmup`, `yolopv2_weights` and `gt_outputs`, and `obstacle_source:=gt_map`.
+Nothing here runs a camera yet; this is the plumbing and the proof that it does
+not disturb the ground-truth loop. The code was written offline (task P3s, against
+fake ROS modules) and applied and checked here (task P3a). Evidence:
+`local-notes/oneshot_evidence/P3a_lane_source_2026-10-09/`.
+
+What the switch does: in a camera mode the ground-truth bridge's `/lane_map` and
+`/lane_costmap` move to `/gt/lane_map` and `/gt/lane_costmap`, so the navigator and
+Nav2 cannot read them; `obstacle_source:=gt` under a camera is promoted to
+`gt_map` with a printed `NOTE:`; `gt_obstacle_map_node` (new, sim-only,
+`igvc_test_bringup`) publishes the barrels, and only the barrels, on
+`/lidar_obstacle_map` in `odom` with the bridge's own rasterising arithmetic, the
+same topic the navigator reads for the lidar map, so the navigator cannot tell
+them apart; the detectors (`lane_detection_node`, `lane_segmentation_node`) start
+with the protected configs verbatim; Nav2 starts at `nav2_delay` and the navigator
+after `lane_warmup`. YOLOPv2 refuses to start without `torch` or weights and names
+`igvc_dev_jazzy`. Default arguments give the old graph.
+
+| Test | Result |
+| --- | --- |
+| U1 `gt_obstacle_map_check.py` (node against the real bridge code and `track_points.json`) | PASS: 8 barrels parsed identically, 946 lethal cells in both, 0 differing; control A (inflation +0.10 m) differs in 334 cells, control B (spawn offset ignored) in 1893 |
+| Packaging: plain (non-symlink) `colcon build` of `igvc_test_bringup` | PASS: `ros2 pkg executables` lists `gt_obstacle_map_node`, it is installed executable, the module imports from `install/`, the installed launch file carries `lane_source`; the symlink workspace was restored and lists it too |
+| L1 `lane_source:=bogus`, L4 `obstacle_source:=bogus`, L2 `lane_source:=yolopv2` in `igvc_gazebo` | PASS, each exits 1 in 0 to 1 s with the stated message and spawns nothing. **L3 (bad weights path) not run**: it needs `igvc_dev_jazzy`; do it at the start of P6 |
+| G0a default graph unchanged | PASS after normalising (see below): 24 nodes and 90 topics before and after. Control: `obstacle_source:=gt_map` differs by exactly `gt_obstacle_map_node` and its publisher on `/lidar_obstacle_map` (25 nodes) |
+| N4 `lane_eval_sim.py --expect-node` | PASS: `lane_detection_node` on a default run exits 3 ("`/lane_map` is not published by lane_detection_node alone"); `gt_nav_bridge_node` proceeds and scores |
+| Probe smoke (`lane_source_probe.py`, default configuration, 60 sim s) | 12 PASS, 0 FAIL, 0 INCONCLUSIVE (its first contact with real rclpy) |
+
+**G0a needed a normalisation, and the helper's filter was wrong.** The raw
+`diff -r` of the two dumps was not empty, but every differing line was a `GID:`
+line or one of two anonymous `transform_listener_impl_<hex>` node names.
+`graph_dump.sh` removes lines matching `Endpoint GID`; this ROS prints `GID:`, so
+it removed nothing, and the tf listener names carry a random suffix. Nothing else
+differed. `local-notes/oneshot_evidence/scripts/g0a_norm.sh` drops `GID:` lines,
+renames the listeners and sorts; it touches nothing else (node and topic names and
+types, QoS and who-publishes-what are compared as dumped). Raw and normalised
+dumps are in the evidence folder.
+
+**C1: `obstacle_source:=gt_map`, `autonomy_check.sh`, 3 of 3 PASS.** One
+simulator, laptop numbers (RTX 5070 Ti Laptop), not Jetson numbers. The real-time
+factor is the mean of Gazebo `/stats` sampled every 10 s beside the run, including
+the start-up samples that read 0 (so the mean understates the steady state).
+
+| Run | Distance | `LANE` worst clearance | `BARRELS` | Arc advanced (`course_progress.py --arc-only`) | RTF mean |
+| --- | --- | --- | --- | --- | --- |
+| `gt_map` 1 (probe beside it) | 88.9 m | +0.190 m | PASS, 8 sensors live | 91.36 m | 0.40 |
+| `gt_map` 2 | 89.4 m | +0.220 m | PASS, 8 live | 91.66 m | 0.33 |
+| `gt_map` 3 | 90.0 m | +0.102 m | PASS, 8 live | 93.64 m | 0.47 |
+| default 1 | **0.0 m, MOVED and PROGRESS FAIL** | n/a | PASS | n/a | 0.49 |
+| default 2 (rerun) | 88.9 m | +0.144 m | PASS, 8 live | 92.39 m | 0.42 |
+| default 3 (rerun) | 86.9 m | +0.123 m | PASS, 8 live | 88.95 m | 0.45 |
+
+`gt_map` distances are within 5 percent of the passing default runs' (86.9 to
+88.9 m). The probe beside `gt_map` 1: W6 PASS, 946 lethal cells against 945
+expected from the 8 discs, all 8 disc centres lethal; W1 on `/lidar_obstacle_map`
+FAILED once on a naming race, below.
+
+**The first default run did not move, and I cannot prove the switch did not cause
+it.** `lifecycle_manager_navigation` aborted Nav2's bring-up (`Failed to change
+state for node: collision_monitor ... async_send_request fail`), after which
+nothing navigates: the start-up race `gazebo_nav_test.launch.py` already
+documents ("the whole sequence aborts if any one of them is slow"). The two
+reruns under the same harness passed, the graph is identical to the old one, and
+the default path's timers are unchanged, so it is recorded as 1 flake in 3
+default runs (and 0 in 3 `gt_map` runs); the earlier default run of the day on
+this branch also passed. If it recurs, look at the harness first (the RTF sampler
+runs `gz topic -e` every 10 s beside the launch during bring-up).
+
+**The probe's W1 had a bug the first real run found.** On `/lidar_obstacle_map` it
+saw `['_NODE_NAME_UNKNOWN_', 'gt_obstacle_map_node']` with at most 1 publisher at
+once over 674 samples: rclpy names an endpoint that way until its node has
+announced itself. `record_graph` now keeps unresolved names out of the set of
+seen names (they still count toward "at most one at once"). A four-case check
+(`scripts/probe_w1_check.py` in the evidence folder): the transient passes; two
+publishers at once, a wrong name and a name that never resolves all fail. A live
+`ros2 topic info -v /lidar_obstacle_map` during a `gt_map` run showed one
+publisher (`gt_obstacle_map_node`) and one subscriber (`igvc_navigator`).
+
+**Reference for the camera runs (D12).** Arc advanced by the passing
+ground-truth-lane runs of this tree: 91.36, 91.66, 93.64 (`gt_map`), 92.39, 88.95
+(default). **REF = 91.66 m** (median of all five; 92.03 m with the three `gt_map`
+runs and the first passing default run). It is more than one lap: the centreline
+is 78.83 m and the 100 s window covers about 1.16 laps, so the fraction of a lap
+reaches 1.16 to 1.19 and a run's arc is not bounded by 78.83. The 0.8 gate is
+therefore 73.3 m of arc.
+
+**Not verified.** Any camera mode (`hough`, `yolopv2`), whether the navigator
+reacts to the overlay as to barrels in the lane grid in a camera run (U1 proves
+equal cells, C1 in ground-truth lanes proves equal behaviour there), L3, and the
+probe's W2, W3, W4 geometry in a camera mode. The `helpers/*.sh` staging aids
+are not in the repository.
+
+Reproduce: `LAUNCH_ARGS="obstacle_source:=gt_map" bash
+scripts/gazebo/autonomy_check.sh`; U1: `python3
+scripts/gazebo/measurements/gt_obstacle_map_check.py`.
