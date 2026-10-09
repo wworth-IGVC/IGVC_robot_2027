@@ -2023,3 +2023,22 @@ Unit tests (`test_mission_planner_gps_gate.py`, rewritten for the distance
 gate): 12 pass on the new code, 11 fail on the old. The 0.22 to 0.24 m residual
 is the GPS antenna's offset from `base_link` (0.177, -0.133 m), which the
 planner does not correct; recorded, not fixed.
+
+**(b) The mission starts by itself (2026-10-08).** `auto_start` was false, and
+the config's own comment said an operator would call `~/start_mission` on the
+start line; the rules allow no operator during a run. It is now true by
+default (code and config), still gated by (a): `_begin()` waits for the start
+waypoint and the anchor. `scripts/gazebo/measurements/gps_mission_check.sh`
+runs the full stack (Nav2 and the lane navigator on ground truth) with the real
+planner, the start waypoint 15 m of lane ahead, the end 10 m after it, a 4 m
+gate, and never calls a service:
+
+| Code | `/mission/state` | Verdict |
+| --- | --- | --- |
+| before 5b (`auto_start: false`) | `idle` only; the planner anchored when the robot reached the gate and then waited | **FAIL** |
+| after 5b | `idle` -> `active` at 3.3 m from the start waypoint -> `lane_follow` 31 s later; Nav2 accepted the goal; "end waypoint reached"; robot 1.0 m from the end waypoint | **PASS** |
+
+That is the first GPS waypoint leg driven end to end in the simulator. It
+says nothing yet about the real robot's heading problem: in the simulator the
+odometry axes happen to point east and north (`gazebo_odom_shim`), which (c)
+addresses.

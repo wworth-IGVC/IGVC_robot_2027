@@ -6,10 +6,11 @@ mission_planner_node:
     state_topic: "/mission/state"
     virtual_obstacles_topic: "/mission/virtual_obstacles"
     clear_virtual_obstacles_topic: "/mission/clear_virtual_obstacles"
-    # Set true to launch the mission as soon as the GPS origin anchors.
-    # Operationally we leave this false and let an operator call the
-    # ~/start_mission service once the robot is on the start line.
-    auto_start: false
+    # Start the mission by itself as soon as the robot reaches the start
+    # waypoint and the GPS origin anchors.  True since 2026-10-08: the rules
+    # allow no operator during a run, so with false the mission never started
+    # unless someone called ~/start_mission by hand.
+    auto_start: true
     # Optionally pin the GPS↔odom anchor instead of taking the first fix.
     # NaN means "use first GPS fix" (default behaviour).
     origin_lat: .nan

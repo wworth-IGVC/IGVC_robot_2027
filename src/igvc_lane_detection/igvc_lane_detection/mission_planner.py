@@ -9,9 +9,11 @@ Drives the 4-waypoint IGVC AutoNav obstacle-avoidance mission:
     waypoint 3 — virtual obs.  (skip; stamp into /obstacle_map instead)
     waypoint 4 — end           (real Nav2 goal)
 
-The mission begins when the robot crosses an operator-controlled
-trigger (a ``std_srvs/Trigger`` call on ``~/start_mission``, or the
-``auto_start`` parameter set true).  It ends when Nav2 reports the
+The mission begins by itself once the robot has reached the start waypoint
+(the GPS gate below) and the waypoints are anchored: ``auto_start`` is true by
+default, because the rules allow no operator during a run (2026 rules p.11).
+A ``std_srvs/Trigger`` call on ``~/start_mission`` still works, and
+``auto_start:=false`` brings back the old hand-started behaviour.  It ends when Nav2 reports the
 final waypoint reached, after which the planner publishes
 ``lane_follow`` on ``/mission/state`` and the lane-following
 ``navigator_node`` takes over again.
@@ -147,7 +149,10 @@ class MissionPlannerNode(Node):
                                      '/mission/virtual_obstacles').value
         self._clear_topic        = p('clear_virtual_obstacles_topic',
                                      '/mission/clear_virtual_obstacles').value
-        self._auto_start         = bool(p('auto_start',     False).value)
+        # True since 2026-10-08: nobody may touch the robot during a run, so
+        # a mission that waits for ~/start_mission never starts.  _begin()
+        # still waits for the start-waypoint gate and the anchor.
+        self._auto_start         = bool(p('auto_start',     True).value)
         # If true, fall back to declared lat/lon origin instead of waiting
         # for first GPS fix.  Useful for sim playback.
         self._origin_lat_param   = float(p('origin_lat',    float('nan')).value)

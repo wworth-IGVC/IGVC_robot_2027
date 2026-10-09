@@ -25,8 +25,8 @@ Three lists, one entry per waypoint, in the order the robot meets them:
 - **`start`** is the mission entry. The robot lane-follows until a valid fix is
   within `gps_start_match_radius_m` (10 m) of it. Then the planner anchors the
   waypoints to where the robot is in odometry at that moment and stamps the
-  obstacles. The mission itself starts when `auto_start` is true or someone
-  calls `~/start_mission`.
+  obstacles, and the mission starts by itself (`auto_start: true`, the
+  default since 2026-10-08; nobody may touch the robot during a run).
 - **`obstacle`** waypoints are virtual obstacles stamped into the obstacle map,
   not goals.
 - **`end`** is the Nav2 goal. When it is reached the planner hands control
