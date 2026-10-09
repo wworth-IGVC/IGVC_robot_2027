@@ -286,6 +286,17 @@ Verified means a command was run and a number came back. Nothing below is
       (`sim_cameras:=none`, zero lethal cells) fails the same way (F12). Next: the
       open-loop re-baseline (P2), then YOLOPv2 (P6); no competition code was
       changed or tuned.
+- [ ] **YOLOPv2 in the loop never leaves the start (P6-mini, 2026-10-09,
+      `GAZEBO_SETUP.md` 10.23).** `lane_source:=yolopv2` in `igvc_dev_jazzy`: model
+      ready on `cuda:0`, L3 passes, but at the start pose the model's raw masks are
+      empty (the one visible line is 1 to 2 px wide at a grazing angle), its grid
+      keeps stamp 0.000 and 0 lethal cells, the navigator drops it after 5 s and
+      sends 0 goals: MOVED FAIL, 0.0 m. After about 3 m of forward driving the same
+      model masks the line (50,828 drivable-area and 4,970 lane pixels) and the mask
+      follows the curve. Next: start the loop 3 m ahead (or nudge it) to see whether
+      the YOLOPv2 grid follows the first right turn; the empty-first-view deadlock
+      (navigator holds on a stale grid, detector does not re-stamp) is worth
+      fixing in the stack.
 - [ ] **The robot USD and the URDF now disagree further** (new front ZED 2i link,
       lidar and mast, side cameras at 45 degrees; research pass 3, RQ-09). Which
       is the real robot is a tape-measure question for Aidan.

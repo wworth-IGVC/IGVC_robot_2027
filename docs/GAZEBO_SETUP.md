@@ -2486,3 +2486,54 @@ lane-crossing task (3 of 3 with `BARRELS` and `LANE` PASS) is **not met**.
 lidar-map runs (the question of what the controller did in the `fixB/2` turn is
 open); no lidar-map run at `min_range` 0.15 on the patched navigator, which is the
 next one-variable test; no Hough run with the patch (E1/E2 of the P1b plan).
+
+### 10.23 YOLOPv2 in the loop: one diagnostic lap, and it never leaves the start (P6-mini, 2026-10-09)
+
+`LAUNCH_ARGS="lane_source:=yolopv2"` in `igvc_dev_jazzy` (the simulator container
+for this test; torch 2.14 with CUDA, `yolopv2.pt` at `$YOLOPV2_WEIGHTS`), barrels
+promoted to `gt_map`, `lane_source_probe.py` and a passive `/clock` log beside the
+run. The competition's detector, the one the 2026 robot ran, **does not see the
+start pose, so the loop never moves.** Evidence:
+`local-notes/oneshot_evidence/P6_yolopv2_2026-10-09/` (`a` the run, `frame_probe`
+the images and numbers below).
+
+| Check | Result |
+| --- | --- |
+| L1, L4, and **L3** (`yolopv2_weights:=/nonexistent`) in `igvc_dev_jazzy` after rebuilding the workspace there | PASS, each rc=1 in 0 to 1 s with the stated message, nothing spawned |
+| W4 | PASS: "YOLOPv2 ready: 1 instance(s) on cuda:0 (half=True)", no CPU fallback |
+| W1, W2, W6 | PASS (one publisher per topic; no forbidden subscriber of `/gt/*`, only `map_compare` and one endpoint seen under an unresolved name; 946 lethal barrel cells against 945 expected) |
+| W3 | geometry 200 x 200 at 0.05, origin (0, -5), values PASS; **stamp age FAIL**: every one of the 584 `/lane_costmap` messages has stamp 0.000, so its age is the sim time (median 111 s); **lethal cells FAIL**: 0 in all 584 |
+| W5 | FAIL: no evidence ever (so `lane_warmup` is not the lever) |
+| Five criteria | MOVED FAIL (0.0 m, 624 s of wall time), PROGRESS FAIL, LANE PASS and BARRELS PASS only because it never moved (clearance +1.740 m), ON THE SLAB PASS. Arc 0 |
+| First crossing | none, it never moved. RTF 0.36 over the 100 s window (meaningless: the robot was still) |
+| No bring-up abort | 0 "Failed to change state" lines, so not void under D20 |
+
+**Mechanism, measured.** The segmentation node's own log, every few seconds for the
+whole run: "yolopv2 produced 0 projected points for cam[0]; raw_mask_px free=0
+lane=0, post_mask_px free=0 lane=0". Its grid therefore never changes from the
+empty grid it published at start-up, with stamp 0.000; the navigator drops a costmap
+older than 5 s ("Dropping stale lane costmap", then "No valid lane path visible (no
+/lane_costmap received)"), sends **0** FollowPath goals, and holds. Unlike Hough
+(10.21) the detector does not re-stamp an empty grid, so this is the N2 signature
+of the design (an empty creation-stamped grid) with the camera working.
+`yolo_frame_probe.py` (the competition's `YolopV2` class, the node's own settings,
+one RGB frame): at the **start pose** the frame (`frame_start.png`: one thin white
+line, 1 to 2 px wide, at a grazing angle across the lower left) gives **0
+drivable-area pixels and 0 lane pixels**, also with the pre-processing off and with
+the colour channels swapped, so it is not a channel-order or filter problem; after
+driving straight ahead for 6 s at 0.5 m/s (about 3 m, a diagnosis with `/cmd_vel`
+published by the probe, not a test) the same model on the next frame gives **50,828
+drivable-area and 4,970 lane pixels** with the node's settings (7,977 and 2,353 with
+the pre-processing off), and the lane mask follows the curved line across the image
+(`frame_after_drive_masks.png`), not a straight extrapolation. So the detector sees
+the first turn from 3 m in; it cannot get there because the loop only moves on a
+fresh grid and its first view is empty. Whether the projected grid follows the turn
+was not measured (the loop never ran).
+
+**Reading.** The loop deadlocks on an empty first view, and the same would happen to
+any detector that misses the start pose. On the real robot the start view is
+different, so this says nothing yet about a competition run, but it is a property
+worth fixing in the stack (a navigator that holds forever on a stale grid, and a
+detector that republishes an empty grid with stamp 0). Not done: a start 3 m ahead
+or a nudge, which would measure whether the YOLOPv2 grid follows the first right
+turn; a run past the start; the open-loop re-baseline (P2) with paced images.
