@@ -266,27 +266,28 @@ def _setup(context, *args, **kwargs):
         os.path.join("config", "gazebo_bridge.yaml"),
     )
 
-    # ── pacing for the point cloud ───────────────────────────────────────────
+    # ── pacing for the camera streams ────────────────────────────────────────
     #
-    # The cloud is 3.7 MB per message. Over the UDP-only Fast DDS the images
-    # set, it leaves a writer as a burst that overflows a reader's socket
-    # buffer, and a best-effort reader (the competition's lane_segmentation is
-    # one) then receives a fraction of the clouds. Measured 2026-10-07: 2.0 to
-    # 3.8 Hz of 7 to 13 Hz, and 99% once the cloud writers are paced. The
-    # profile paces only those writers; it is given only to the two kinds of
-    # process that publish them, via additional_env, so nothing else in the
-    # launch changes. A profile the environment already names is left alone.
-    # See config/fastdds_sim_cloud_pacing.xml and docs/GAZEBO_SETUP.md 10.13.
+    # The cloud is 5.5 MB per message, the depth image 0.9 MB and the RGB image
+    # 0.7 MB. Over the UDP-only Fast DDS the images set, each leaves a writer as
+    # a burst that overflows a reader's socket buffer, and a best-effort reader
+    # (the competition's lane_segmentation is one) then receives a fraction of
+    # them. Measured: clouds 15% to 34% (2026-10-07), RGB 21% and depth 35%
+    # (2026-10-08), unpaced. The profile paces only those writers; it is given
+    # only to the two kinds of process that publish them, via additional_env,
+    # so nothing else in the launch changes. A profile the environment already
+    # names is left alone. See config/fastdds_sim_camera_pacing.xml and
+    # docs/GAZEBO_SETUP.md 10.13 and 10.19.
     pacing_xml = _find(
         os.path.join("src", "igvc_test_bringup", "config",
-                     "fastdds_sim_cloud_pacing.xml"),
+                     "fastdds_sim_camera_pacing.xml"),
         "igvc_test_bringup",
-        os.path.join("config", "fastdds_sim_cloud_pacing.xml"),
+        os.path.join("config", "fastdds_sim_camera_pacing.xml"),
     )
     pacing_env = {}
     if os.environ.get("FASTRTPS_DEFAULT_PROFILES_FILE"):
         pacing_note = ("NOT applied, FASTRTPS_DEFAULT_PROFILES_FILE is already "
-                       "set (%s): the cloud may lose frames"
+                       "set (%s): the camera streams may lose frames"
                        % os.environ["FASTRTPS_DEFAULT_PROFILES_FILE"])
     elif not os.path.exists(pacing_xml):
         pacing_note = "NOT applied, %s is missing" % pacing_xml

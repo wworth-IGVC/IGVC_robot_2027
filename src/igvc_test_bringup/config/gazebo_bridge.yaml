@@ -160,7 +160,7 @@
 #  right for them. Measured: docs/GAZEBO_SETUP.md 10.6 and 10.13.
 #
 #  The raw cloud is 3.7 MB, and the bridge's writer for it is paced by a Fast
-#  DDS profile the launch supplies (config/fastdds_sim_cloud_pacing.xml). It is
+#  DDS profile the launch supplies (config/fastdds_sim_camera_pacing.xml). It is
 #  keyed on these topic names: rename one here and it must be renamed there, or
 #  a best-effort subscriber silently loses most of the clouds.
 # ─────────────────────────────────────────────────────────────────────────────

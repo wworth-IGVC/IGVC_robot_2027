@@ -47,7 +47,7 @@ They are equal in every report. A best-effort subscriber to its output once saw
 only 2.0 to 3.8 Hz of the 7 to 13 Hz it was publishing, and that loss was in
 the transport, not here: a 3.7 MB cloud crosses the UDP-only loopback as a burst
 that overflows the reader's socket buffer. The cure is the Fast DDS flow
-controller in config/fastdds_sim_cloud_pacing.xml, which gazebo_sim.launch.py
+controller in config/fastdds_sim_camera_pacing.xml, which gazebo_sim.launch.py
 gives to this node and to the bridge. Without it this node is exactly as
 correct and a consumer receives a fraction of the clouds.
 docs/GAZEBO_SETUP.md 10.13.

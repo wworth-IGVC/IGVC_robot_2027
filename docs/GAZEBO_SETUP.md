@@ -1724,7 +1724,7 @@ competition's `lane_segmentation` is one: it subscribes to the cloud with
 `qos_profile_sensor_data` (`67a6934`, `lane_segmentation.py:628`). A reliable
 reader gets repairs, which is why B3 saw everything.
 
-**The fix, in configuration.** `config/fastdds_sim_cloud_pacing.xml` is a Fast
+**The fix, in configuration.** `config/fastdds_sim_cloud_pacing.xml` (renamed `fastdds_sim_camera_pacing.xml` on 2026-10-08, when it also took the images, 10.19) is a Fast
 DDS profile with a flow controller (`cloud_pacer`: at most 131072 bytes every
 1 ms, 128 MB/s against the 51 MB/s that 13.7 Hz of clouds needs) attached by
 topic name to the six cloud writers (the raw and the re-stamped topic for each
@@ -2081,3 +2081,38 @@ No Man's Land, the ramp and judge-style waypoints (needs "course v2"); and the
 real robot's launch path, where the u-blox driver comes only from
 `sensor_launch.launch.py` (its include in `igvc_fused_drive.launch.py` is
 commented out; a proposal is in `docs/GPS_WAYPOINTS.md`, not made).
+
+### 10.19 The RGB and depth images were losing most of their frames too; now paced (2026-10-08)
+
+Measured like the cloud (10.13): `scripts/gazebo/camera_rate_check.py`, one
+large stream per run (a second large subscriber starves itself), a best-effort
+subscriber, counted against the camera's own `camera_info`, the kernel's
+`RcvbufErrors` beside it, 45 s per stream, front camera at 640x360 and 15 Hz.
+
+| Stream (size) | Unpaced: received / camera frames | `RcvbufErrors` | Paced | `RcvbufErrors` |
+| --- | --- | --- | --- | --- |
+| RGB image (0.69 MB) | **0.214** (2.51 Hz) | 2144 | **1.000** (11.07 Hz) | 15 |
+| depth image (0.92 MB) | **0.345** (3.98 Hz) | 2022 | **1.002** (11.40 Hz) | 40 |
+| point cloud (5.53 MB, paced since 10.13) | 1.000 | 20 | 1.000 | 11 |
+
+So until today every best-effort consumer of the simulated RGB image, which
+includes both lane detectors, received about a fifth of the frames. That is a
+candidate cause for the "missed lines" baseline of 10.17, measured with the
+images unpaced, and Hough's and YOLOPv2's numbers there should be re-measured.
+
+The fix is the same mechanism: the profile, renamed
+`config/fastdds_sim_camera_pacing.xml`, now also lists the image and depth
+writers (all three cameras), all sharing one FIFO flow controller,
+`camera_pacer`, at 131072 bytes per ms, so the three streams queue behind one
+another instead of bursting together. Gates on this tree: render PASS, smoke
+18/18, autonomy PASS (89.5 m, `LANE` +0.182 m, no barrel contact).
+
+**A build trap fixed on the way.** A symlink-install build directory keeps a
+link for every file it ever installed, so renaming or deleting a launch or
+config file leaves a dangling link and `colcon build` fails ("can't copy ...:
+doesn't exist or not a regular file") on every workspace built before the
+change. It happened twice today (the merge renamed `zed_multi.launch.py`; this
+rename). `igvc_build` now deletes dangling links, only those, in the packages
+it builds; the rename above then built without any manual cleanup.
+
+Evidence: `local-notes/oneshot_evidence/task6b_images_2026-10-08/`.

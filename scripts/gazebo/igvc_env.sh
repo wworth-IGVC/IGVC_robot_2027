@@ -77,7 +77,16 @@ igvc_source_ws () {
 IGVC_SIM_PACKAGES="zed_description yolo_msgs igvc_test_description igvc_test_bringup igvc_lane_detection"
 
 igvc_build () {   # optional args: a subset of packages
-    local pkgs="${*:-$IGVC_SIM_PACKAGES}" rc
+    local pkgs="${*:-$IGVC_SIM_PACKAGES}" rc p
+    # A symlink-install build directory keeps a symlink for every file it ever
+    # installed. When a launch or config file is renamed or deleted (the merge
+    # renamed zed_multi.launch.py; fastdds_sim_cloud_pacing.xml became
+    # fastdds_sim_camera_pacing.xml), the old link dangles and setup.py fails
+    # with "can't copy ...: doesn't exist or not a regular file", on every
+    # workspace built before the change. Remove dangling links only.
+    for p in $pkgs; do
+        [ -d "$WS/build/$p" ] && find "$WS/build/$p" -xtype l -delete 2>/dev/null
+    done
     # shellcheck disable=SC2086
     ( cd "$WS" && colcon build --symlink-install --base-paths "$REPO/src" \
         --packages-select $pkgs ) > /tmp/colcon.log 2>&1

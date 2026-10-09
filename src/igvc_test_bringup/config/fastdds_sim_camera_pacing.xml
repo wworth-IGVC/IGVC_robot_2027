@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  fastdds_sim_camera_pacing.xml   (fastdds_sim_cloud_pacing.xml until 2026-10-08)
+
+  Pace the simulated camera writers (RGB image, depth image, point cloud) so
+  that a best-effort subscriber receives them. Loaded by gazebo_sim.launch.py
+  for the two kinds of process that publish them (the ros_gz bridge and
+  gazebo_cloud_restamp), and by nothing else.
+
+  THE PROBLEM, measured (docs/GAZEBO_SETUP.md 10.13 and 10.19)
+  Fast DDS, here restricted to UDPv4 (FASTDDS_BUILTIN_TRANSPORTS=UDPv4, which
+  the compose files set because shared memory fails quietly: see
+  docker-compose.mac.yml), sends a large message as a burst of datagrams back to
+  back. That overflows the receiving socket's buffer (the kernel's
+  RcvbufErrors counter rises), and losing one datagram loses the whole message
+  for a best-effort reader. The competition's lane_segmentation is one: it
+  subscribes with qos_profile_sensor_data. Unpaced, a best-effort subscriber
+  received 15% to 34% of the clouds (2026-10-07), and 21% of the RGB images and
+  35% of the depth images (2026-10-08), one stream at a time, against the
+  camera's own camera_info.
+
+  THE FIX
+  One Fast DDS flow controller, camera_pacer, shared by these writers in a
+  process: ASYNCHRONOUS publication, at most 131072 bytes every 1 ms (128 MB/s),
+  so each message leaves as a stream instead of a burst, and the three streams
+  queue behind one another (FIFO) instead of bursting together. No camera
+  rate, resolution or threshold was changed.
+
+  WHAT IT TOUCHES
+  Only the writers named below. Every other writer in those two processes keeps
+  the default (/clock, /scan, /odom, tf, camera_info). The launch sets
+  RMW_FASTRTPS_PUBLICATION_MODE=AUTO for these two processes, which lets this
+  file choose the mode per writer; without it the rmw forces SYNCHRONOUS and
+  Fast DDS refuses to build a flow controller ("Cannot use a flow controller in
+  synchronously publication mode").
+
+  The profile names are topic names, written out for all three cameras so the
+  file need not change with sim_cameras. If a topic is renamed in
+  gazebo_bridge.yaml or the launch, rename it here too, or that stream silently
+  goes back to losing most of its messages. scripts/gazebo/camera_rate_check.py
+  (one stream per run, against camera_info) is the check.
+-->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+
+    <participant profile_name="igvc_sim_cloud_pacing" is_default_profile="true">
+        <rtps>
+            <flow_controller_descriptor_list>
+                <flow_controller_descriptor>
+                    <name>camera_pacer</name>
+                    <scheduler>FIFO</scheduler>
+                    <max_bytes_per_period>131072</max_bytes_per_period>
+                    <period_ms>1</period_ms>
+                </flow_controller_descriptor>
+            </flow_controller_descriptor_list>
+        </rtps>
+    </participant>
+
+    <!-- bridge to re-stamp node: the private names gazebo_bridge.yaml publishes -->
+    <data_writer profile_name="/sim/front_zed/points_optical_stamp">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/sim/left_zed/points_optical_stamp">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/sim/right_zed/points_optical_stamp">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+
+    <!-- re-stamp node to consumers: the ZED contract names -->
+    <data_writer profile_name="/front_zed_camera_x/zed_node/point_cloud/cloud_registered">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/left_zed_camera_x/zed_node/point_cloud/cloud_registered">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/right_zed_camera_x/zed_node/point_cloud/cloud_registered">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+
+    <!-- bridge to consumers: the RGB and depth images, on the ZED contract names (2026-10-08) -->
+    <data_writer profile_name="/front_zed_camera_x/zed_node/rgb/color/rect/image">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/front_zed_camera_x/zed_node/depth/depth_registered">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/left_zed_camera_x/zed_node/rgb/color/rect/image">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/left_zed_camera_x/zed_node/depth/depth_registered">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/right_zed_camera_x/zed_node/rgb/color/rect/image">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+    <data_writer profile_name="/right_zed_camera_x/zed_node/depth/depth_registered">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+                <flow_controller_name>camera_pacer</flow_controller_name>
+            </publishMode>
+        </qos>
+    </data_writer>
+
+</profiles>

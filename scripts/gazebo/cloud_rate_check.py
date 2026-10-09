@@ -28,7 +28,7 @@ information only, and only when asked for (--raw).
 WHY COUNT MESSAGES
 Not `ros2 topic hz`, and not the real-time factor: a 3.7 MB message is lost
 whole to a single dropped UDP datagram while the simulator reports a healthy
-RTF. That is what happened before config/fastdds_sim_cloud_pacing.xml (2.0 to
+RTF. That is what happened before config/fastdds_sim_camera_pacing.xml (2.0 to
 3.8 Hz received while the re-stamp node was publishing 7 to 13 Hz), and this is
 the check that sees it. See docs/GAZEBO_SETUP.md 10.13.
 

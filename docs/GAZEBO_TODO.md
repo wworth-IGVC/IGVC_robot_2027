@@ -395,7 +395,7 @@ Verified means a command was run and a number came back. Nothing below is
 - [x] **DONE 2026-10-07: the point-cloud frame is fixed and the cloud arrives.**
       `gazebo_cloud_restamp` republishes the cloud in the camera's body frame
       (3 of 3 frame arms as predicted), and a Fast DDS flow controller on the
-      cloud writers (`config/fastdds_sim_cloud_pacing.xml`) makes a best-effort
+      cloud writers (`config/fastdds_sim_camera_pacing.xml`) makes a best-effort
       subscriber receive it: 680 clouds against 680 camera frames in 60 s,
       where unpaced it saw 15% to 34% of the camera's frames. The loss was never the Python node, it
       was UDP datagrams dropped from a 3.7 MB burst. `scripts/gazebo/
