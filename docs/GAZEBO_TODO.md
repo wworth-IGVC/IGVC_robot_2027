@@ -235,14 +235,23 @@ Verified means a command was run and a number came back. Nothing below is
 - [x] **DONE:** `67a6934` merged on branch `adopt-competition`; every package
       builds; render, smoke and autonomy pass three times (89.0 to 90.1 m, `LANE`
       clearance +0.120 to +0.173 m). Moving `main` is Liam's.
-- [ ] **The competition navigator's path-heading clamp and validator disagree at
-      the boundary** (`navigator.py` `_limit_path_heading` and
-      `_path_invalid_reason`): a lane that turns more than `max_path_heading_rad`
-      (43 degrees) inside the look-ahead leaves the robot holding and reversing.
-      The simulator hides it with `max_path_heading_rad: 1.57` in
-      `gazebo_nav_test.launch.py`. Fixing it needs a unit test (a path at
-      exactly the limit must be accepted), a decision on the number, and Liam's
-      approval (protected package). Not started.
+- [x] **DONE 2026-10-09 (P1b, `GAZEBO_SETUP.md` 10.22; was F16): the navigator's
+      path-heading clamp and validator disagreed at the boundary.** Two defects
+      (float rounding at the limit, and straight sideways steps from repeated
+      forward positions). Fixed in `navigator.py` (`6c78a0e`) with 23 failing-first
+      tests (6 failed before, 23 pass after). At the competition's own 0.75 the
+      shipped navigator never moved (0.0 m, no FollowPath goal); patched it drives
+      the lap (90.0 m, LANE +0.146 m). The sim keeps `max_path_heading_rad: 1.57`
+      by default; `nav_max_path_heading_rad:=0.75` runs the real value. Dropping
+      the override is a later decision. The older navigator tests still fail 21 of
+      33 (F15, a transposed fixture), untouched.
+- [ ] **Lidar map after the navigator fix: 1 of 3** (`lidar_min_range_m:=0.25`,
+      patched navigator, 2026-10-09, 10.22): run 1 PASS (LANE +0.281 m, the best
+      on record), runs 2 and 3 touch barrels (barrel_4, and barrel_1) with LANE
+      -0.046 and -0.077 m; the `none` control still fails `BARRELS`. Cause of the
+      contacts not established (candidates: the 0.25 m minimum range; paths the
+      repair now accepts). Next: one run at `min_range` 0.15 on the patched
+      navigator, then capture `/lane_path` and `/cmd_vel*` in a failing run.
 - [ ] **`ublox_gps` needs `libasio-dev`, which the simulator image lacks.** An
       unchanged submodule, so `main` has the same property; the gates do not
       build it. Add it to `docker/Dockerfile.gazebo-jazzy` only if the team wants

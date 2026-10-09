@@ -2430,3 +2430,59 @@ detector's own TF listener starts empty whenever it is started, so a later start
 does not remove it, and a candidate (start the detector before Nav2's bring-up
 load, not with it) would need about four more runs to show an effect on a race
 that appears in a third of runs and does not explain the result.
+
+### 10.22 The navigator's heading check, fixed with failing-first tests (P1b, 2026-10-09)
+
+**F16 is two defects in `igvc_lane_detection/navigator.py`, and the competition's
+own `max_path_heading_rad: 0.75` triggers them.** (1) `_limit_path_heading` clamps
+each lateral step to `tan(max_heading) * df`, so a saturated step has a heading
+equal to the limit to within float rounding (about 2e-15 rad), and
+`_path_invalid_reason` rejected it with `heading > limit`: "path heading 0.75rad >
+0.75rad". (2) A sideways step in the search's raw path is flattened by the limiter
+into repeated points at one forward position; the smoother gives the repeats
+different lateral values, which makes straight sideways steps (heading exactly
+pi/2) that are rejected even at the most the validator accepts. The sim's
+`max_path_heading_rad: 1.57` of 10.15 hid (1) and exposed (2) as "1.57 > 1.57".
+The fix (commit `6c78a0e`): the validator allows `_HEADING_TOLERANCE_RAD = 1e-6`,
+and `_condition_path_points` merges the repeats and conditions again only for a
+path that would otherwise be rejected. No new parameter; no config changed.
+
+| Check | Shipped navigator | Patched |
+| --- | --- | --- |
+| The two new test files, real rclpy (`test_navigator_path_conditioning.py`, `test_navigator_camera_grid_paths.py`, 23 tests) | 6 failed, 17 passed | 23 passed |
+| The older navigator test files (F15, a fixture that predates the overlay) | 21 failed, 12 passed | 21 failed, 12 passed (unchanged) |
+| Ground-truth lap at the competition's value, `nav_max_path_heading_rad:=0.75` | "pose 14 path heading 0.75rad > 0.75rad", one reverse recovery, **no FollowPath goal sent, 0.0 m in 624 s of wall time**, MOVED and PROGRESS FAIL | 0 heading lines, **MOVED 90.0 m, LANE +0.146 m**, BARRELS PASS, RTF 0.39 |
+| Default run (sim override 1.57) | (passed before; P3a) | PASS, 86.8 m, LANE +0.154 m, 0 heading lines, RTF 0.36 |
+
+The unpatched 0.75 run is the live failing-first control: the shipped navigator
+cannot drive the real robot's own setting. The launch argument
+`nav_max_path_heading_rad` (default 1.57 = today, commit `d534e99`) makes the
+simulator run at 0.75; whether to drop the 1.57 override is a later decision. RTF
+is sim seconds over wall seconds across the watch window, from a passive `/clock`
+log; laptop numbers. Evidence: `local-notes/oneshot_evidence/P1b_live_2026-10-09/`.
+
+**The lidar map after the fix: 1 of 3, and a new failure.** `obstacle_source:=lidar_map
+lidar_min_range_m:=0.25` (inflation the competition's 0.20), patched navigator, 0
+heading lines in every run:
+
+| Run | Distance | `LANE` worst clearance | `BARRELS` | RTF |
+| --- | --- | --- | --- | --- |
+| 1 | 88.7 m | +0.281 m (no crossing) | PASS | 0.37 |
+| 2 | 89.7 m | -0.046 m, 0.8% over (barrel_1 area) | **FAIL**, touched barrel_1 and barrel_4 | 0.37 |
+| 3 | 86.9 m | -0.077 m, 1.4% over (2.0 m from barrel_2, left line) | **FAIL**, touched barrel_4 | 0.40 |
+| `obstacle_source:=none` (control) | 86.9 m | +0.740 m | **FAIL**, touched barrel_4 | 0.32 |
+
+Run 1 is the best lidar-map result on record (the crossings of 10.16 and 10.20 are
+absent), and runs 2 and 3 touch barrels, which the 10.16 runs (shipped navigator at
+1.57, `min_range` 0.15) did not in 3 of 3. This is three runs and one change at a
+time was not possible: the navigator, `lidar_min_range_m` 0.25 and the days differ
+from 10.16. Which of them produces the contacts is **not established**; the
+untested candidates are the 0.25 m minimum range (a barrel within 0.25 m of the
+lidar is not mapped) and paths the repair now accepts that the shipped code
+rejected. The `none` control fails `BARRELS` as it must. The pass criterion of the
+lane-crossing task (3 of 3 with `BARRELS` and `LANE` PASS) is **not met**.
+
+**Not done here.** No capture of `/lane_path`, `/cmd_vel*` and the odometry in the
+lidar-map runs (the question of what the controller did in the `fixB/2` turn is
+open); no lidar-map run at `min_range` 0.15 on the patched navigator, which is the
+next one-variable test; no Hough run with the patch (E1/E2 of the P1b plan).
