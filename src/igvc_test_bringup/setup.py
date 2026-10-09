@@ -30,6 +30,7 @@ setup(
             'sim_startup_helper = igvc_test_bringup.sim_startup_helper:main',
             'gazebo_odom_shim = igvc_test_bringup.gazebo_odom_shim:main',
             'gazebo_cloud_restamp = igvc_test_bringup.gazebo_cloud_restamp:main',
+            'gt_obstacle_map_node = igvc_test_bringup.gt_obstacle_map:main',
         ],
     },
 )
