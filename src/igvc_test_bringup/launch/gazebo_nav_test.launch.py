@@ -98,6 +98,35 @@ Arguments
                    obstacle_map_topic). The node's parameters and the lidar
                    mount are the ones igvc_fused_drive.launch.py uses, the
                    mount read from the URDF by that file's own function.
+        gt_map     the barrels from track_points.json, and only the barrels,
+                   on /lidar_obstacle_map (gt_obstacle_map_node), the topic the
+                   navigator overlays; the bridge's grid carries none. Valid
+                   with any lane_source. The same cells as gt, by a different
+                   route (scripts/gazebo/measurements/gt_obstacle_map_check.py)
+    lane_source                   where the lane grids come from
+                                  (default: gt, the behaviour before 2026-10-09)
+        gt         gt_nav_bridge_node publishes /lane_map and /lane_costmap
+        hough      the competition's lane_detection_node (OpenCV Hough, no
+                   torch, runs in igvc_gazebo) does, from the front camera
+        yolopv2    the competition's lane_segmentation_node does; it needs
+                   torch and weights, so run it in igvc_dev_jazzy
+        With hough or yolopv2, obstacle_source:=gt is promoted to gt_map (and
+        the launch says so), because gt means "barrels stamped into the
+        ground-truth lane grid", which is not the planner's grid then. The
+        ground-truth bridge keeps running for scoring, on /gt/lane_map and
+        /gt/lane_costmap; track_ground_truth_node's /lane_ground_truth is
+        unchanged. Detector and navigator are started later than Nav2: see
+        lane_warmup.
+    lane_warmup                   seconds from the detector to the navigator in
+                                  camera modes (default: auto, hough 5,
+                                  yolopv2 45; a number overrides). Without it
+                                  an empty grid reads as open road and the
+                                  robot drives straight off.
+    yolopv2_weights               weights path (default: $YOLOPV2_WEIGHTS)
+    gt_outputs                    camera modes only: whether the ground-truth
+                                  nodes run at all (default: true; false is
+                                  the leak ablation, nothing of the ground
+                                  truth is then in the graph)
 """
 
 import json
@@ -133,8 +162,15 @@ def _find(rel_from_repo: str, pkg: str, rel_from_share: str) -> str:
     return os.path.join(_repo_root(), rel_from_repo)
 
 
+# ── lane_source: where /lane_map and /lane_costmap come from ─────────────────
+LANE_SOURCES = ("gt", "hough", "yolopv2")
+# Seconds from the detector to the navigator in camera modes. Initial guesses,
+# to be replaced by what test W5 measures (the navigator must not move the robot
+# before there is lane evidence on /lane_costmap).
+LANE_WARMUP_DEFAULT = {"gt": 0.0, "hough": 5.0, "yolopv2": 45.0}
+
 # ── obstacle_source: where the planner's barrels come from ───────────────────
-OBSTACLE_SOURCES = ("gt", "none", "nav2_scan", "lidar_map")
+OBSTACLE_SOURCES = ("gt", "gt_map", "none", "nav2_scan", "lidar_map")
 
 
 def _track_without_obstacles(track_file: str) -> str:
@@ -154,6 +190,21 @@ def _track_without_obstacles(track_file: str) -> str:
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(data, fh)
     return out
+
+
+def _shared_inflate(shared_cfg: str) -> float:
+    """obstacle_inflate_radius_m exactly as gt_nav_bridge_node gets it.
+
+    gt_obstacle_map_node must grow each barrel by the same margin the bridge
+    does, or the two routes to the navigator would mark different cells. The
+    value is read out of the shared YAML the bridge is launched with, so they
+    cannot drift apart; 0.3 is the bridge's own code default, used when the key
+    is absent, because that is what the bridge would then use.
+    """
+    with open(shared_cfg, encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    params = (data.get("gt_nav_bridge_node") or {}).get("ros__parameters") or {}
+    return float(params.get("obstacle_inflate_radius_m", 0.3))
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -210,13 +261,64 @@ def _setup(context, *args, **kwargs):
 
     use_sim_time = cfg("use_sim_time").lower() in ("true", "1", "yes")
     odom_topic = cfg("odom_topic")
+    lane_source = cfg("lane_source")
+    if lane_source not in LANE_SOURCES:
+        raise RuntimeError("lane_source:=%s is not one of %s"
+                           % (lane_source, ", ".join(LANE_SOURCES)))
     obstacle_source = cfg("obstacle_source")
     if obstacle_source not in OBSTACLE_SOURCES:
         raise RuntimeError("obstacle_source:=%s is not one of %s"
                            % (obstacle_source, ", ".join(OBSTACLE_SOURCES)))
+    # obstacle_source gt means "the barrels are stamped into the ground-truth
+    # lane grid". With a camera detector that grid is not the planner's, so the
+    # barrels would silently vanish. Promote to gt_map (the same barrels, on
+    # the navigator's overlay topic) and say so. This must happen before
+    # bridge_track is derived from obstacle_source.
+    promoted = lane_source != "gt" and obstacle_source == "gt"
+    if promoted:
+        obstacle_source = "gt_map"
+        print("NOTE: lane_source:=%s with obstacle_source:=gt. gt stamps the "
+              "barrels into the ground-truth lane grid, which the planner does "
+              "not read in this mode, so obstacle_source is promoted to gt_map "
+              "(the same barrels on /lidar_obstacle_map)." % lane_source)
     bridge_track = cfg("track_file")
     if obstacle_source != "gt":
         bridge_track = _track_without_obstacles(bridge_track)
+
+    warm_arg = cfg("lane_warmup")
+    if warm_arg == "auto":
+        lane_warmup = LANE_WARMUP_DEFAULT[lane_source]
+    else:
+        try:
+            lane_warmup = float(warm_arg)
+        except ValueError:
+            raise RuntimeError("lane_warmup:=%s is not 'auto' or a number of "
+                               "seconds" % warm_arg) from None
+    gt_outputs = cfg("gt_outputs").lower() in ("true", "1", "yes")
+
+    # YOLOPv2 needs torch and weights. Both are checked here, before anything is
+    # built, so a missing one fails in the first second and not after the
+    # navigator's start timer. Only igvc-dev-jazzy has torch (the simulator's
+    # igvc_gazebo image deliberately does not).
+    yolopv2_weights = ""
+    if lane_source == "yolopv2":
+        import importlib.util
+        if importlib.util.find_spec("torch") is None:
+            raise RuntimeError(
+                "lane_source:=yolopv2 needs torch, which only igvc-dev-jazzy "
+                "has. Run this in igvc_dev_jazzy (igvc_dev_jazzy_linux on "
+                "native Linux), not igvc_gazebo.")
+        yolopv2_weights = (cfg("yolopv2_weights")
+                           or os.environ.get("YOLOPV2_WEIGHTS", ""))
+        if not yolopv2_weights or not os.path.isfile(yolopv2_weights):
+            raise RuntimeError(
+                "YOLOPv2 weights not found (%r). Run "
+                "src/igvc_lane_detection/scripts/fetch_yolopv2_weights.sh, "
+                "set YOLOPV2_WEIGHTS, or pass yolopv2_weights:=" % yolopv2_weights)
+    if lane_source != "gt" and cfg("sim_cameras") == "none":
+        print("WARNING: lane_source:=%s with sim_cameras:=none. No image will "
+              "arrive. This is the negative control, not a working setup."
+              % lane_source)
 
     # The same config the Isaac nav test uses. Nothing in it is Isaac-specific:
     # it is grid geometry, obstacle inflation and navigator gains. Sharing it
@@ -284,12 +386,21 @@ def _setup(context, *args, **kwargs):
     # It reads the odometry pose as a pose in the ground-truth grid's frame,
     # with no TF lookup anywhere, which is why gazebo_odom_shim has to correct
     # the frame at the source rather than leaving it to map -> odom.
+    #
+    # With a camera detector (lane_source hough or yolopv2) /lane_map and
+    # /lane_costmap belong to the detector, which hard-codes the same two
+    # names, and exactly one node may publish them. The bridge is moved onto
+    # /gt/... so it can still be scored against; only names that collide move.
+    gt_remaps = [("/odom", odom_topic)]
+    if lane_source != "gt":
+        gt_remaps += [("/lane_map", "/gt/lane_map"),
+                      ("/lane_costmap", "/gt/lane_costmap")]
     gt_bridge_node = Node(
         package="igvc_lane_detection",
         executable="gt_nav_bridge_node",
         name="gt_nav_bridge_node",
         output="screen",
-        remappings=[("/odom", odom_topic)],
+        remappings=gt_remaps,
         parameters=[
             shared_cfg,
             {
@@ -327,7 +438,14 @@ def _setup(context, *args, **kwargs):
         }],
     )
 
-    actions = [sim, gt_node, gt_bridge_node, localization_node]
+    # The ground-truth nodes run in gt mode (they ARE the lane source) and, by
+    # default, in camera modes (scoring only). gt_outputs:=false leaves them out
+    # of a camera run altogether, which is the ablation that shows nothing in
+    # the graph was reading them.
+    actions = [sim]
+    if lane_source == "gt" or gt_outputs:
+        actions += [gt_node, gt_bridge_node]
+    actions.append(localization_node)
 
     # ── obstacles from the lidar, the way the 2026 robot got them ────────────
     #
@@ -369,6 +487,92 @@ def _setup(context, *args, **kwargs):
                 "publish_hz": 5.0,
             }],
         ))
+
+    # ── the barrels alone, on the navigator's overlay topic ──────────────────
+    #
+    # obstacle_source gt_map: the barrels the ground-truth bridge would have
+    # stamped into /lane_costmap, published instead on /lidar_obstacle_map (the
+    # topic navigator_config.yaml names), so a camera detector can own the lane
+    # grid and the barrels still reach the planner. Never started with
+    # lidar_map: both would publish that topic, and obstacle_source is one value.
+    #
+    # track_file is the ORIGINAL, with its obstacles_m: the bridge's copy has
+    # them emptied. Inflation is read from the same YAML the bridge gets, and the
+    # grid is 80 x 80 m like /lane_ground_truth, which holds the whole course.
+    if obstacle_source == "gt_map":
+        actions.append(Node(
+            package="igvc_test_bringup",
+            executable="gt_obstacle_map_node",
+            name="gt_obstacle_map_node",
+            output="screen",
+            parameters=[{
+                "use_sim_time": use_sim_time,
+                "track_file": cfg("track_file"),
+                "output_topic": "/lidar_obstacle_map",
+                "frame_id": "odom",
+                "width_m": 80.0,
+                "height_m": 80.0,
+                "origin_x": -40.0,
+                "origin_y": -40.0,
+                "resolution": 0.10,
+                "inflate_radius_m": _shared_inflate(shared_cfg),
+                "publish_hz": 1.0,
+            }],
+        ))
+
+    # ── lanes from the camera ────────────────────────────────────────────────
+    #
+    # The competition's own detector, its own protected config loaded verbatim,
+    # nothing tuned. The node name must equal the YAML's top-level key or the
+    # params file does not apply. It starts in its own timer, at the Nav2 delay,
+    # so TF (map -> odom, odom -> base_link, the camera frames) is up first: a
+    # detector that starts before it falls back to a pinhole projection and puts
+    # the lanes in the wrong place (the 2026-09-29 Hough run). Inline values are
+    # only what the simulator needs: sim time, one camera, the odometry topic.
+    detector = None
+    if lane_source == "hough":
+        detector = Node(
+            package="igvc_lane_detection",
+            executable="lane_detection_node",
+            name="lane_detection_node",
+            output="screen",
+            parameters=[
+                _find(
+                    os.path.join("src", "igvc_test_bringup", "config",
+                                 "lane_detection_config.yaml"),
+                    "igvc_test_bringup",
+                    os.path.join("config", "lane_detection_config.yaml")),
+                {
+                    "use_sim_time": use_sim_time,
+                    # The config says 3 (the real robot's cameras); the
+                    # simulator has the front one, sim_cameras:=front.
+                    "num_cameras": 1,
+                },
+            ],
+        )
+    elif lane_source == "yolopv2":
+        detector = Node(
+            package="igvc_lane_detection",
+            executable="lane_segmentation_node",
+            name="lane_segmentation_node",
+            output="screen",
+            parameters=[
+                _find(
+                    os.path.join("src", "igvc_test_bringup", "config",
+                                 "lane_segmentation_config.yaml"),
+                    "igvc_test_bringup",
+                    os.path.join("config", "lane_segmentation_config.yaml")),
+                {
+                    "use_sim_time": use_sim_time,
+                    "model_weights": yolopv2_weights,
+                    # A parameter, so a remapping would do nothing.
+                    "odom_topic": odom_topic,
+                },
+            ],
+        )
+    if detector is not None:
+        actions.append(TimerAction(period=float(cfg("nav2_delay")),
+                                   actions=[detector]))
 
     # ── Nav2 and the navigator: the part that makes the robot drive itself ───
     use_nav2 = cfg("nav2").lower() in ("true", "1", "yes")
@@ -471,15 +675,46 @@ def _setup(context, *args, **kwargs):
         #
         # It also spares the navigator its first few seconds of complaining
         # about a costmap and an odometry topic that do not exist yet.
-        actions.append(TimerAction(period=float(cfg("nav2_delay")),
-                                   actions=[nav2, navigator_node]))
+        #
+        # In camera modes the navigator waits lane_warmup longer than Nav2. An
+        # empty grid reads as open road (the navigator treats unknown as
+        # drivable), so it would drive straight off before the detector had
+        # drawn a line, and with no grid at all it logs "no /lane_costmap",
+        # holds, and reverses. The warm-up is a guess; test W5 measures it.
+        delay = float(cfg("nav2_delay"))
+        if lane_source == "gt":
+            actions.append(TimerAction(period=delay,
+                                       actions=[nav2, navigator_node]))
+        else:
+            actions.append(TimerAction(period=delay, actions=[nav2]))
+            actions.append(TimerAction(period=delay + lane_warmup,
+                                       actions=[navigator_node]))
 
     print("gazebo_nav_test.launch.py")
     print("  shared config : %s" % shared_cfg)
     print("  odom topic    : %s" % odom_topic)
     print("  nav2          : %s" % ("on" if use_nav2 else "off"))
-    print("  obstacles     : %s (planner track file %s; nav2 overrides %s)"
-          % (obstacle_source, bridge_track, nav2_overrides))
+    # /tmp/autonomy.log is the only record of which configuration a run used.
+    print("  lanes         : %s (/lane_costmap and /lane_map from %s)"
+          % (lane_source,
+             {"gt": "gt_nav_bridge_node", "hough": "lane_detection_node",
+              "yolopv2": "lane_segmentation_node"}[lane_source]))
+    if lane_source == "yolopv2":
+        print("  weights       : %s" % yolopv2_weights)
+    if lane_source == "gt":
+        print("  ground truth  : feeds the planner (gt_outputs does not apply)")
+    elif gt_outputs:
+        print("  ground truth  : /gt/lane_map, /gt/lane_costmap, scoring only")
+    else:
+        print("  ground truth  : not started (gt_outputs:=false)")
+    print("  obstacles     : %s%s (planner track file %s; nav2 overrides %s)"
+          % (obstacle_source, " (promoted from gt)" if promoted else "",
+             bridge_track, nav2_overrides))
+    if obstacle_source == "gt_map":
+        print("  barrel overlay: gt_obstacle_map_node on /lidar_obstacle_map")
+    if lane_source != "gt" and use_nav2:
+        print("  navigator     : starts at nav2_delay + %.1f s (lane_warmup %s)"
+              % (lane_warmup, cfg("lane_warmup")))
     if lidar_mount is not None:
         print("  lidar mount   : x %.3f y %.3f yaw %.4f (from the URDF, as "
               "igvc_fused_drive.launch.py reads it)" % lidar_mount)
@@ -530,10 +765,35 @@ def generate_launch_description():
                         "lifecycle nodes are not activating while Gazebo is "
                         "still loading meshes and rendering its first frame."),
         DeclareLaunchArgument(
+            "lane_source", default_value="gt",
+            description="Where /lane_map and /lane_costmap come from: gt "
+                        "(gt_nav_bridge_node, the default), hough (the "
+                        "competition's lane_detection_node, from the front "
+                        "camera) or yolopv2 (lane_segmentation_node; needs "
+                        "torch and weights, run it in igvc_dev_jazzy). With "
+                        "hough or yolopv2, obstacle_source gt is promoted to "
+                        "gt_map."),
+        DeclareLaunchArgument(
+            "lane_warmup", default_value="auto",
+            description="lane_source hough or yolopv2: seconds from the "
+                        "detector to the navigator. auto = hough 5, yolopv2 "
+                        "45; a number overrides. The detector starts with "
+                        "Nav2, at nav2_delay."),
+        DeclareLaunchArgument(
+            "yolopv2_weights", default_value="",
+            description="lane_source:=yolopv2: path to the weights. Empty "
+                        "means $YOLOPV2_WEIGHTS."),
+        DeclareLaunchArgument(
+            "gt_outputs", default_value="true",
+            description="lane_source hough or yolopv2: whether the "
+                        "ground-truth nodes run at all (scoring only, on "
+                        "/gt/...). false is the leak ablation."),
+        DeclareLaunchArgument(
             "obstacle_source", default_value="gt",
             description="Where the planner's barrels come from: gt (stamped "
-                        "from track_points.json, the default), none (not at "
-                        "all; a negative control), nav2_scan (Nav2's "
+                        "from track_points.json, the default), gt_map (the "
+                        "same barrels, alone, on /lidar_obstacle_map), none "
+                        "(not at all; a negative control), nav2_scan (Nav2's "
                         "obstacle_layer on /scan alone), lidar_map (the "
                         "competition's lidar_obstacle_costmap_node). The "
                         "barrels stay in the world in every case."),
