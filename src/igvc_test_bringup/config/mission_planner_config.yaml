@@ -26,6 +26,15 @@ mission_planner_node:
     gps_start_match_enabled: true
     gps_start_match_radius_m: 10.0
     gps_start_match_required_fixes: 1
+    # Odometry's axes follow the robot's start heading, not east and north.
+    # The planner estimates the angle between them by fitting the /fix track to
+    # the odom track while it drives, and anchors the waypoints only once it
+    # has at least odom_yaw_fit_min_travel_m of travel and a residual under
+    # odom_yaw_fit_max_residual_m.  false restores the old assumption that odom
+    # x is east, which is wrong unless the robot starts facing east.
+    odom_yaw_fit_enabled: true
+    odom_yaw_fit_min_travel_m: 10.0
+    odom_yaw_fit_max_residual_m: 2.0
     # ENTER THE DAY'S WAYPOINTS HERE, in this one file, before each run, in
     # degrees (decimal, south and west negative): see docs/GPS_WAYPOINTS.md.
     # The shipped (0, 0) is a placeholder and the planner says so loudly and

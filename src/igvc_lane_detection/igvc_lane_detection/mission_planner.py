@@ -32,7 +32,22 @@ moment, so a waypoint east ``e`` and north ``n`` of it lands at odom
 ``(x0 + e, y0 + n)`` with ``(x0, y0)`` the robot's odom position then.  Before
 2026-10-08 the odom origin was assumed to be the fix, which is only true if the
 robot has not moved since boot.  Lat/lon → east/north is ``gps_to_map``
-(WGS-84 flat-earth).  The odom axes are still assumed to point east and north.
+(WGS-84 flat-earth).
+
+Odometry starts at identity, so its x axis points wherever the robot faced at
+boot, not east.  Until 2026-10-08 the planner put east and north straight into
+odom x and y, which rotates every waypoint by the start heading (about 90 deg at
+a north or south start; the simulator hid it because its odometry happens to be
+world-aligned).  Now the planner fits the robot's ``/fix`` track to its odom
+track while it drives (it lane-follows to the start waypoint anyway): a 2D
+rotation over the displacements from the first sample, needing
+``odom_yaw_fit_min_travel_m`` of travel and a residual under
+``odom_yaw_fit_max_residual_m``.  The waypoints are anchored only once that
+estimate exists, and a waypoint east ``e`` and north ``n`` of the anchoring fix
+lands at odom ``(x0, y0) + R(-yaw) (e, n)``.  The estimate, its residual and the
+travel behind it are logged and published (Vector3Stamped x, y, z) on
+``odom_yaw_fit_topic``.  ``odom_yaw_fit_enabled:=false`` restores the old
+east-north assumption (a negative control).
 
 Topics
 ------
@@ -169,6 +184,13 @@ class MissionPlannerNode(Node):
             p('gps_start_match_radius_m', 10.0).value)
         self._gps_start_match_required_fixes = max(
             1, int(p('gps_start_match_required_fixes', 1).value))
+        # The heading between odom and east/north (see the module docstring).
+        self._yaw_fit_enabled = bool(p('odom_yaw_fit_enabled', True).value)
+        self._yaw_fit_min_travel_m = float(
+            p('odom_yaw_fit_min_travel_m', 10.0).value)
+        self._yaw_fit_max_residual_m = float(
+            p('odom_yaw_fit_max_residual_m', 2.0).value)
+        self._yaw_fit_topic = p('odom_yaw_fit_topic', '/mission/odom_enu_yaw').value
 
         # ── Ramp handling ──────────────────────────────────────────
         self._ramp_enabled       = bool(p('ramp_enabled', True).value)
@@ -224,6 +246,13 @@ class MissionPlannerNode(Node):
         # The robot's odom position when the origin was anchored.  (0, 0) for a
         # pinned origin_lat/origin_lon, which assumes odom started there.
         self._origin_xy: tuple = (0.0, 0.0)
+        # Heading fit: the first valid fix is the ENU reference for the
+        # samples; each sample is (odom x, odom y, east, north).
+        self._fit_ref: Optional[tuple] = None
+        self._fit_samples: list = []
+        self._odom_enu_yaw: Optional[float] = None
+        self._fit_residual = float('nan')
+        self._fit_travel = 0.0
         self._gps_start_match_count = 0
         self._gps_start_area_confirmed = not self._gps_start_match_enabled
         if (math.isfinite(self._origin_lat_param)
@@ -267,6 +296,8 @@ class MissionPlannerNode(Node):
             PoseArray, self._virtual_topic, latched)
         self._clear_pub = self.create_publisher(
             Empty, self._clear_topic, 10)
+        self._yaw_pub = self.create_publisher(
+            Vector3Stamped, self._yaw_fit_topic, latched)
 
         self.create_subscription(
             NavSatFix, self._gps_topic,
@@ -314,17 +345,87 @@ class MissionPlannerNode(Node):
     def _anchor_waypoints(self) -> None:
         assert self._origin_lat is not None and self._origin_lon is not None
         ox, oy = self._origin_xy
+        yaw = self._anchor_yaw()
+        c, s = math.cos(yaw), math.sin(yaw)
         for wp in self._waypoints:
             east, north = gps_to_map(
                 wp.lat, wp.lon, self._origin_lat, self._origin_lon)
-            wp.x, wp.y = ox + east, oy + north
+            # enu = R(yaw) odom, so odom = R(-yaw) enu
+            wp.x = ox + c * east + s * north
+            wp.y = oy - s * east + c * north
         self.get_logger().info(
             f'mission_planner: origin anchored at '
             f'({self._origin_lat:.6f}, {self._origin_lon:.6f}) = odom '
-            f'({ox:.2f}, {oy:.2f}); '
+            f'({ox:.2f}, {oy:.2f}), odom x {math.degrees(yaw):.1f} deg from '
+            f'east; '
             + ', '.join(f'wp{i}({w.kind})=({w.x:.1f},{w.y:.1f})'
                         for i, w in enumerate(self._waypoints)))
         self._publish_virtual_obstacles()
+
+    def _anchor_yaw(self) -> float:
+        """The odom-to-ENU yaw to anchor with: the fit, or 0 when disabled."""
+        if self._yaw_fit_enabled and self._odom_enu_yaw is not None:
+            return self._odom_enu_yaw
+        return 0.0
+
+    @staticmethod
+    def fit_odom_to_enu_yaw(samples):
+        """Fit enu = R(yaw) odom over displacements from the first sample.
+
+        samples: (odom_x, odom_y, east, north), any common origins.  Returns
+        (yaw_rad, rms_residual_m, travel_m), or None with fewer than 3 samples.
+        travel is the farthest odom displacement from the first sample.
+        """
+        if len(samples) < 3:
+            return None
+        x0, y0, e0, n0 = samples[0]
+        sum_cross = sum_dot = travel = 0.0
+        pairs = []
+        for x, y, e, n in samples:
+            dx, dy, de, dn = x - x0, y - y0, e - e0, n - n0
+            sum_cross += dx * dn - dy * de
+            sum_dot += dx * de + dy * dn
+            travel = max(travel, math.hypot(dx, dy))
+            pairs.append((dx, dy, de, dn))
+        yaw = math.atan2(sum_cross, sum_dot)
+        c, s = math.cos(yaw), math.sin(yaw)
+        residual = math.sqrt(sum(
+            (c * dx - s * dy - de) ** 2 + (s * dx + c * dy - dn) ** 2
+            for dx, dy, de, dn in pairs) / len(pairs))
+        return yaw, residual, travel
+
+    def _record_fit_sample(self, lat: float, lon: float) -> None:
+        if self._robot_xy is None:
+            return
+        if self._fit_ref is None:
+            self._fit_ref = (lat, lon)
+        east, north = gps_to_map(lat, lon, self._fit_ref[0], self._fit_ref[1])
+        ox, oy = self._robot_xy
+        if self._fit_samples:
+            px, py = self._fit_samples[-1][:2]
+            if math.hypot(ox - px, oy - py) < 0.25:   # standing still adds nothing
+                return
+        self._fit_samples.append((ox, oy, east, north))
+        if len(self._fit_samples) > 400:
+            del self._fit_samples[0]
+        fit = self.fit_odom_to_enu_yaw(self._fit_samples)
+        if fit is None:
+            return
+        yaw, residual, travel = fit
+        self._fit_residual, self._fit_travel = residual, travel
+        if (travel >= self._yaw_fit_min_travel_m
+                and residual <= self._yaw_fit_max_residual_m):
+            first = self._odom_enu_yaw is None
+            self._odom_enu_yaw = yaw
+            msg = Vector3Stamped()
+            msg.header = self._stamped_header()
+            msg.vector.x, msg.vector.y, msg.vector.z = yaw, residual, travel
+            self._yaw_pub.publish(msg)
+            if first:
+                self.get_logger().info(
+                    f'mission_planner: heading estimated: odom x is '
+                    f'{math.degrees(yaw):.1f} deg from east (residual '
+                    f'{residual:.2f} m over {travel:.1f} m of travel)')
 
     def _start_is_placeholder(self) -> bool:
         ref = self._start_reference_waypoint()
@@ -385,6 +486,9 @@ class MissionPlannerNode(Node):
                 or not math.isfinite(msg.longitude)):
             return
 
+        if self._origin_lat is None:
+            self._record_fit_sample(msg.latitude, msg.longitude)
+
         if not self._gps_start_area_confirmed:
             if not self._gps_start_area_matches(msg.latitude, msg.longitude):
                 return
@@ -395,6 +499,14 @@ class MissionPlannerNode(Node):
                 self.get_logger().warn(
                     'mission_planner: at the start waypoint but no odometry '
                     'yet; waiting to anchor', throttle_duration_sec=5.0)
+                return
+            if self._yaw_fit_enabled and self._odom_enu_yaw is None:
+                self.get_logger().warn(
+                    f'mission_planner: at the start waypoint but no heading '
+                    f'estimate yet: {self._fit_travel:.1f} m of the '
+                    f'{self._yaw_fit_min_travel_m:.0f} m of travel the fit needs '
+                    f'(residual {self._fit_residual:.2f} m); waiting to anchor',
+                    throttle_duration_sec=5.0)
                 return
             self._origin_lat = msg.latitude
             self._origin_lon = msg.longitude

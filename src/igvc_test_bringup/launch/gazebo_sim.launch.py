@@ -61,6 +61,14 @@ Arguments
     use_sim_time       true | false               (default: true)
     robot_name         spawned entity name        (default: igvc_robot)
     spawn_{x,y,z,yaw}  override the json spawn pose
+    odom_axes          world | robot              (default: world)
+        world  gazebo_odom_shim rotates odometry onto the world axes (east,
+               north), which the ground-truth navigation nodes need
+        robot  the shim passes odometry through: its axes follow the spawn
+               heading, as the real robot's wheel and visual odometry do.
+               For GPS tests that must see a heading error (the simulator
+               otherwise hides it); the ground-truth lane grid assumes world
+               axes, so do not use it with gazebo_nav_test.launch.py.
 
 Camera budget, measured: three 1280x720 cameras at 30 Hz deliver about 7 Hz
 each. The defaults here are the ones that hold up. Pass sim_cameras:=all
@@ -127,6 +135,9 @@ def _setup(context, *args, **kwargs):
     headless = cfg("headless").lower() in ("true", "1", "yes")
     use_sim_time = cfg("use_sim_time").lower() in ("true", "1", "yes")
     cams = cfg("sim_cameras")
+    odom_axes = cfg("odom_axes")
+    if odom_axes not in ("world", "robot"):
+        raise RuntimeError("odom_axes:=%s is not world or robot" % odom_axes)
 
     # sim_cameras is dispatched by two xacro:if blocks with no else branch, so
     # any value that is not one of these three silently produces a robot with
@@ -311,7 +322,9 @@ def _setup(context, *args, **kwargs):
         name="gazebo_odom_shim",
         output="screen",
         parameters=[{
-            "spawn_yaw_rad": syaw,
+            # odom_axes:=robot passes odometry through, axes along the spawn
+            # heading, as on the real robot (see the docstring).
+            "spawn_yaw_rad": syaw if odom_axes == "world" else 0.0,
             "use_sim_time": use_sim_time,
         }],
     )
@@ -384,8 +397,12 @@ def _setup(context, *args, **kwargs):
     print("  spawn     : x=%.4f y=%.4f z=%.2f yaw=%.6f" % (sx, sy, sz, syaw))
     print("  cameras   : %s" % cams)
     print("  bridge    : %s" % bridge_cfg)
-    print("  odom shim : rotating by %.6f rad (%.2f deg)"
-          % (syaw, syaw * 180.0 / 3.141592653589793))
+    if odom_axes == "world":
+        print("  odom shim : rotating by %.6f rad (%.2f deg)"
+              % (syaw, syaw * 180.0 / 3.141592653589793))
+    else:
+        print("  odom shim : pass-through (odom_axes:=robot): odom axes follow "
+              "the spawn heading, %.2f deg from east" % (syaw * 180.0 / 3.141592653589793))
     print("  cloud     : re-stamped to the body frame for %s"
           % (", ".join(cloud_cams) or "no camera"))
     print("  cloud DDS : %s" % pacing_note)
@@ -448,6 +465,12 @@ def generate_launch_description():
         DeclareLaunchArgument("spawn_y", default_value=""),
         DeclareLaunchArgument("spawn_z", default_value="0.25"),
         DeclareLaunchArgument("spawn_yaw", default_value=""),
+        DeclareLaunchArgument(
+            "odom_axes", default_value="world",
+            description="world: odometry rotated onto east/north (the "
+                        "default, what the ground-truth navigation needs). "
+                        "robot: odometry axes along the spawn heading, as on "
+                        "the real robot, for GPS heading tests."),
     ]
 
     return LaunchDescription(

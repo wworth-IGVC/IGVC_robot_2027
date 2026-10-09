@@ -2042,3 +2042,42 @@ That is the first GPS waypoint leg driven end to end in the simulator. It
 says nothing yet about the real robot's heading problem: in the simulator the
 odometry axes happen to point east and north (`gazebo_odom_shim`), which (c)
 addresses.
+
+**(c) The heading: odometry's axes are not east and north (2026-10-08).** The
+planner put each waypoint's east and north metres straight into odom x and y.
+Real odometry starts at identity, so its x axis points wherever the robot faced
+at boot, and every waypoint lands rotated by the start heading. The simulator
+hid this: `gazebo_odom_shim` rotates odometry onto the world axes. New, sim
+only: `gazebo_sim.launch.py odom_axes:=robot` makes the shim a pass-through, so
+the odometry axes follow the spawn heading as on the real robot. New in the
+planner: it fits its `/fix` track to its odom track (a 2D rotation over the
+displacements, at least 10 m of travel, residual under 2 m), anchors only once
+the estimate exists, and rotates waypoints by it; `odom_yaw_fit_enabled:=false`
+restores the old behaviour.
+
+`scripts/gazebo/measurements/gps_heading_check.sh`: robot at the course centre,
+`odom_axes:=robot`, four start headings, driving 14 m to the start waypoint,
+obstacles compared with ground truth in that odom frame (pass under 0.5 m):
+
+| Heading | Before (5b code) | After | After, fit disabled (control) |
+| --- | --- | --- | --- |
+| 0 deg (east) | PASS, 0.24 m | **PASS**, 0.25 m | PASS, 0.24 m |
+| 90 deg | **FAIL**, 8.62 / 12.57 m | **PASS**, 0.25 m | FAIL, 9.24 / 13.21 m |
+| 180 deg | **FAIL**, 12.76 / 18.47 m | **PASS**, 0.25 m | FAIL, 12.10 / 17.79 m |
+| 135 deg (the course's start) | **FAIL**, 11.52 / 16.74 m | **PASS**, 0.26 m | FAIL, 11.11 / 16.31 m |
+
+The estimates, from the planner's log: -0.1, 89.9, 179.9 and 134.9 deg, residual
+0.00 to 0.01 m over 10.1 to 10.5 m of travel (the simulator's GPS has no
+noise; a real receiver's metre or two will widen this, which is what the
+residual limit is for). That is the prediction exactly: before the fix only the
+heading that happens to face east passes. Unit tests 18/18 (the fit at four
+rotations, anchoring with and without it). The (a) and (b) checks pass again on
+the final code: (a) now anchors 2.1 m past the start waypoint, after 10.1 m of
+driving, waiting for the heading; (b) idle -> active -> lane_follow, 1.1 m from
+the end waypoint.
+
+**Still not tested anywhere:** a real receiver's noise; a whole mission with
+No Man's Land, the ramp and judge-style waypoints (needs "course v2"); and the
+real robot's launch path, where the u-blox driver comes only from
+`sensor_launch.launch.py` (its include in `igvc_fused_drive.launch.py` is
+commented out; a proposal is in `docs/GPS_WAYPOINTS.md`, not made).

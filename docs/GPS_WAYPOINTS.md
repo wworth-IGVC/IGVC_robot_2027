@@ -46,17 +46,34 @@ them and says so in its log, at start-up and every 5 s:
   start line, N should be the distance from the start line to the first
   waypoint. A number in the thousands means a typo or a sign error.
 
+## How the heading is found (2026-10-08)
+
+Odometry's x axis points wherever the robot faced when it booted, not east.
+The planner works out the angle between the two by fitting its `/fix` track to
+its odometry track while it drives, and anchors the waypoints only once it has
+`odom_yaw_fit_min_travel_m` (10 m) of travel and a residual under
+`odom_yaw_fit_max_residual_m` (2 m). The robot lane-follows to the start
+waypoint anyway, so on a course where the start waypoint is more than about
+10 m down the lane this costs nothing. Its log says "heading estimated: odom x is
+N deg from east (residual R m over T m of travel)", and the estimate is
+published on `/mission/odom_enu_yaw`. If the start waypoint is closer than that,
+the planner waits at the gate until the robot has driven 10 m; it never anchors
+without a heading.
+
 ## Known limits (2026-10-08)
 
-- The planner still assumes the odometry axes point east and north. On the
-  real robot they point wherever it faced at start-up, so waypoints come out
-  rotated by that heading. This is the next fix (Task 5c in
-  `NEXT_SESSION_PROMPT.md`); until it lands, GPS waypoints are only right if
-  the robot starts facing east.
 - The fix is the antenna's position and the odometry is `base_link`'s, 0.22 m
   apart (`front_gps_antenna_link` at 0.177, -0.133 m). The planner does not
-  correct for it; measured in the simulator as a 0.22 m error in where the
-  waypoints land.
+  correct for it; measured in the simulator as a 0.22 to 0.26 m error in where
+  the waypoints land.
+- The u-blox driver is started by `sensor_launch.launch.py`, not by
+  `igvc_fused_drive.launch.py`, where its include is commented out (lines
+  127-134). A competition run therefore needs both launch files, or no `/fix`
+  arrives and the planner waits forever. Proposed, not made (it cannot be
+  tested without the robot, and enabling the include beside `sensor_launch`
+  would start two drivers on one serial port): either uncomment the include
+  behind `gps_enabled` and stop starting the driver in `sensor_launch`, or
+  leave both and add a start-up check that `/fix` is publishing.
 
 ## The test
 
