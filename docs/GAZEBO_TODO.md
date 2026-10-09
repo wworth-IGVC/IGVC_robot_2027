@@ -293,7 +293,10 @@ Verified means a command was run and a number came back. Nothing below is
       keeps stamp 0.000 and 0 lethal cells, the navigator drops it after 5 s and
       sends 0 goals: MOVED FAIL, 0.0 m. After about 3 m of forward driving the same
       model masks the line (50,828 drivable-area and 4,970 lane pixels) and the mask
-      follows the curve. Next: start the loop 3 m ahead (or nudge it) to see whether
+      follows the curve. Resolution explains the empty start view: at 1280 x 720
+      (`sim_camera_width:=1280 sim_camera_height:=720`) the start frame gives 4,652
+      drivable-area and 9,862 lane pixels, at 640 x 360 it gives 0 and 0. Next: a
+      closed-loop run at 1280 x 720 (not run), or start the loop 3 m ahead to see whether
       the YOLOPv2 grid follows the first right turn; the empty-first-view deadlock
       (navigator holds on a stale grid, detector does not re-stamp) is worth
       fixing in the stack.

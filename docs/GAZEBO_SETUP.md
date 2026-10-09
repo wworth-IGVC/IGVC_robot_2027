@@ -2537,3 +2537,26 @@ worth fixing in the stack (a navigator that holds forever on a stale grid, and a
 detector that republishes an empty grid with stamp 0). Not done: a start 3 m ahead
 or a nudge, which would measure whether the YOLOPv2 grid follows the first right
 turn; a run past the start; the open-loop re-baseline (P2) with paced images.
+
+**Resolution check (P6-res, 2026-10-09, single frame, no closed loop).** Is the sim
+camera's default 640 x 360 the reason the start frame is empty? Same pose (robot at
+the start, navigation off), same probe and the node's own settings, the front camera
+at the launch arguments `sim_camera_width:=1280 sim_camera_height:=720` (default
+rate; the frame arrives at 1280 x 720, mean pixel 172.0 in both):
+
+| Frame at the start pose | Drivable-area px | Lane-line px |
+| --- | --- | --- |
+| 640 x 360 (default, the control, from the run above) | 0 | 0 |
+| 1280 x 720 | **4,652** | **9,862** |
+
+With the node's pre-processing off the 1280 x 720 frame still gives 0 and 0 (so the
+node's CLAHE and blur matter at this size), and with the channels swapped 31,630
+and 10,407. The lane mask at 1280 x 720 lies on the near half of the single visible
+line (from the left edge to about 600 px, a band several pixels thick) and misses
+its far half; the drivable-area mask is a small patch beside it
+(`frame_probe_1280/frame_start_masks.png`). **So resolution accounts for the empty
+start view: from the same pose the model finds the line at 1280 x 720 and not at
+640 x 360.** What was not measured: whether the detector's projected grid at that
+size is fresh and follows the turn, and whether the loop then moves (no closed-loop
+run was made; the cloud and depth are 4 times larger at 1280 x 720 and the real-time
+factor there is unknown). The projected-point count is not given by the probe.
