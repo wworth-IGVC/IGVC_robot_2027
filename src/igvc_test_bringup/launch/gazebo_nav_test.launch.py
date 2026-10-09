@@ -359,13 +359,13 @@ def _setup(context, *args, **kwargs):
                 "origin_x": -50.0,
                 "origin_y": -50.0,
                 "resolution": 0.10,
-                "min_range_m": 0.15,
+                "min_range_m": float(cfg("lidar_min_range_m")),
                 "max_range_m": 10.0,
                 "hit_weight": 5.0,
                 "free_weight": 0.5,
                 "hit_threshold": 4.0,
                 "free_threshold": 3.0,
-                "inflate_radius_m": 0.20,
+                "inflate_radius_m": float(cfg("lidar_inflate_radius_m")),
                 "publish_hz": 5.0,
             }],
         ))
@@ -537,6 +537,16 @@ def generate_launch_description():
                         "obstacle_layer on /scan alone), lidar_map (the "
                         "competition's lidar_obstacle_costmap_node). The "
                         "barrels stay in the world in every case."),
+        DeclareLaunchArgument(
+            "lidar_inflate_radius_m", default_value="0.20",
+            description="obstacle_source:=lidar_map only: the lidar map's "
+                        "inflation, default the competition's 0.20 m "
+                        "(igvc_fused_drive.launch.py). A diagnosis knob."),
+        DeclareLaunchArgument(
+            "lidar_min_range_m", default_value="0.15",
+            description="obstacle_source:=lidar_map only: the lidar map's "
+                        "minimum range, default the competition's 0.15 m. "
+                        "A diagnosis knob."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
