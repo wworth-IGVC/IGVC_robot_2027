@@ -50,6 +50,14 @@ Unknown cells (-1) are never counted as either positive or negative.
 
 Usage, inside the Gazebo container with the simulator running:
     lane_eval_sim.py [--topic /lane_map] [--tol 0.25] [--duration 60]
+                     [--expect-node NAME]
+
+--expect-node NAME fails (exit 3, before any score is printed) unless the
+scored topic has exactly one publisher and its node name is NAME. Use it every
+time a score is going to be quoted. On 2026-09-17 the first Hough score was the
+ground truth scored against itself, because gt_nav_bridge_node and
+lane_detection_node both publish /lane_map and the subscriber saw the wrong one.
+Names are matched with or without the leading slash and namespace.
 """
 
 import argparse
@@ -58,6 +66,7 @@ import json
 import math
 import os
 import sys
+import time
 
 import numpy as np
 import rclpy
@@ -137,6 +146,38 @@ class Eval(Node):
         self.msg = m
 
 
+def publisher_names(node, topic):
+    """Full names of every node publishing `topic`, e.g. ['/gt_nav_bridge_node']."""
+    names = []
+    for info in node.get_publishers_info_by_topic(topic):
+        ns = (info.node_namespace or "/").rstrip("/")
+        names.append(ns + "/" + info.node_name)
+    return sorted(names)
+
+
+def names_match(name, expect):
+    """True if `name` (full, with namespace) is the node `expect` asks for."""
+    return expect.strip("/") in (name.strip("/"), name.rsplit("/", 1)[-1])
+
+
+def settle_publishers(node, topic, wait_s=10.0, settle_s=2.0):
+    """Publisher names on `topic`, once discovery has had time to finish.
+
+    Discovery is eventual: wait until at least one publisher shows up (up to
+    wait_s), then settle_s longer so a second one has time to appear, and
+    return everything seen at the end. An empty list means none appeared.
+    """
+    t0 = time.time()
+    names = publisher_names(node, topic)
+    while not names and time.time() - t0 < wait_s:
+        rclpy.spin_once(node, timeout_sec=0.2)
+        names = publisher_names(node, topic)
+    t1 = time.time()
+    while time.time() - t1 < settle_s:
+        rclpy.spin_once(node, timeout_sec=0.2)
+    return publisher_names(node, topic)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--topic", default="/lane_map")
@@ -149,6 +190,9 @@ def main():
                          "(default 1.5 m)")
     ap.add_argument("--duration", type=float, default=60.0,
                     help="how long to wait for a grid with content")
+    ap.add_argument("--expect-node", default=None, metavar="NAME",
+                    help="fail (exit 3) unless the scored topic has exactly "
+                         "one publisher and it is the node NAME")
     args = ap.parse_args()
 
     ref = lane_line_points(args.json)
@@ -157,7 +201,20 @@ def main():
 
     rclpy.init()
     n = Eval(args.topic)
-    import time
+    names_start = None
+    if args.expect_node:
+        names_start = settle_publishers(n, args.topic)
+        good = len(names_start) == 1 and names_match(names_start[0],
+                                                     args.expect_node)
+        print("  publisher check      : %s has %d publisher(s) %s, expected "
+              "exactly one, %s" % (args.topic, len(names_start),
+                                   names_start or "[]", args.expect_node))
+        if not good:
+            print("  FAIL: %s is not published by %s alone; any score here "
+                  "would be of something else" % (args.topic, args.expect_node))
+            n.destroy_node()
+            rclpy.shutdown()
+            return 3
     t0 = time.time()
     best = None
     while time.time() - t0 < args.duration:
@@ -170,6 +227,17 @@ def main():
     if best is None:
         print("  FAIL: no grid on %s within %.0f s" % (args.topic, args.duration))
         return 2
+
+    # The publisher must also be the same one at the end of the window: a second
+    # one that appeared mid-run means some of the grids scored were not its own.
+    if names_start is not None:
+        names_end = publisher_names(n, args.topic)
+        if names_end != names_start:
+            print("  FAIL: the publishers of %s changed during the run: %s at "
+                  "the start, %s at the end" % (args.topic, names_start, names_end))
+            n.destroy_node()
+            rclpy.shutdown()
+            return 3
 
     pred, data = grid_occupied_xy(best)
     known = int(np.sum(np.array(best.data, dtype=np.int16) >= 0))
