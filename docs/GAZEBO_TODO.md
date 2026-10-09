@@ -251,8 +251,17 @@ Verified means a command was run and a number came back. Nothing below is
       (`obstacle_source:=lidar_map`, 2026-10-08, `GAZEBO_SETUP.md` 10.16): 3 of 3
       runs touch no barrel (the `none` control pins on barrel 4), and 3 of 3 FAIL
       `LANE` (-0.144 to -0.696 m), each squeezing between barrel 4 and the right
-      line. Next: separate the causes listed there (inflation, decay, line cost);
-      any fix is competition code or parameters, so it needs Liam's approval.
+      line. **2026-10-09, `GAZEBO_SETUP.md` 10.20: two causes found, not fixed.**
+      (1) The simulated lidar sees the robot's own body (4 rays at 0.11 to 0.13 m);
+      noise lets some past `min_range_m` 0.15 and one hit is lethal, so a lethal
+      cell sits inside the footprint (it blocks the start at 4 cells of inflation;
+      `lidar_min_range_m:=0.25` removes it). (2) The navigator's centerline search
+      accepts a 0.5 m gap beside a barrel for a 0.81 m chassis, and the Nav2
+      costmaps do not include the lidar map at all (`plugins` lists only
+      `lane_layer` and `inflation_layer`). A hard `min_clearance_m` in the
+      navigator removes the barrel 1, 3 and 4 crossings but crosses at the barrel
+      7 corner; saved as a patch, not committed. Next: the same rule over FREE
+      cells only (unknown space beyond the paint is a suspect), 3 live runs.
 - [ ] **The robot USD and the URDF now disagree further** (new front ZED 2i link,
       lidar and mast, side cameras at 45 degrees; research pass 3, RQ-09). Which
       is the real robot is a tape-measure question for Aidan.

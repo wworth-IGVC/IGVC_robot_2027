@@ -2116,3 +2116,136 @@ rename). `igvc_build` now deletes dangling links, only those, in the packages
 it builds; the rename above then built without any manual cleanup.
 
 Evidence: `local-notes/oneshot_evidence/task6b_images_2026-10-08/`.
+
+### 10.20 The lidar-map lane crossing: two causes found, a clearance rule tried and not kept, not passing (2026-10-09)
+
+Task: make `obstacle_source:=lidar_map` pass `BARRELS` and `LANE` three times,
+with `none` still failing `BARRELS` (10.16 measured LANE failing 3 of 3).
+Diagnosed one parameter at a time, then a fix was tried in competition code
+behind a parameter whose default is the old behaviour. **Result: not passing.**
+Two causes are found and evidenced. The fix tried removes the barrel 1, 3 and 4
+crossings in the runs that finished but creates a new one at the barrel 7 corner
+(worse as the value rises), so it is **not committed**: it is saved as
+`local-notes/oneshot_evidence/p1_lidar_lane_2026-10-09/min_clearance_attempt.patch`
+with its six tests. Only the diagnosis tooling, one test and these notes are in
+the repository. Evidence: `local-notes/oneshot_evidence/p1_lidar_lane_2026-10-09/`
+and `lidar_lane_diag_2026-10-08/`. All runs: one simulator, `autonomy_check.sh`
+with `LAUNCH_ARGS`, `BARRELS` read from the contact sensors.
+
+**What was measured (every row `lidar_map`; `BARRELS` PASS in every run that moved):**
+
+| Inflation | Lidar min range | Navigator clearance | Result |
+| --- | --- | --- | --- |
+| 0.20 m (the competition's) | 0.15 | off | 10.16: `LANE` FAIL 3 of 3, barrel 4 every run |
+| 0.30 m | 0.15 | off | run 1: 90 m, `LANE` FAIL -0.269 m at barrel 1. Run 2 (same setting, a day later): **never left the start** |
+| 0.35 and 0.40 m | 0.15 | off | **never left the start**, both. Identical, see below |
+| 0.50 m | 0.15 | off | never left the start (2026-10-08) |
+| 0.30 m | 0.25 | off | moved; `LANE` FAIL -1.005 m, crossings far from any barrel (not diagnosed) |
+| 0.30 m, second run | 0.25 | off | moved; `LANE` FAIL -0.451 m at barrel 1 |
+| 0.40 m | 0.25 | off | moved; `LANE` FAIL, ended off the slab (-22.3 m), `ON THE SLAB` FAIL |
+| 0.20 m | 0.25 | 0.45 m, first version | never left the start: no path (see "built-in trap" below) |
+| 0.20 m | 0.25 | 0.45 m | run 1: stalled over the left paint near barrel 7 from 66.7 s, 49.3 m, `LANE` FAIL -0.205 m. Run 2: 89.4 m, `LANE` FAIL -0.181 m, 2.4% of samples over, one span near barrel 7 only |
+| 0.20 m | 0.25 | 0.65 m (the chassis half-diagonal) | run 1: 86.9 m, left the lane after the barrel 7 corner at 66.8 s and ended 34 m from the course, off the slab: `LANE` FAIL, `ON THE SLAB` FAIL. A second run was stopped for the time box |
+
+**Cause 1, the robot's own body is in the map.** The lidar's `inflate_radius_m`
+is applied as `ceil(radius / 0.10 m)` cells, so 0.35 and 0.40 are both 4 cells
+and the table's identical rows are not a coincidence; the inflation cannot be
+tuned finer than 0.10 m. More important: at the start, `/scan` has 4 finite rays
+at 161 to 164 degrees, ranges 0.111 to 0.134 m, which is the robot behind the
+lidar (mount x 0.345 m). The map node ignores returns under `min_range_m` 0.15,
+but the sensor's 1 cm noise puts some of them over it, and the sim's parameters
+(copied from `igvc_fused_drive.launch.py`: `hit_weight` 5, `hit_threshold` 4) make
+one hit lethal. The cell lands about 0.2 m ahead of `base_link`, inside the
+footprint; with the map's inflation it is a disc of radius 0.2, 0.3 or 0.4 m on
+the robot. At 4 cells it walls the robot in (57 lethal cells at the origin in
+`pic_infl040/picture.txt`), at 3 cells it does so some of the time, which is why
+the same setting moved on one day and not the next. Tested by changing one
+number: `min_range_m` 0.15 to 0.25 (`lidar_min_range_m` launch argument) and the
+robot starts at 0.30 and 0.40 (0.35 was not rerun; it is the same 4 cells as 0.40). Unit test:
+`test_lidar_costmap_body_return.py` (a 0.16 m body return enters the map at
+0.15 and not at 0.25). **Open:** whether the real RPLidar C1 sees its own mount;
+the competition value is unchanged, the 0.25 is a simulator launch override.
+
+**Cause 2, the navigator accepts any gap.** `pic_infl030/` and
+`ser_mr025_030/series.txt` (robot-frame pictures of the lidar map and the lane
+grid) show the robot beside barrel 1 at 70 s with the paint 0.1 to 0.2 m to its
+left and the barrel's lethal blob to its right: a free corridor about 0.5 m wide,
+for a 0.810 m chassis. `navigator.py` `_extract_centerline` treats a corridor one
+cell wide as traversable (its comment: clearance is allowed below the robot's
+half-width "without falsely blocking narrow gaps"), so a route through the gap
+costs only a little more than the wide side. The Nav2 costmaps do not help:
+`nav2_lane_follow_config.yaml` lists `plugins: ["lane_layer", "inflation_layer"]`
+for both costmaps (lines 253 and 315); `lidar_obstacle_layer` appears only in a
+comment (line 233). So in the 2026 stack the lidar map reaches the path only
+through the navigator's overlay, which is the stage with no half-width. The
+ground-truth bridge stamps the whole disk plus 0.30 m and the same gap exists
+there; the difference is that the barrel is fully known from afar (the lidar sees
+an arc, more as the robot nears), and `scripts/gazebo/measurements/barrel_gaps.py`
+prints the corridors per barrel.
+
+**The fix tried, and why it is not kept: `min_clearance_m` in the navigator.**
+Cells the centerline search may use must be at least that far from every lethal
+cell (paint and overlaid obstacles), measured to the lethal cell's edge. Default
+**0.0 is the old rule**, so the old code stays a control. Three details, each from
+a failure: cells within 1 m ahead of `base_link` are exempt (the live
+`/lane_costmap` is lethal across its full width for the first 0.3 m or more ahead
+of the robot, and without the exemption a clearance of 0.45 m left no cell within
+the 0.8 m start-cell search, so the robot never left the start: "first version" in
+the table); if no cell beyond the exempt zone qualifies the old rule applies; and
+the value was moved from the half-width 0.45 m to the chassis half-diagonal 0.65 m
+because `LANE` scores the rotated 0.810 x 0.970 m footprint (half-diagonal 0.632
+m). Tests (`test_navigator_min_clearance.py`, 6): on the old code the one that
+asserts a 0.5 m gap is refused fails and the five controls pass; on the new code
+all 6 pass. **Live result: worse where it matters.** With the rule, no run
+crossed at barrel 1, 3 or 4, but every run crossed the left paint at the barrel 7
+corner (-0.205 and -0.181 m at 0.45 m; off the course at 0.65 m), and no run
+without the rule crossed there. Hypothesis, not tested: the lane grid leaves
+the space beyond the paint UNKNOWN, which the search treats as traversable, so
+once cells near the paint are excluded the only cells with room are outside the
+lane. The next attempt should compute the clearance rule over FREE cells only
+(unknown stays available to the old rule), then run the same unit tests and 3
+live runs.
+
+**Alternatives rejected, with reasons.** (a) Inflation alone: no value works,
+because it is quantised to 0.10 m cells and 2 cells fail barrel 4, 3 cells are
+inconsistent and 4 cells start only once the body is out of the map. (b) A
+dilation of the overlaid cells (the ground-truth bridge's 0.30 m): it adds to
+the lidar map's own inflation and narrows a gap by that amount from one side, so
+it blocks a gap only when the dilation exceeds the gap; the clearance rule treats
+paint and obstacles alike and states the chassis size once. (c) Putting
+`/lidar_obstacle_map` into the Nav2 costmaps: the navigator builds the path and
+the controller follows it, so costmap awareness would stop the robot, not reroute
+it; not tested. (d) Raising `hit_threshold`: unrelated to either cause.
+
+**Found on the way, not fixed.** 21 of the 33 tests in
+`test_navigator_waypoint_generation.py` and `test_centerline_navigator.py` fail on
+the shipped competition code: the shared fixture lays the grid out with forward
+along rows, the navigator reads forward along columns, and the shell lacks
+`_obstacle_grid`. The navigator rejects paths with "path heading 1.57rad >
+1.57rad" (the clamp and validator mismatch of 10.15) often in the later part of a
+lidar-map run. The 0.30 m run with `min_range` 0.25 crossed the paint 5.8 m from
+the nearest barrel, which no barrel-side fix explains.
+
+**Next.** (1) Retry the clearance rule over FREE cells only (patch above is the
+starting point), 3 live runs, `none` control. (2) Separately, find why the 0.30 m
+run with `min_range` 0.25 crossed the paint 5.8 m from any barrel (rejections
+"path heading 1.57rad" in its log); that is not a barrel-side problem and may be
+the navigator's clamp and validator mismatch of 10.15. (3) Ask whether the real
+RPLidar C1 returns its own mount; if it does not, the 0.25 m override is a
+simulator-only correction and the competition's 0.15 m stays. Not done: the
+shared lidar parameter file for `igvc_fused_drive.launch.py` and the simulator,
+because the fix it was meant to carry does not exist yet and Liam asked on
+2026-10-08 that real-robot launch files not be edited.
+
+**Controls rerun after the experiments** (working tree with the navigator patch
+applied and its parameter at the default 0.0; the repository itself does not
+contain the patch): ground truth `autonomy_check.sh` PASS, 89.4 m, `LANE` worst
+clearance +0.169 m, `BARRELS` PASS; `obstacle_source:=none` `BARRELS` FAIL (touched
+`barrel_4`), as it must. Evidence: `verify_gt_none/`. Real-time factor was not
+recorded in these runs; laptop numbers, not Jetson numbers.
+
+Reproduce a row: `LAUNCH_ARGS="obstacle_source:=lidar_map
+lidar_min_range_m:=0.25 lidar_inflate_radius_m:=0.30" bash
+scripts/gazebo/autonomy_check.sh`. Corridors per barrel: `python3
+scripts/gazebo/measurements/barrel_gaps.py 0.20 0.30 0.40` (inside the container).
+
