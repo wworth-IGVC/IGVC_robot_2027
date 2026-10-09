@@ -161,6 +161,11 @@ _YIELD_STATES = ('active', 'ramp_align', 'ramp_climb')
 
 class IGVCNavigatorNode(Node):
 
+    # _limit_path_heading clamps lateral steps to tan(max_heading) * df, so a
+    # saturated step has heading max_heading to within float rounding (2e-15
+    # rad measured); the validator must not call that a violation.
+    _HEADING_TOLERANCE_RAD = 1.0e-6
+
     def __init__(self) -> None:
         super().__init__('igvc_navigator')
 
@@ -1628,9 +1633,52 @@ class IGVCNavigatorNode(Node):
         # is forward.  Anchoring also gives the smoother a real boundary
         # value to pull the first lane samples toward straight ahead.
         anchored = [(0.0, 0.0)] + list(pts)
-        return self._resample_path_points(
-            self._smooth_path_points(self._limit_path_heading(anchored)),
+        limited = self._limit_path_heading(anchored)
+        conditioned = self._resample_path_points(
+            self._smooth_path_points(limited), self._path_sample_spacing_m)
+        if not self._exceeds_heading_limit(conditioned):
+            return conditioned
+        # A lateral run in the raw path (the search may step sideways without
+        # advancing) is flattened by the limiter into repeated points at one
+        # forward position. The smoother then gives those repeats different
+        # lateral values, which makes straight sideways steps (heading exactly
+        # pi/2) that _path_invalid_reason rejects even when the limit is set to
+        # the most it accepts. Merge the repeats and condition again. Only a
+        # path that would be rejected is touched: any other comes out exactly
+        # as before.
+        repaired = self._resample_path_points(
+            self._smooth_path_points(self._merge_same_forward(limited)),
             self._path_sample_spacing_m)
+        if self._exceeds_heading_limit(repaired):
+            return conditioned
+        return repaired
+
+    @staticmethod
+    def _merge_same_forward(
+        pts: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Drop points that repeat the forward position of the one before."""
+        merged: list[tuple[float, float]] = []
+        for fwd, lat in pts:
+            if merged and abs(fwd - merged[-1][0]) <= 1.0e-6:
+                continue
+            merged.append((fwd, lat))
+        return merged
+
+    def _exceeds_heading_limit(self, pts: list[tuple[float, float]]) -> bool:
+        """Same test as the heading check in _path_invalid_reason."""
+        max_heading = max(
+            0.05,
+            min(float(getattr(self, '_max_path_heading_rad', 0.75)), math.pi / 2.0 - 1.0e-3),
+        )
+        for (x0, y0), (x1, y1) in zip(pts[:-1], pts[1:]):
+            dx = x1 - x0
+            dy = y1 - y0
+            if math.hypot(dx, dy) <= 1.0e-6:
+                continue
+            if abs(math.atan2(dy, dx)) > max_heading + self._HEADING_TOLERANCE_RAD:
+                return True
+        return False
 
     def _limit_path_heading(
         self,
@@ -1780,7 +1828,7 @@ class IGVCNavigatorNode(Node):
                 prev_pose = cur_pose
                 continue
             heading = abs(math.atan2(dy, dx))
-            if heading > max_heading:
+            if heading > max_heading + self._HEADING_TOLERANCE_RAD:
                 return (
                     f'pose {index} path heading {heading:.2f}rad > '
                     f'{max_heading:.2f}rad')
