@@ -2560,3 +2560,50 @@ start view: from the same pose the model finds the line at 1280 x 720 and not at
 size is fresh and follows the turn, and whether the loop then moves (no closed-loop
 run was made; the cloud and depth are 4 times larger at 1280 x 720 and the real-time
 factor there is unknown). The projected-point count is not given by the probe.
+
+**Closed loop at 1280 x 720 (P6-720, 2026-10-09): it leaves the start, then drives away blind and stops.**
+`LAUNCH_ARGS="lane_source:=yolopv2 sim_camera_width:=1280 sim_camera_height:=720"`,
+`igvc_dev_jazzy`, one run, probe and `/clock` log beside it, `lane_warmup` not
+raised. Evidence: `local-notes/oneshot_evidence/P6_720_2026-10-09/run/`.
+
+| Item | Result |
+| --- | --- |
+| W4 | PASS (YOLOPv2 ready on `cuda:0`, half precision, no CPU fallback) |
+| W1, W2, W6 | PASS; W3 geometry and values PASS, **W3 stamp age FAIL**: 10.6% of messages under 1 s, median 40.2 s |
+| W5 | "PASS" (first grid with 50 or more lethal cells at 15.5 s, robot first moved at 18.9 s), **but vacuous, see below** |
+| MOVED | **PASS, 15.4 m** (at 640 x 360 it was 0.0 m); PROGRESS script PASS (15.2 m span) |
+| Arc (`course_progress.py`, REF 91.66 m, bar 73.3 m) | **0.18 m**, 2316 of 2415 samples off the course |
+| LANE, ON THE SLAB | FAIL, FAIL (worst clearance -14.405 m, 98.5% over; ended off the ground); BARRELS PASS, 8 sensors, no contact |
+| First crossing | 21.2 s, about 2.3 s after the first motion and 1 m along, at about (-14.0, 0.8); the robot then ran west-southwest to (-25.8, -7.6) by 40 s and stood there until the end |
+| RTF | 0.36 (sim 20.2 to 120.3 s over 278.7 s of wall time) |
+| Bring-up abort | none, not void |
+
+**Why the loop moved, and why it is not camera lanes steering.** Every YOLOPv2
+grid in the run holds exactly 1,200 lethal cells and nothing else: the 0.30 m back
+strip the node writes into its local grid (`lane_segmentation.py:3213-3215`, 6
+columns by 200 rows), so the probe's "50 lethal cells" evidence test (W3 and W5) is
+satisfied by the strip alone and cannot tell the strip from lane lines in this
+mode; the 640 x 360 run had no strip only because it never built a grid. The
+node's own reports are zero lane evidence: in all 134 periodic lines `lane_pts=0
+components=0 mask_lane_px=0` (drivable-area mask up to 65,675 px), and 86 warnings
+"yolopv2 produced 0 projected points" with `raw_mask_px lane=0` and 0 to 109,770
+finite cloud points of 921,600. A grid with a fresh stamp and no lane cells reads as
+open road (F12), so the navigator drove away, as the blind N1 robot did; the node
+then stopped producing grids (the last stamp is 26.7 s), the navigator dropped the
+stale grid ("`/lane_costmap` stale: age 9.300s > 5.000s"), and the robot stood still.
+So 1280 x 720 turns "never moves" into "drives off blind, then stops": still 0 of
+the five criteria that need lanes.
+
+**An unexplained discrepancy, and a correction.** The single-frame probes above
+(P6-mini, P6-res) built `YolopV2` with the class defaults, so their `lane_threshold`
+was 0.5, not the config's 0.35, and "the node's own settings" was not exact. Offline
+on the saved start frames, with the config's values (threshold 0.35, img_size 640,
+CLAHE 2.0, blur 5 x 5, half): 640 x 360 start 0 and 0, 1280 x 720 start 4,683
+drivable-area and **10,088** lane pixels, 640 x 360 after 3 m 50,828 and 5,139, so
+the earlier numbers stand. But the live node, on what should be the same view at
+1280 x 720, reported **zero** lane pixels in every frame. What differs between the
+node and the offline call is not found: the node does not resize or crop the frame
+before `infer`, and the threshold is not it. Untested candidates: the live image
+(the node processes synchronised frames up to 2.75 s old, "behind camera rate"), or
+state in the node's model instance. Until it is explained, "the model finds the line
+at 1280 x 720" is true of a saved frame and not shown for the running node.

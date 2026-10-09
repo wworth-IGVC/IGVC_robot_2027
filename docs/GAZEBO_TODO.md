@@ -296,7 +296,11 @@ Verified means a command was run and a number came back. Nothing below is
       follows the curve. Resolution explains the empty start view: at 1280 x 720
       (`sim_camera_width:=1280 sim_camera_height:=720`) the start frame gives 4,652
       drivable-area and 9,862 lane pixels, at 640 x 360 it gives 0 and 0. Next: a
-      closed-loop run at 1280 x 720 (not run), or start the loop 3 m ahead to see whether
+      closed-loop run at 1280 x 720 (RUN 2026-10-09, `GAZEBO_SETUP.md` 10.23: it moves
+      15.4 m but only because the grid holds just the 1,200-cell back strip, so it
+      drives off blind and stops on a stale grid; the live node reported 0 lane
+      pixels where the saved frame gives 10,088, unexplained), or start the loop 3 m
+      ahead to see whether
       the YOLOPv2 grid follows the first right turn; the empty-first-view deadlock
       (navigator holds on a stale grid, detector does not re-stamp) is worth
       fixing in the stack.
