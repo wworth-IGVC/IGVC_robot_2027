@@ -654,7 +654,10 @@ def _setup(context, *args, **kwargs):
                     # what main did before the merge: no limit. The clamp and
                     # validator inconsistency is a competition-code defect,
                     # recorded in docs/GAZEBO_SETUP.md and not fixed here.
-                    "max_path_heading_rad": 1.57,
+                    # nav_max_path_heading_rad changes it; the default is the
+                    # value above. With the validator tolerance in navigator.py
+                    # the real robot's 0.75 works too (P1b).
+                    "max_path_heading_rad": float(cfg("nav_max_path_heading_rad")),
                 },
             ],
         )
@@ -806,6 +809,12 @@ def generate_launch_description():
             "lidar_min_range_m", default_value="0.15",
             description="obstacle_source:=lidar_map only: the lidar map's "
                         "minimum range, default the competition's 0.15 m. "
+                        "A diagnosis knob."),
+        DeclareLaunchArgument(
+            "nav_max_path_heading_rad", default_value="1.57",
+            description="The navigator's max_path_heading_rad in the simulator. "
+                        "Default 1.57, the value the simulator has used since "
+                        "2026-10-08 (the competition's own default is 0.75). "
                         "A diagnosis knob."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
