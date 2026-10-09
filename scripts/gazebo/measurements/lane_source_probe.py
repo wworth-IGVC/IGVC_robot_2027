@@ -172,10 +172,20 @@ class State:
         self.t_end = None
 
 
+UNRESOLVED = "_NODE_NAME_UNKNOWN_"   # rclpy's name for an endpoint DDS has found
+                                     # but whose node has not announced itself yet
+
+
 def record_graph(state, topic, pub_names, sub_names):
     g = state.graph[topic]
     g["samples"] += 1
-    g["pubs"].update(pub_names)
+    # An endpoint seen before its node name resolves still counts toward
+    # max_pubs (two at once is a FAIL), but it is not a differently named
+    # publisher: first contact with real rclpy (P3a, 2026-10-09) showed it on
+    # the first sample or two of /lidar_obstacle_map, then the real name.
+    resolved = [n for n in pub_names if bare(n) != UNRESOLVED]
+    g["unresolved"] = g.get("unresolved", 0) + (len(pub_names) - len(resolved))
+    g["pubs"].update(resolved)
     g["subs"].update(sub_names)
     g["max_pubs"] = max(g["max_pubs"], len(pub_names))
     if pub_names:
@@ -229,10 +239,14 @@ def evaluate(state, cfg):
             out.append(("W1", "INCONCLUSIVE", "%s: the graph was never sampled" % topic))
             continue
         ok = seen == want and g["max_pubs"] <= 1
+        unresolved = g.get("unresolved", 0)
         out.append(("W1", "PASS" if ok else "FAIL",
                     "%-20s publishers seen %s, expected %s; at most %d at once "
-                    "(%d graph samples)" % (topic, seen or "none", want or "none",
-                                            g["max_pubs"], g["samples"])))
+                    "(%d graph samples%s)"
+                    % (topic, seen or "none", want or "none", g["max_pubs"],
+                       g["samples"],
+                       "; %d sample(s) held a publisher whose node name was not "
+                       "yet resolved" % unresolved if unresolved else "")))
 
     # -- W2: the ground truth does not reach the planner ---------------------
     if exp["/gt/lane_costmap"]:
