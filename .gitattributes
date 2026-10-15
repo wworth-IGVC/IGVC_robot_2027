@@ -41,3 +41,5 @@ Dockerfile*     text eol=lf
 *.usd       binary
 *.usda      binary
 *.usdc      binary
+*.stl       binary
+*.STL       binary
