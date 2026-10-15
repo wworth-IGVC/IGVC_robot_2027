@@ -2607,3 +2607,84 @@ before `infer`, and the threshold is not it. Untested candidates: the live image
 (the node processes synchronised frames up to 2.75 s old, "behind camera rate"), or
 state in the node's model instance. Until it is explained, "the model finds the line
 at 1280 x 720" is true of a saved frame and not shown for the running node.
+
+## 11. The 2027 robot, the simulator's default since 2026-10-15
+
+The simulator now loads the **2027 robot**, built from the team's Onshape model
+("Last Minute CAD Update"). The 2026 robot is still there:
+`robot:=2026` on `gazebo_sim.launch.py` or `gazebo_nav_test.launch.py`
+(`LAUNCH_ARGS="robot:=2026"` for `autonomy_check.sh`, `ROBOT=2026` for
+`bringup_smoke_test.sh`).
+
+### 11.1 How the model gets from Onshape into the sim
+
+1. In Onshape, export the assembly: Format **URDF**, Geometry **STL**, **Binary**,
+   Resolution **Medium**. Onshape writes one link per part, joints from the
+   mates, masses from the materials.
+2. `python3 scripts/gazebo/generate_robot_2027.py "<export.zip>"` writes
+   `src/igvc_test_description/urdf/robot_2027/body_2027.urdf.xacro` and the meshes
+   in `src/igvc_test_description/meshes/robot_2027/`. **Generated: re-export and
+   re-run, never hand-edit.** It prints the measured wheel radius and separation;
+   if they change, update the two `sim_wheel_*` defaults in
+   `urdf/robot_2027/igvc_2027.urdf.xacro`.
+3. `igvc_build`, then the gates as usual.
+
+The mates matter. The generator refuses an export that does not have exactly
+four moving joints (two drive wheels, caster swivel, caster spin). The export
+of 2026-10-15 needed these changes in Onshape first: the drive wheels'
+**Cylindrical** mates (slide and spin) became **Revolute**; duplicate and broken
+mates were deleted; the e-stop push button (a linked part this account cannot
+resolve) and the two side ZED X cameras and their mounts were **suppressed**
+(hidden parts still export; suppressed ones do not). The 2027 robot has **one
+camera, the front ZED X**, so `sim_cameras:=all` is refused with `robot:=2027`.
+
+### 11.2 What the generator does to the export
+
+| Item | Export | Sim |
+| --- | --- | --- |
+| Axes | CAD frame, front is -Y | ROS: x forward, y left, z up (`cad_root_joint` rotates 90 deg) |
+| Frame and joint names | Onshape's (`revolute_1`, `part_37`, ...) | the 2026 names: `base_link`, `chassis_link`, `left/right_wheel_joint`, `caster_raceway_joint` (swivel), `caster_wheel_joint` (spin), found from geometry not names |
+| `base_link` | none | as the 2026 robot: 0.150 m ahead of the drive axle (the chassis centre), 0.2331 m above the ground, so spawn height, LANE's footprint and ON THE SLAB are unchanged |
+| Wheel axes | left +y, right -y | both +y (positive is forward for both), as 2026 |
+| Masses | about 0.03 kg in total (no materials in the CAD) | **2026 values**: 2.112 kg per drive wheel, 1.001 kg caster wheel, 0.260 kg caster raceway; **chassis 20 kg, a placeholder**, with a box inertia from the 2027 footprint (the 2026 chassis inertia, 0.001, is not physical) |
+| Collisions | none | chassis box over the footprint (0.97 x 0.81 m, 10 cm above the ground), wheel cylinders, a low-friction sphere on the caster |
+| Camera cover plate, GMSL connector, lens holder, 2 screws | exported 0.17 to 0.34 m from the camera | **dropped** (cosmetic; the exporter misplaces the inside of the linked "ZED X (official)" subassembly, which looks right in Onshape) |
+
+Measured from the export: wheel radius 0.0999 m, separation 0.6241 m (F13: the
+real `controllers.yaml` says 0.5027, the 2026 model 0.5763), caster 0.34 m ahead
+of the chassis centre. The front ZED X is placed from the CAD (mounting screw at
+(0.414, -0.005, 0.237) in `base_link`). **The lidar and GPS antenna are not in the
+CAD: they keep the 2026 poses**, above the electronics box and the mast top, so
+the lidar's scan plane misses the robot's own body.
+
+`gazebo_sim.urdf.xacro` now takes the DiffDrive geometry as arguments
+(`sim_wheel_separation`, `sim_wheel_radius`, defaults the 2026 values). The 2026
+robot's expanded description is byte-identical to before (sim, real, and all
+cameras: 0 differing lines, checked 2026-10-15).
+
+### 11.3 Measured (2026-10-15, Gazebo image, tier A laptop)
+
+One simulator at a time, headless, `igvc_gazebo` (Gazebo image), laptop numbers.
+Evidence: `local-notes/oneshot_evidence/robot_2027_2026-10-15/`.
+
+| Check | Robot | Result |
+| --- | --- | --- |
+| Expansion unchanged | 2026 | sim, real, `sim_cameras:=all`: 0 differing lines against before the change |
+| `gz sdf -p` | 2027 | converts; only the `gz_frame_id` warnings the 2026 robot also gives; fixed CAD parts lump into one body |
+| `bringup_smoke_test.sh` | 2027 | **18/18**: drove 2.759 m, heading disagreement 0.01 deg, distance ratio 0.9969 (wheel radius right) |
+| `bringup_smoke_test.sh`, `ROBOT=2026` | 2026 | **18/18**, distance ratio 0.9970 |
+| `autonomy_check.sh` run 1 | 2027 | **FAIL**: 88.4 m, LANE +0.186 m, BARRELS: the chassis box grazed `barrel_3` (0.5 mm, about 1 s) at 103.3 s, on lap 2, after two Nav2 "Failed to make progress" aborts moved its lap-2 line about 2 m |
+| `autonomy_check.sh` runs 2 to 5 | 2027 | **PASS 4 of 4 in a row**: 88.3, 88.5, 88.2, 88.1 m; worst lane clearance +0.188, +0.082, +0.174, +0.129 m; no barrel contact; no progress aborts |
+| `autonomy_check.sh`, `LAUNCH_ARGS="robot:=2026"` | 2026 | **PASS**: 88.9 m, +0.121 m, no contact |
+
+About run 1. The 2027 robot starts moving about 6 s sooner after launch than the
+2026 robot, so its 100 s window reaches `barrel_3` on the second lap; the 2026
+robot's windows end 2 to 3 m short of it, so that stretch had never been graded.
+Runs 2 to 5 pass it 2.8 to 3.0 m away. The gate was not changed. The two aborts
+(controller_server "Failed to make progress", none in runs 2 to 5) are the stack,
+not the robot description; worth watching in the freeze rule.
+
+Still placeholders, to replace when known: the chassis mass (20 kg) and the
+inertias (assign materials in Onshape, or weigh the robot); the lidar and GPS
+antenna poses (not in the CAD). The two `sim_wheel_*` defaults in
+`igvc_2027.urdf.xacro` must follow the generator's printout after a re-export.

@@ -25,6 +25,11 @@ Verified means a command was run and a number came back. Nothing below is
 - [x] **The IGVC course is generated** from `track_points.json`, the same file
       Isaac reads, so both simulators share one coordinate frame with no
       alignment step.
+- [x] **The 2027 robot is the default (2026-10-15).** Built from the team's
+      Onshape model by `scripts/gazebo/generate_robot_2027.py`; smoke 18/18,
+      autonomy PASS 4 of 4 in a row after one barrel graze on lap 2 (run 1).
+      `robot:=2026` keeps the old robot (smoke 18/18, autonomy PASS). Masses,
+      lidar and GPS poses are placeholders. `GAZEBO_SETUP.md` section 11.
 - [x] **The robot loads and drives.** Meshes resolve, sensors and plugins
       survive the URDF to SDF conversion.
 - [x] **Four zero-normal collision meshes worked around** for simulation with
