@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The 2027 robot, from the team's Onshape model ("Last Minute CAD Update",
+  exported 2026-10-15). The default robot in the simulator; the 2026 robot is
+  urdf/robots/test_robot.urdf.xacro, selected with robot:=2026.
+
+  body_2027.urdf.xacro is GENERATED from the Onshape URDF export by
+  scripts/gazebo/generate_robot_2027.py. Re-export, re-run, do not hand-edit.
+  It keeps the frame and joint names of the 2026 robot (base_link,
+  chassis_link, left/right_wheel_joint, caster_raceway_joint,
+  caster_wheel_joint), so the sensors, plugins, bridge and the 2026 software
+  need no change.
+
+  Placeholders, until the CAD or the team says otherwise:
+  * masses: the CAD has no materials yet. Wheels and caster use the 2026 CAD
+    values; the chassis is 20 kg as in 2026, with a box inertia.
+  * the lidar and the GPS antenna are not in the CAD. They sit where the 2026
+    robot had them, relative to base_link (above the electronics box and the
+    mast top, so the scan plane misses the robot's own body).
+  The 2027 robot has ONE camera, the front ZED X (Liam, 2026-10-15). Its pose is
+  the CAD's: the mounting screw on the camera base.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="igvc_test_robot">
+    <!-- Declared before any include, as in test_robot.urdf.xacro: xacro keeps
+         the first default it sees, so these win over gazebo_sim.urdf.xacro's
+         2026 values. Measured by generate_robot_2027.py. -->
+    <xacro:arg name="sim" default="false" />
+    <xacro:arg name="hardware_interface" default="IsaacDriveHardware" />
+    <xacro:arg name="sim_wheel_separation" default="0.6241" />
+    <xacro:arg name="sim_wheel_radius" default="0.0999" />
+
+    <xacro:include filename="$(find igvc_test_description)/urdf/robot_2027/body_2027.urdf.xacro" />
+    <xacro:include filename="$(find igvc_test_description)/urdf/control/ros2_control_info.urdf.xacro" />
+    <xacro:include filename="$(find igvc_test_description)/urdf/parts/zed_camera_x.urdf.xacro" />
+    <xacro:include filename="$(find igvc_test_description)/urdf/parts/rplidar_c1.urdf.xacro" />
+    <xacro:include filename="$(find igvc_test_description)/urdf/parts/gps_antenna.urdf.xacro" />
+
+    <xacro:robot_body_2027 />
+
+    <!-- CAD: the front ZED X base at (0.001, -0.414, 0.2415) in the Onshape
+         frame, which is (0.414, -0.005, 0.237) in base_link. -->
+    <xacro:zed_camera_x parent="chassis_link" prefix="front">
+        <origin xyz="0.414 -0.005 0.237" rpy="0 0 0"/>
+    </xacro:zed_camera_x>
+
+    <!-- PLACEHOLDERS: the 2026 poses (not in the 2027 CAD). -->
+    <xacro:rplidar_c1 parent="chassis_link" prefix="top">
+        <origin xyz="0.345 0 0.52" rpy="0 0 0"/>
+    </xacro:rplidar_c1>
+
+    <xacro:gps_antenna parent="chassis_link" prefix="front">
+        <origin xyz="0.177 -0.133 0.218" rpy="0 0 0"/>
+    </xacro:gps_antenna>
+
+    <!-- Gazebo-only plugins and sensors, shared with the 2026 robot. -->
+    <xacro:if value="$(arg sim)">
+        <xacro:include filename="$(find igvc_test_description)/urdf/gazebo/gazebo_sim.urdf.xacro" />
+    </xacro:if>
+</robot>
