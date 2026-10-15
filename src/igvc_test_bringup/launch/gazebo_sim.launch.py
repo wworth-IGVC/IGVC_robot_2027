@@ -139,6 +139,18 @@ def _setup(context, *args, **kwargs):
     if odom_axes not in ("world", "robot"):
         raise RuntimeError("odom_axes:=%s is not world or robot" % odom_axes)
 
+    # Which robot: 2027 (default since 2026-10-15, the team's Onshape model,
+    # urdf/robot_2027/) or 2026 (urdf/robots/test_robot.urdf.xacro). Both use
+    # the same frame and joint names, so everything downstream is shared.
+    robot = cfg("robot")
+    if robot not in ("2027", "2026"):
+        raise RuntimeError("robot:=%s is not 2027 or 2026" % robot)
+    if robot == "2027" and cams == "all":
+        raise RuntimeError(
+            "sim_cameras:=all asks for left and right cameras, but the 2027 "
+            "robot has only the front ZED X. Use sim_cameras:=front, or "
+            "robot:=2026 for the three-camera robot.")
+
     # sim_cameras is dispatched by two xacro:if blocks with no else branch, so
     # any value that is not one of these three silently produces a robot with
     # ZERO cameras that launches cleanly, passes every topic-name check, and
@@ -180,11 +192,12 @@ def _setup(context, *args, **kwargs):
                 syaw = float(val)
     sz = float(cfg("spawn_z"))
 
+    xacro_rel = (("urdf", "robot_2027", "igvc_2027.urdf.xacro") if robot == "2027"
+                 else ("urdf", "robots", "test_robot.urdf.xacro"))
     xacro_file = _find(
-        os.path.join("src", "igvc_test_description", "urdf", "robots",
-                     "test_robot.urdf.xacro"),
+        os.path.join("src", "igvc_test_description", *xacro_rel),
         "igvc_test_description",
-        os.path.join("urdf", "robots", "test_robot.urdf.xacro"),
+        os.path.join(*xacro_rel),
     )
 
     robot_description = Command([
@@ -454,6 +467,7 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument("world", default_value=default_world),
         DeclareLaunchArgument("track_file", default_value=default_track),
+        DeclareLaunchArgument("robot", default_value="2027"),
         DeclareLaunchArgument("sim_cameras", default_value="front"),
         DeclareLaunchArgument("sim_camera_width", default_value="640"),
         DeclareLaunchArgument("sim_camera_height", default_value="360"),

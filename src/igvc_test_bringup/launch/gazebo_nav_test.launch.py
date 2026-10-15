@@ -341,6 +341,7 @@ def _setup(context, *args, **kwargs):
         launch_arguments={
             "world": cfg("world"),
             "track_file": cfg("track_file"),
+            "robot": cfg("robot"),
             "sim_cameras": cfg("sim_cameras"),
             # Forwarded so the camera budget can be varied on the AUTONOMY
             # path, not only on gazebo_sim.launch.py. Until 2026-09-17 these
@@ -747,6 +748,7 @@ def generate_launch_description():
                               default_value="52.5"),
         DeclareLaunchArgument("debug_png_path",
                               default_value="/tmp/igvc_nav_ground_truth.png"),
+        DeclareLaunchArgument("robot", default_value="2027"),
         DeclareLaunchArgument("sim_cameras", default_value="front"),
         # Same defaults as gazebo_sim.launch.py, restated here only so they can
         # be overridden on the autonomy path. Raising these costs real time:

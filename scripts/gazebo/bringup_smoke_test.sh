@@ -26,6 +26,8 @@
 #                 fast machine does not pay for a slow one.
 #   NAV=0         skip PART 4 and launch the simulator alone
 #   CAMERAS=all   exercise all three cameras instead of just the front one
+#                 (robot 2026 only: the 2027 robot has one camera)
+#   ROBOT=2026    test the 2026 robot; the default is the launch file's, 2027
 # ---------------------------------------------------------------------------
 set -o pipefail
 . "$(dirname "$0")/igvc_env.sh" || exit 1
@@ -69,6 +71,7 @@ fi
 # autonomy_check.sh, which measures it properly by never touching /cmd_vel.
 # PART 4's ground-truth nodes do not need Nav2 and still run.
 [ "$NAV" = "0" ] || LAUNCH_ARGS="$LAUNCH_ARGS nav2:=false"
+[ -n "${ROBOT:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS robot:=$ROBOT"
 
 echo "launch file: $LAUNCH_FILE"
 echo "launch args: $LAUNCH_ARGS"
