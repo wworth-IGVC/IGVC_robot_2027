@@ -62,9 +62,16 @@
        floating 97 mm in the air.
 
        separation 0.57633 = 0.2844359 + 0.2918941 from the wheel joint origins.
-       controllers.yaml says 0.5027, which is 0.87x the geometry it describes. -->
-  <xacro:property name="wheel_separation" value="0.57633" />
-  <xacro:property name="wheel_radius"     value="0.1016" />
+       controllers.yaml says 0.5027, which is 0.87x the geometry it describes.
+
+       Arguments, so the 2027 robot (urdf/robot_2027/igvc_2027.urdf.xacro) can
+       pass its own measured geometry. It declares them first, and xacro keeps
+       the first default it sees, so the 2026 robot gets exactly the values
+       above. -->
+  <xacro:arg name="sim_wheel_separation" default="0.57633" />
+  <xacro:arg name="sim_wheel_radius"     default="0.1016" />
+  <xacro:property name="wheel_separation" value="$(arg sim_wheel_separation)" />
+  <xacro:property name="wheel_radius"     value="$(arg sim_wheel_radius)" />
 
 <!-- ================= drive =================
        Both wheel joints have axis 0 1 0, so both take a positive radius here.
