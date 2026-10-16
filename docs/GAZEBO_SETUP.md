@@ -2757,6 +2757,48 @@ on the captured frames is staged (`local-notes/P5b_hough_grid_design.md`); no
 code is changed yet. Evidence: `local-notes/oneshot_evidence/camlanes_F21_2026-10-16/`
 (`grab_c2/` has the frames, `pic_c2left/` and `pic_c2r2026/` the grid pictures).
 
+### 10.30 Keeping a lane line whole when the robot faces it (P5b, 2026-10-16): better, not passing
+
+An offline replay of the real detector and navigator on the 17 frames from 10.29
+(`local-notes/P5b_hough_grid_design.md`) measured three leaks, all at the frames
+just before the crossing:
+
+- the clamp: one left line ends 3.6 m ahead and is held to the grid edge; at
+  18 s the grid is free on the heading to 8 m while the paint crosses it at
+  4.73 m;
+- the sign split: at 20 and 21 s the ONE fitted line is cut into a "left" and a
+  "right" piece at the robot's axis; both are clamped and the planned path
+  leaves the lane from 20 s;
+- F12's reach: a steep line painted one cell per column has 4-connected gaps, so
+  1,067 to 2,173 unknown cells beyond the paint were within the planner's reach.
+
+New detector parameter `lane_boundary_model` (`2698b57`): `legacy`, the default,
+is cell for cell the shipped grid; `whole_line` keeps each fused line whole, puts
+it on the side where its straight-line fit passes the robot, continues it along
+that fit beyond the points seen, and paints it as a 4-connected lethal run. Sim
+launch argument `lane_boundary_model` (default `legacy`). Of eight variants
+measured offline, only this one gave the planner a path in every frame. Tests
+(`test_lane_boundary_model.py`): 13 fail on the shipped code, 24 pass fixed.
+
+Live, with P5a, F12 and F21 on. Course arc is the camera-lap measure; the pass
+bar is 73.3 m. Evidence: `local-notes/oneshot_evidence/P5b_live_2026-10-16/`.
+
+| Run | Robot | Arc | LANE worst | Barrels | Note |
+| --- | --- | --- | --- | --- | --- |
+| `legacy` (control) | 2027 | 10.6 m | -9.006 m | none | leaves over the left paint at index 156, as in 10.29 |
+| `whole_line` 1 | 2027 | 50.8 m | -0.749 m | `barrel_3` | past `barrel_3`, brief excursions, back into the lane each time |
+| `whole_line` 2 | 2027 | 15.2 m | -18.543 m | `barrel_2` | out over the right paint at `barrel_3` |
+| `whole_line` 3 | 2027 | 8.8 m | -0.229 m | none | left paint at index 139, then back and forth |
+| `whole_line` | 2026 | 50.8 m | -2.895 m | `barrel_7` | |
+| `whole_line`, cameras off | 2027 | 0.0 m | +1.740 m | none | holds, as it must |
+
+So the robot can now return to the lane after an excursion, which it never did
+before, and two of four laps went five times as far. None passes. What is left
+(inferred from the offline study): a single straight segment per side cannot
+follow the course's curves (the paint curves from slope -0.85 to -3.3 within
+4 m), and the planned path keeps only about 0.1 m between the robot's centre and
+the paint where the chassis needs 0.405 m.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model

@@ -314,8 +314,11 @@ Verified means a command was run and a number came back. Nothing below is
       -8.8 m). Still not passing. Where and why (10.29): all seven later laps
       leave over the left paint about 2 m before `barrel_3`, on both robots,
       gap choice on or off; the Hough grid extends a seen line straight ahead
-      past its end and marks free space beyond the real paint. Next: the
-      offline study `local-notes/P5b_hough_grid_design.md`.
+      past its end and marks free space beyond the real paint. P5b
+      (`lane_boundary_model:=whole_line`, 10.30): course arc 50.8, 15.2 and
+      8.8 m on the 2027 robot, 50.8 m on the 2026 robot (control 10.6 m; bar
+      73.3 m); it now recovers into the lane, still not passing. Next: follow
+      the curve (more than one segment per side) and the chassis margin.
 - [ ] **YOLOPv2 in the loop never leaves the start (P6-mini, 2026-10-09,
       `GAZEBO_SETUP.md` 10.23).** `lane_source:=yolopv2` in `igvc_dev_jazzy`: model
       ready on `cuda:0`, L3 passes, but at the start pose the model's raw masks are
