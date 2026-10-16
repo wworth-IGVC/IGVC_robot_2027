@@ -600,7 +600,14 @@ Verified means a command was run and a number came back. Nothing below is
 
 ### P1, before competition
 
-- [ ] **TEAM: decide RQ-06, the control path.** `ros2_control` is not in the
+- [ ] **Verify the new defaults together (2026-10-16, `d3c6011`):**
+      `drive:=ros2_control` (3 of 3 laps alone, 10.32) plus
+      `obstacle_source:=lidar_map` (5 of 5 alone, 10.33; fails without F21's gap
+      choice, which the real robot does not have on). Run the freeze rule on
+      the new defaults in both images, then update README, SETUP and WINDOWS,
+      which still describe DiffDrive and ground-truth barrels as the defaults.
+- [ ] **TEAM: decide RQ-06, the control path.** *(2026-10-16: the simulator now
+      defaults to gz_ros2_control and the real diff_drive_controller, 10.32.)* `ros2_control` is not in the
       loop at all - Nav2's twist goes straight to Gazebo's DiffDrive, so
       `/isaac_joint_cmd` is unbridged and joint limits, the controller update
       rate and its interaction with the physics step are untested. Choice is

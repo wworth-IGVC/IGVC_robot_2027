@@ -2865,6 +2865,77 @@ autonomy check on tree `f840712` passes in both images (Gazebo image 90.1 m,
 worst lane clearance +0.167 m; dev image 90.1 m, +0.152 m; no barrel contact, 0
 retries).
 
+### 10.32 `drive:=ros2_control`: the real diff_drive_controller and its wheel odometry (2026-10-16)
+
+By default the simulator drives through Gazebo's DiffDrive system, which also
+publishes the odometry. `drive:=ros2_control` (`306f421`) loads `gz_ros2_control`
+with the robot's own `controllers.yaml` plus a sim overlay (`controllers_sim.yaml`,
+or `controllers_sim_2027.yaml` for the 2027 robot's wheel geometry), spawns
+`joint_state_broadcaster` and `diff_drive_controller`, and takes `/odom` from the
+controller's wheel odometry through `gazebo_odom_shim`, as on the real robot.
+The controller stops the robot 0.3 s after the last command; DiffDrive holds the
+last command. The default is unchanged.
+
+```bash
+EXTRA_LAUNCH_ARGS="drive:=ros2_control" bash scripts/gazebo/bringup_smoke_test.sh
+LAUNCH_ARGS="drive:=ros2_control" bash scripts/gazebo/autonomy_check.sh
+```
+
+Measured, 2027 robot, Gazebo image (evidence `local-notes/oneshot_evidence/R2C_2026-10-16/`,
+run log `local-notes/R2C_live_2026-10-16.md`):
+
+- Smoke test: 22 passed, 0 failed. Both controllers active; the controller's
+  odometry 1.278 m against ground truth 1.285 m (ratio 0.9948), heading 0.01 deg;
+  after a 3 s burst at 0.40 m/s it coasted 0.095 m and stopped by itself.
+- Autonomy check, lap 1: PASS, 90.1 m, worst lane clearance +0.186 m, no barrel
+  contact, 0 retries. Laps 2 and 3: PASS, 90.1 m (+0.176 m) and 90.0 m
+  (+0.196 m), no barrel contact, 0 retries. So 3 of 3 with `drive:=ros2_control`.
+- Default `drive:=diffdrive` smoke test on the same tree: 18 passed, 0 failed
+  (ratio 0.9969).
+
+**The default since 2026-10-16 (`d3c6011`).** On Liam's call (the sim should
+default to what is most like the real robot), `drive:=ros2_control` and
+`obstacle_source:=lidar_map` (10.33) are now the defaults of
+`gazebo_sim.launch.py` and `gazebo_nav_test.launch.py`; `drive:=diffdrive
+obstacle_source:=gt` gives the previous behaviour, and the smoke test checks
+DiffDrive with `EXTRA_LAUNCH_ARGS="drive:=diffdrive"`. Lanes stay
+`lane_source:=gt`. **Not yet verified:** each default passed on its own (above,
+and 10.33), but no lap has run with both together, and the freeze rule has not
+been rerun on the new defaults (a combined lap was started at 17:29; Docker
+Desktop stopped before its result was read).
+
+Two traps on the way: the spawner's 5 s switch timeout expired while the
+simulator was starting (now 30 s), and a failed first run left a simulator
+running, which starved the next run's clock and produced a page of false
+failures (odometry ratio 0.25, "off the slab"). Check for leftovers between runs.
+
+### 10.33 Obstacles from the lidar map: 5 of 5 on today's tree (2026-10-16)
+
+`obstacle_source:=lidar_map` with ground-truth lanes on today's tree (F12, F20,
+F21 in): five laps, all PASS, no barrel contact. Evidence:
+`local-notes/oneshot_evidence/lidar_map_2026-10-16/`. These ran in `igvc_dev_jazzy`
+beside another simulator in `igvc_gazebo` (ROS domain 37, Gazebo partition
+`lidar37`), so the real-time factor was 0.52 to 0.80.
+
+| Lap | `lidar_min_range_m` | Distance | Worst lane clearance | Barrels |
+| --- | --- | --- | --- | --- |
+| 1 | 0.25 | 90.0 m | +0.205 m | none |
+| 2 | 0.25 | 89.0 m | +0.225 m | none |
+| 3 | 0.25 | 90.1 m | +0.179 m | none |
+| 4 | 0.15 | 90.1 m | +0.283 m | none |
+| 5 | 0.15 | 90.0 m | +0.302 m | none |
+
+On 2026-10-09 the same mode touched barrels and crossed the paint (10.16, 10.20,
+10.22). The closest approach today was 0.79 to 0.96 m from the robot's centre to
+a barrel's surface. F21's gap choice was active in every lap (it removed 394 to
+1,308 cells too narrow for the robot), which fits the squeeze 10.20 described.
+Control, the same as laps 4 and 5 with `nav_gap_choice:=false` (two laps, same
+conditions): both FAIL, both touch `barrel_4` at 28.6 s (lap 6 also LANE -0.063 m;
+readings after a contact are void). So F21's gap choice is the likely reason the
+lidar-map mode now passes (two control laps, not a large sample). The real robot
+does not have F21 turned on (`navigator_config.yaml`); see the GAZEBO_TODO team
+decision.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model
