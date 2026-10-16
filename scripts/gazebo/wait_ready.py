@@ -28,8 +28,21 @@ Modes
 LIMIT_S is a WALL-clock ceiling. Exit 0 when ready, 1 on timeout. Either way
 it prints how long it took in wall and simulation time, which is itself a
 useful number on a new machine.
+
+Option
+------
+  --abort-log FILE
+      Also watch the launch's own output file for Nav2's lifecycle manager
+      giving up: "Failed to bring up all requested nodes. Aborting bringup."
+      (added 2026-10-09, F17). After that line nothing navigates, ever: the
+      manager tries once and does not retry, so waiting out the ceiling only
+      wastes it (566 s wall on 2026-10-09; 2 of 56 saved bring-ups aborted).
+      On seeing it this exits 3 and prints the line; the caller decides
+      whether to restart. Exit codes: 0 ready, 1 ceiling, 3 Nav2 bring-up
+      aborted.
 """
 import math
+import re
 import sys
 import time
 
@@ -38,6 +51,49 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from nav_msgs.msg import Odometry
 from rosgraph_msgs.msg import Clock
+
+
+ABORT_MARK = "Failed to bring up all requested nodes. Aborting bringup."
+# Colour codes: the launch log is written with them when Nav2 logs to a tty.
+_ANSI = re.compile("\x1b\\[[0-9;]*m")
+
+
+class LogWatch:
+    """Incremental scan of a growing launch log for the lifecycle manager's
+    abort. Reads only what is new since the last poll, so a long log costs
+    nothing, and starts again from the top if the file is replaced by a
+    shorter one (a relaunch writes the same path)."""
+
+    def __init__(self, path):
+        self.path = path
+        self.pos = 0
+        self.carry = ""
+        self.cause = ""    # the last "Failed to change state" line seen
+        self.hit = ""      # the abort line, once seen
+
+    def poll(self):
+        if not self.path or self.hit:
+            return self.hit
+        try:
+            with open(self.path, "r", errors="replace") as f:
+                f.seek(0, 2)
+                if f.tell() < self.pos:
+                    self.pos, self.carry = 0, ""
+                f.seek(self.pos)
+                chunk = f.read()
+                self.pos = f.tell()
+        except OSError:
+            return ""
+        lines = (self.carry + chunk).split(chr(10))
+        self.carry = lines.pop()          # a partial last line waits
+        for ln in lines:
+            ln = _ANSI.sub("", ln).rstrip()
+            if "Failed to change state for node" in ln:
+                self.cause = ln
+            if ABORT_MARK in ln:
+                self.hit = ln
+                break
+        return self.hit
 
 
 class Waiter(Node):
@@ -65,12 +121,26 @@ class Waiter(Node):
         self.odom = (p.x, p.y)
 
 
+USAGE = "usage: wait_ready.py odom|moving LIMIT_S [METRES] [--abort-log FILE]"
+
+
 def main():
-    if len(sys.argv) < 3 or sys.argv[1] not in ("odom", "moving"):
-        print("usage: wait_ready.py odom|moving LIMIT_S [METRES]")
+    argv = list(sys.argv)
+    abort_log = ""
+    if "--abort-log" in argv:
+        i = argv.index("--abort-log")
+        if i + 1 >= len(argv):
+            print(USAGE)
+            return 2
+        abort_log = argv[i + 1]
+        del argv[i:i + 2]
+    if len(argv) < 3 or argv[1] not in ("odom", "moving"):
+        print(USAGE)
         return 2
-    mode, limit = sys.argv[1], float(sys.argv[2])
-    metres = float(sys.argv[3]) if len(sys.argv) > 3 else 0.3
+    mode, limit = argv[1], float(argv[2])
+    metres = float(argv[3]) if len(argv) > 3 else 0.3
+    watch = LogWatch(abort_log)
+    last_watch = 0.0
 
     rclpy.init()
     n = Waiter()
@@ -87,6 +157,10 @@ def main():
                 ready = math.hypot(n.odom[0] - n.odom0[0], n.odom[1] - n.odom0[1]) >= metres
         if ready:
             break
+        if abort_log and time.time() - last_watch >= 2.0:
+            last_watch = time.time()
+            if watch.poll():
+                break
         if time.time() - last_note >= 15:
             last_note = time.time()
             print("  ...still waiting (%s): %.0f s wall, %.1f s sim, odom %s"
@@ -95,6 +169,15 @@ def main():
 
     wall = time.time() - wall0
     sim_adv = (n.clock - n.clock0) if n.clock is not None else 0.0
+    if watch.hit and not ready:
+        print("  NAV2 BRING-UP ABORTED after %.1f s wall (%.1f s sim): the lifecycle "
+              "manager gave up and does not retry" % (wall, sim_adv))
+        if watch.cause:
+            print("    " + watch.cause[:300])
+        print("    " + watch.hit[:300])
+        n.destroy_node()
+        rclpy.try_shutdown()
+        return 3
     if ready:
         print("  READY (%s) after %.1f s wall, %.1f s of sim time since /clock was first seen"
               % (mode, wall, sim_adv))

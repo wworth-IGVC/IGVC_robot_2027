@@ -36,6 +36,21 @@
 #                  driving itself. A ceiling, not a wait.
 #   NAV2_DELAY=25  delay Nav2's own bringup, if it loses the race with
 #                  Gazebo on a loaded machine
+#   BRINGUP_RETRIES=1  how many times a run may start over after Nav2's
+#                  lifecycle manager aborts its bring-up ("Failed to bring up
+#                  all requested nodes. Aborting bringup."), default 1. That abort
+#                  is a start-up fault (2 of 59 saved bring-ups, 2026-10-01 and
+#                  2026-10-09, always at collision_monitor's get_state, which the
+#                  manager gives 2 s and never retries): after it nothing can
+#                  navigate, so waiting out the ceiling only wastes 5 to 9 minutes.
+#                  The attempt is torn down, loudly reported and counted, and the
+#                  run starts again from a fresh simulator. A run that needed a
+#                  retry prints "NAV2 BRINGUP RETRIES: n" with n > 0 as its last
+#                  line, and a gate that wants "clean" passes must grep for 0.
+#                  BRINGUP_RETRIES=0 makes the first abort a FAIL at once (exit 1,
+#                  "NOT GRADED"). Aborts are never silent and never become a PASS
+#                  of anything they did not measure: the graded attempt is always
+#                  a complete run of its own.
 #   LAUNCH_ARGS="a:=b c:=d"  extra arguments for gazebo_nav_test.launch.py,
 #                  appended last, for running the same check on another
 #                  configuration (a perception source, say). The default run
@@ -85,6 +100,11 @@ STARTUP_LIMIT="${STARTUP_LIMIT:-300}"
 # Gazebo. Its own default is 15.0 and neither check script could reach it
 # before, so the documented fix for a lost race was unreachable from here.
 NAV2_DELAY="${NAV2_DELAY:-}"
+BRINGUP_RETRIES="${BRINGUP_RETRIES:-1}"
+BRINGUP_ABORTS=0
+case "$BRINGUP_RETRIES" in
+    ''|*[!0-9]*) echo "FAIL: BRINGUP_RETRIES=$BRINGUP_RETRIES is not a whole number."; exit 1 ;;
+esac
 TRACK="$REPO/IGVC_track_generator/track_points.json"
 
 # TOL was the old IN LANE limit. Nothing reads it now; say so rather than
@@ -139,26 +159,66 @@ else
     [ -n "${LAUNCH_ARGS:-}" ] && ARGS="$ARGS $LAUNCH_ARGS" \
         && echo "extra launch arguments: $LAUNCH_ARGS"
 
-    ros2 launch igvc_test_bringup gazebo_nav_test.launch.py $ARGS \
-        > /tmp/autonomy.log 2>&1 &
-    LP=$!
+    # One attempt is: launch, then wait for the robot to drive. If Nav2's
+    # lifecycle manager aborts its bring-up (see BRINGUP_RETRIES at the top) the
+    # attempt is not a result, so it is torn down, reported, counted, and run
+    # again up to BRINGUP_RETRIES times. Every abort is printed here and the
+    # count is printed again on the last line of the run. Nothing else is retried.
+    BRINGUP_ABORTS=0
+    ATTEMPT=0
+    while :; do
+        ATTEMPT=$((ATTEMPT + 1))
+        ros2 launch igvc_test_bringup gazebo_nav_test.launch.py $ARGS \
+            > /tmp/autonomy.log 2>&1 &
+        LP=$!
 
-    # Every barrel touch from launch to the end of the watch window, so a touch
-    # during startup counts too. See contact_logger.py for why silence alone
-    # proves nothing and what it records instead.
-    python3 "$(dirname "$0")/contact_logger.py" "$CONTACT_LOG" \
-        > /tmp/contact_logger.out 2>&1 &
-    CL=$!
+        # Every barrel touch from launch to the end of the watch window, so a
+        # touch during startup counts too. See contact_logger.py for why silence
+        # alone proves nothing and what it records instead.
+        python3 "$(dirname "$0")/contact_logger.py" "$CONTACT_LOG" \
+            > /tmp/contact_logger.out 2>&1 &
+        CL=$!
 
-    # Open the watch window when the robot is DRIVING ITSELF, not after a guess.
-    #
-    # This was `sleep 50` until 2026-09-24: Gazebo, ten Nav2 lifecycle nodes in
-    # sequence, then the navigator's first plan. How long that takes is a property
-    # of the machine. The thing the window is meant to watch starts when the robot
-    # moves, so wait for exactly that. If it never moves, the ceiling expires, the
-    # window runs anyway, and MOVED fails loudly, which is the right outcome.
-    echo "waiting for the robot to start driving itself (ceiling ${STARTUP_LIMIT}s)..."
-    python3 "$(dirname "$0")/wait_ready.py" moving "$STARTUP_LIMIT" 0.3
+        # Open the watch window when the robot is DRIVING ITSELF, not after a guess.
+        #
+        # This was `sleep 50` until 2026-09-24: Gazebo, ten Nav2 lifecycle nodes in
+        # sequence, then the navigator's first plan. How long that takes is a
+        # property of the machine. The thing the window is meant to watch starts
+        # when the robot moves, so wait for exactly that. If it never moves, the
+        # ceiling expires, the window runs anyway, and MOVED fails loudly, which is
+        # the right outcome.
+        #
+        # --abort-log: Nav2's lifecycle manager gives up for good on the first
+        # failed transition, so a log line saying so ends the wait at once (exit 3)
+        # instead of after the ceiling. Before 2026-10-09 such a run spent the whole
+        # ceiling and the whole watch window (566 s) to report 0.0 m.
+        echo "waiting for the robot to start driving itself (ceiling ${STARTUP_LIMIT}s)..."
+        python3 "$(dirname "$0")/wait_ready.py" moving "$STARTUP_LIMIT" 0.3 \
+            --abort-log /tmp/autonomy.log
+        WRC=$?
+        [ "$WRC" -ne 3 ] && break
+
+        BRINGUP_ABORTS=$((BRINGUP_ABORTS + 1))
+        cp /tmp/autonomy.log "/tmp/autonomy.bringup_abort${BRINGUP_ABORTS}.log" 2>/dev/null
+        echo
+        echo "!! NAV2 BRING-UP ABORT #${BRINGUP_ABORTS} (attempt ${ATTEMPT}): the lifecycle manager gave up."
+        echo "!! This is a start-up fault, not a navigation result. Launch log kept as"
+        echo "!! /tmp/autonomy.bringup_abort${BRINGUP_ABORTS}.log"
+        kill -INT "$CL" 2>/dev/null
+        kill "$LP" 2>/dev/null
+        sleep 3
+        sim_teardown
+        if [ "$BRINGUP_ABORTS" -gt "$BRINGUP_RETRIES" ]; then
+            echo "FAIL: Nav2 bring-up aborted ${BRINGUP_ABORTS} time(s) and BRINGUP_RETRIES=${BRINGUP_RETRIES};"
+            echo "      the robot was never given a chance to drive, so the run is not graded."
+            echo
+            echo "  AUTONOMY CHECK: FAIL (Nav2 bring-up aborted; the robot was not graded)"
+            echo "NAV2 BRINGUP RETRIES: ${BRINGUP_ABORTS}"
+            exit 1
+        fi
+        echo "!! Starting a fresh simulator (retry ${BRINGUP_ABORTS} of ${BRINGUP_RETRIES})."
+        echo
+    done
 
     if ! kill -0 "$LP" 2>/dev/null; then
         kill -INT "$CL" 2>/dev/null   # sim_teardown does not match a script
@@ -500,5 +560,15 @@ if [ "$RC" -ne 0 ] && [ -z "${ANALYSE_ONLY:-}" ]; then
     echo "--- launch log, errors only ---"
     grep -iE "error|abort|fail" /tmp/autonomy.log \
         | grep -viE "deprecated|localhost_only" | tail -20 | sed 's/^/  /'
+fi
+
+# The last line of every live run, so a gate can count start-up flakes with one
+# grep. 0 is a clean run; n > 0 means n earlier attempts never got to drive.
+if [ -z "${ANALYSE_ONLY:-}" ]; then
+    echo
+    if [ "$BRINGUP_ABORTS" -gt 0 ]; then
+        echo "note: the result above is attempt $((BRINGUP_ABORTS + 1)); the ${BRINGUP_ABORTS} earlier launch(es) aborted in Nav2 bring-up (logs: /tmp/autonomy.bringup_abort*.log)"
+    fi
+    echo "NAV2 BRINGUP RETRIES: ${BRINGUP_ABORTS}"
 fi
 exit $RC
