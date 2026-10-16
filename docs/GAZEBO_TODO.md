@@ -319,8 +319,8 @@ Verified means a command was run and a number came back. Nothing below is
       contact 10.3, 15.2 and 8.8 m on the 2027 robot (control 10.6 m; bar
       73.3 m), 49.5 m on the 2026 robot; not shown to help on the 2027 robot.
       P5c (`lane_held_grid_motion:=odom`, 10.31): no contacts, worst LANE
-      -0.09 to -0.38 m, but all three laps turn round before `barrel_3` (arc
-      about 10 m). Next: why it turns round (frames from such a lap), and a
+      -0.09 to -0.38 m in three laps (-1.38 m in a fourth), but every lap turns
+      round before `barrel_3` (arc about 10 m). Next: why it turns round (frames from such a lap), and a
       ground-truth pose log so lane numbers survive a barrel contact.
 - [ ] **YOLOPv2 in the loop never leaves the start (P6-mini, 2026-10-09,
       `GAZEBO_SETUP.md` 10.23).** `lane_source:=yolopv2` in `igvc_dev_jazzy`: model

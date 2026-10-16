@@ -2815,7 +2815,7 @@ same day as P5c, 10.31.
 
 ### 10.31 Moving a held lane grid with the robot (P5c, 2026-10-16): stays near the lane, turns back before `barrel_3`
 
-New detector parameter `held_grid_motion` (`4cbc346`): `none`, the default, is
+New detector parameter `held_grid_motion` (`f840712`): `none`, the default, is
 today's republish; `odom` resamples the last grid built from the `base_link` of
 its own stamp into the `base_link` of the new stamp through `odom` (TF at both
 stamps, never the latest), and publishes an all-unknown grid if either
@@ -2833,9 +2833,11 @@ lane_boundary_model:=whole_line lane_held_grid_motion:=odom`. Evidence:
 | 1 | none | -0.377 m | 10.4 m | furthest index 157; turned round between 21 and 27 s, then wandered back toward the start |
 | 2 | none | -0.300 m | 10.2 m | furthest index 156; turned round between 25 and 32 s, later drove the course backwards past the start to index 636 |
 | 3 | none | -0.087 m | 9.8 m | furthest index 157; turned round between 25 and 31 s, then wandered between index 84 and 126 |
+| 4 (frames, 15 to 40 s) | none | -1.378 m | 10.4 m | furthest index 157; moved only 22.7 m in the window; frames in `grab_wlh/` |
 
 No contact in any lap, so every reading is valid, and the lane misses are small
-(the `legacy` control left the lane by 9.0 m). But every lap turns round about
+in laps 1 to 3 (the `legacy` control left the lane by 9.0 m); lap 4 missed by
+1.4 m. But every lap turns round about
 1 m before `barrel_3` (index 168; the centreline points are 0.1 m apart) and never
 passes it, so the arc stays at about
 10 m of the 73.3 m bar. Not passing. Why it turns round is not established; the
