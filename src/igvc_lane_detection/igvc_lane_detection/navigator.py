@@ -53,6 +53,8 @@ Parameters
     path_change_tolerance_rad float 0.25
     max_path_lateral_jump_m float 0.5
     max_path_heading_rad float 0.75       reject/limit sideways local paths
+    stop_on_invalid_path  bool    false   cancel the active FollowPath on the
+                                          first invalid lane path (P5e)
 
 Subscriptions
     /fix              NavSatFix       (GPS mode only)
@@ -227,6 +229,7 @@ class IGVCNavigatorNode(Node):
         self._reverse_speed_mps = abs(float(self._p('reverse_speed_mps', 0.30)))
         self._reverse_max_dist_m = float(self._p('reverse_max_dist_m', 0.80))
         self._reverse_cmd_topic = self._p('reverse_cmd_topic', 'cmd_vel_nav')
+        self._stop_on_invalid_path = bool(self._p('stop_on_invalid_path', False))
 
         # Centerline-waypoint strategy: rolling NavigateToPose goals along a
         # pre-known centerline (from track_points.json).  Lets SmacPlanner2D
@@ -460,6 +463,12 @@ class IGVCNavigatorNode(Node):
             ('reverse_speed_mps',      0.30),
             ('reverse_max_dist_m',     0.80),
             ('reverse_cmd_topic',      'cmd_vel_nav'),
+            # P5e: the lane path is in base_link, so a FollowPath goal kept
+            # while the path is invalid turns with the robot and Nav2 drives
+            # a circle. True cancels that goal on the first invalid cycle (the
+            # robot stops and waits for the next valid path). Off by default:
+            # off keeps the goal, today's behaviour.
+            ('stop_on_invalid_path', False),
             # Centerline-waypoint navigation strategy
             ('nav_strategy', ''),               # '' (auto) | 'local_lane' | 'centerline_waypoints' | 'gps'
             ('centerline_source_json', ''),     # path to track_points.json
@@ -641,6 +650,8 @@ class IGVCNavigatorNode(Node):
         if self._uses_follow_path():
             invalid_reason = self._path_invalid_reason(lane_path)
             if invalid_reason is not None:
+                if getattr(self, '_stop_on_invalid_path', False):
+                    self._stop_active_path_goal(invalid_reason)
                 self._handle_blocked_path(invalid_reason)
                 return
             # Forward corridor is clear again — abandon any reverse recovery.
@@ -707,6 +718,30 @@ class IGVCNavigatorNode(Node):
         self._reverse_active = False
         self._reverse_start_xy = None
         self._blocked_since_sec = None
+
+    def _stop_active_path_goal(self, reason: str) -> None:
+        """
+        Cancel the active FollowPath goal when the lane path becomes invalid.
+
+        The path is in base_link, so a goal kept while the path is invalid
+        turns with the robot and the controller drives a constant-curvature
+        circle until a path is valid again (P5d). Cancelling stops the
+        controller; with no goal active, _update sends the next valid path as
+        a new goal (force, after replan_min_dt_sec). The blocked timer and the
+        reverse are unchanged: _handle_blocked_path runs after this and finds
+        no goal to cancel.
+        """
+        if self._goal_handle is None:
+            return
+        try:
+            self._goal_handle.cancel_goal_async()
+        except Exception:
+            pass
+        self._goal_handle = None
+        self._publish_reverse_cmd(0.0)
+        self.get_logger().warn(
+            f'No valid lane path ({reason}): cancelled FollowPath, '
+            'stopping until a valid path returns.')
 
     def _handle_blocked_path(self, reason: str) -> None:
         """

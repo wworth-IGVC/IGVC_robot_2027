@@ -140,6 +140,16 @@ Arguments
         a number   metres, in any mode; 0 = unknown is never traversable.
                    With a blind or lost camera the navigator then has no path
                    and holds, instead of driving straight on
+    nav_stop_on_invalid_path      the navigator's stop_on_invalid_path (P5e):
+                                  cancel the active FollowPath goal on the first
+                                  invalid lane path, so the robot stops instead
+                                  of following a base_link path that turns with
+                                  it (default: auto)
+        auto       true with lane_source hough or yolopv2, not passed with gt
+                   (the navigator's default, off), so the ground-truth run is
+                   the one it was
+        true       on in any mode
+        false      the navigator's default (off) in every mode
 """
 
 import json
@@ -204,6 +214,14 @@ OBSTACLE_SOURCES = ("gt", "gt_map", "none", "nav2_scan", "lidar_map")
 # 1.5 m bridges the gaps measured in the replay (the camera's near blind zone is
 # about 1.0 m); see igvc_lane_detection/navigator.py (unknown_reach_m).
 UNKNOWN_REACH_DEFAULT = {"gt": None, "hough": 1.5, "yolopv2": 1.5}
+
+# ── nav_stop_on_invalid_path: stop instead of circling on a held path ────────
+# The lane path is in base_link. While it is invalid the navigator keeps the
+# last FollowPath goal, which turns with the robot, so the controller drives a
+# constant-curvature circle (P5d: -37 deg/s for 2.7 s, the camera laps turning
+# round before barrel_3). A camera grid has invalid cycles often; the
+# ground-truth grid rarely does, so gt keeps the navigator's default (off).
+STOP_ON_INVALID_PATH_DEFAULT = {"gt": False, "hough": True, "yolopv2": True}
 
 
 def _track_without_obstacles(track_file: str) -> str:
@@ -733,6 +751,21 @@ def _setup(context, *args, **kwargs):
         # exactly the parameters it had before.
         unknown_reach_params = (
             {} if unknown_reach is None else {"unknown_reach_m": unknown_reach})
+        nav_stop = cfg("nav_stop_on_invalid_path").lower()
+        if nav_stop == "auto":
+            stop_on_invalid = STOP_ON_INVALID_PATH_DEFAULT[lane_source]
+        elif nav_stop in ("true", "1", "yes"):
+            stop_on_invalid = True
+        elif nav_stop in ("false", "0", "no"):
+            stop_on_invalid = False
+        else:
+            raise RuntimeError(
+                "nav_stop_on_invalid_path:=%s is not auto, true or false"
+                % nav_stop)
+        # Only passed when on, so the default gt launch (and false) hands the
+        # navigator exactly the parameters it had before.
+        stop_on_invalid_params = (
+            {"stop_on_invalid_path": True} if stop_on_invalid else {})
         navigator_node = Node(
             package="igvc_lane_detection",
             executable="navigation_node",
@@ -787,6 +820,7 @@ def _setup(context, *args, **kwargs):
                     # the real robot's 0.75 works too (P1b).
                     "max_path_heading_rad": float(cfg("nav_max_path_heading_rad")),
                     **unknown_reach_params,
+                    **stop_on_invalid_params,
                 },
             ],
         )
@@ -990,6 +1024,14 @@ def generate_launch_description():
                         "yolopv2 and the navigator's default (no limit) with "
                         "gt; off = the navigator's default in every mode; or "
                         "a number of metres."),
+        DeclareLaunchArgument(
+            "nav_stop_on_invalid_path", default_value="auto",
+            description="The navigator's stop_on_invalid_path in the simulator: "
+                        "cancel the active FollowPath goal on the first invalid "
+                        "lane path, so the robot stops instead of circling on a "
+                        "held base_link path (P5e). auto = true with lane_source "
+                        "hough or yolopv2 and the navigator's default (off) "
+                        "with gt; true or false in any mode."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
