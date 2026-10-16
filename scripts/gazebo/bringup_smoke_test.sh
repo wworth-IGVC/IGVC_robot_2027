@@ -31,12 +31,13 @@
 #   EXTRA_LAUNCH_ARGS="a:=b c:=d"  extra arguments for the launch file,
 #                 appended last, for running the same checks on another
 #                 configuration. Unset, the run is exactly what it was.
-#                 EXTRA_LAUNCH_ARGS="drive:=ros2_control" runs it through
+#                 The default drive (since 2026-10-16) is drive:=ros2_control:
 #                 gz_ros2_control and the real diff_drive_controller; PART 1
 #                 then also checks that both controllers are active and that
 #                 /diff_drive_controller/odom carries data, and PART 2 expects
 #                 the robot to stop on its own after the last command (the
 #                 controller's 0.3 s timeout; DiffDrive holds the last one).
+#                 EXTRA_LAUNCH_ARGS="drive:=diffdrive" tests Gazebo's DiffDrive.
 # ---------------------------------------------------------------------------
 set -o pipefail
 . "$(dirname "$0")/igvc_env.sh" || exit 1
@@ -84,9 +85,11 @@ fi
 
 # Last, so an argument given here wins over the ones above.
 [ -n "${EXTRA_LAUNCH_ARGS:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS $EXTRA_LAUNCH_ARGS"
-DRIVE_ROS2_CONTROL=0
+# drive:=ros2_control is the launch files' default since 2026-10-16;
+# EXTRA_LAUNCH_ARGS="drive:=diffdrive" checks Gazebo's DiffDrive instead.
+DRIVE_ROS2_CONTROL=1
 case "${EXTRA_LAUNCH_ARGS:-}" in
-    *drive:=ros2_control*) DRIVE_ROS2_CONTROL=1 ;;
+    *drive:=diffdrive*) DRIVE_ROS2_CONTROL=0 ;;
 esac
 
 echo "launch file: $LAUNCH_FILE"

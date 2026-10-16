@@ -7,11 +7,11 @@ is the file that turns "we have a simulator image" into "we have a robot that
 drives".
 
 Two ways to drive the robot, chosen with drive:=
-  diffdrive     Stage 1, the default. Gazebo's built-in DiffDrive system,
+  diffdrive     Stage 1, the default until 2026-10-16. Gazebo's DiffDrive,
                 declared in urdf/gazebo/gazebo_sim.urdf.xacro. It does not
                 exercise ros2_control, but it does exercise the description,
                 physics, sensors, odometry and TF in one go.
-  ros2_control  Stage 2. gz_ros2_control (a binary on ROS 2 Jazzy; RQ-06 was
+  ros2_control  Stage 2, the default since 2026-10-16. gz_ros2_control (a binary on ROS 2 Jazzy; RQ-06 was
                 decided for it on 2026-10-08) runs the real
                 diff_drive_controller and joint_state_broadcaster inside
                 Gazebo, loaded with controllers.yaml and then controllers_sim.yaml,
@@ -90,7 +90,7 @@ Arguments
                For GPS tests that must see a heading error (the simulator
                otherwise hides it); the ground-truth lane grid assumes world
                axes, so do not use it with gazebo_nav_test.launch.py.
-    drive              diffdrive | ros2_control   (default: diffdrive)
+    drive              ros2_control | diffdrive   (default: ros2_control)
         see "Two ways to drive the robot" above. ros2_control needs
         use_sim_time:=true and the packages gz_ros2_control, controller_manager,
         diff_drive_controller, joint_state_broadcaster and twist_stamper; the
@@ -714,9 +714,10 @@ def generate_launch_description():
                         "robot: odometry axes along the spawn heading, as on "
                         "the real robot, for GPS heading tests."),
         DeclareLaunchArgument(
-            "drive", default_value="diffdrive",
-            description="diffdrive: Gazebo's built-in DiffDrive reads /cmd_vel "
-                        "(the default). ros2_control: gz_ros2_control runs the "
+            "drive", default_value="ros2_control",
+            description="diffdrive: Gazebo's built-in DiffDrive reads /cmd_vel. "
+                        "ros2_control (the default since 2026-10-16, as on the "
+                        "real robot): gz_ros2_control runs the "
                         "real diff_drive_controller and joint_state_broadcaster "
                         "(controllers.yaml, then controllers_sim.yaml); needs "
                         "use_sim_time:=true and the controller packages."),

@@ -84,7 +84,8 @@ Arguments
     odom_topic                    odometry every consumer is remapped onto
                                   (default: /front_zed_camera_x/zed_node/odom)
     obstacle_source               where the planner's barrels come from
-                                  (default: gt, the behaviour before 2026-10-01)
+                                  (default: lidar_map since 2026-10-16, as on
+                                  the real robot; gt before that)
         gt         gt_nav_bridge_node stamps track_points.json's obstacles_m
                    into /lane_map and /lane_costmap
         none       it stamps none: the barrels are still physically in the
@@ -944,9 +945,11 @@ def generate_launch_description():
                         "ground-truth nodes run at all (scoring only, on "
                         "/gt/...). false is the leak ablation."),
         DeclareLaunchArgument(
-            "obstacle_source", default_value="gt",
-            description="Where the planner's barrels come from: gt (stamped "
-                        "from track_points.json, the default), gt_map (the "
+            "obstacle_source", default_value="lidar_map",
+            description="Where the planner's barrels come from: lidar_map (the "
+                        "default since 2026-10-16, as on the real robot; see "
+                        "below), gt (stamped from track_points.json, the "
+                        "default until 2026-10-16), gt_map (the "
                         "same barrels, alone, on /lidar_obstacle_map), none "
                         "(not at all; a negative control), nav2_scan (Nav2's "
                         "obstacle_layer on /scan alone), lidar_map (the "
@@ -997,8 +1000,9 @@ def generate_launch_description():
                         "default is the section 3.7 contract name, which is "
                         "what isaac_nav_test.launch.py uses."),
         DeclareLaunchArgument(
-            "drive", default_value="diffdrive",
-            description="diffdrive (the default) or ros2_control. Passed to "
+            "drive", default_value="ros2_control",
+            description="ros2_control (the default since 2026-10-16, as on the "
+                        "real robot) or diffdrive. Passed to "
                         "gazebo_sim.launch.py, which explains both; with "
                         "ros2_control, Nav2's last hop is repointed at "
                         "/diff_drive_controller/cmd_vel_unstamped too."),
