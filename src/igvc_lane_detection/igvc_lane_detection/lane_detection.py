@@ -16,6 +16,7 @@ from cv_bridge import CvBridge
 
 class LaneDetectionNode(Node):
     _SYNTHETIC_BOUNDARY_MODES = ('lethal', 'unknown')
+    _BOUNDARY_MODELS = ('legacy', 'whole_line')
 
     def __init__(self):
         super().__init__('lane_detection_node')
@@ -51,6 +52,23 @@ class LaneDetectionNode(Node):
                 f'synthetic_boundary "{self.synthetic_boundary}" is not one of '
                 f'{self._SYNTHETIC_BOUNDARY_MODES}; using "lethal".')
             self.synthetic_boundary = 'lethal'
+
+        # How a fitted lane line becomes grid boundaries.  'legacy' (the
+        # default, and what this node has always done) repartitions every
+        # projected point by the sign of its lateral offset, so one line seen
+        # crossing the robot's heading becomes a 'left' and a 'right' piece,
+        # and holds each boundary at its first/last lateral to the grid edge.
+        # Facing a line obliquely that opens a free corridor straight through
+        # the paint.  'whole_line' keeps each fused line whole, puts it on the
+        # side where its straight-line fit passes the robot (fwd 0), continues
+        # it along that fit beyond the points seen, and paints it as a
+        # 4-connected lethal run so a steep line has no gaps between columns.
+        self.lane_boundary_model    = p('lane_boundary_model',      'legacy')
+        if self.lane_boundary_model not in self._BOUNDARY_MODELS:
+            self.get_logger().warn(
+                f'lane_boundary_model "{self.lane_boundary_model}" is not one of '
+                f'{self._BOUNDARY_MODELS}; using "legacy".')
+            self.lane_boundary_model = 'legacy'
 
         # ── Chassis / ROI exclusion ────────────────────────────────────────
         self.chassis_mask_frac  = p('chassis_mask_frac',   0.15)
@@ -721,6 +739,8 @@ class LaneDetectionNode(Node):
         return overlay_left, overlay_right
 
     def _fill_missing(self, left_3d, right_3d):
+        if getattr(self, 'lane_boundary_model', 'legacy') == 'whole_line':
+            return self._fill_missing_whole_line(left_3d, right_3d)
         self._last_synthetic_side = None
         W = self.assumed_lane_width
         min_valid_sep = max(0.6, 0.35 * W)
@@ -800,6 +820,53 @@ class LaneDetectionNode(Node):
         # If both missing → return None, None (already handled upstream)
         return left_3d, right_3d
 
+    @staticmethod
+    def _line_fit(pts):
+        """Least-squares lat = a + b * fwd over a boundary's points: (b, a)."""
+        f = np.array([p[0] for p in pts], dtype=float)
+        lat = np.array([p[1] for p in pts], dtype=float)
+        if len(pts) < 2 or np.ptp(f) < 1e-6 or np.ptp(lat) == 0.0:
+            return 0.0, float(np.mean(lat))
+        b, a = np.polyfit(f, lat, 1)
+        return float(b), float(a)
+
+    def _fill_missing_whole_line(self, left_3d, right_3d):
+        """lane_boundary_model 'whole_line': no repartition by lateral sign.
+
+        Each fused line stays one boundary.  It is a left boundary when its
+        straight-line fit passes left of the robot (lateral > 0 at fwd 0),
+        else a right one; with two on one side the nearer one is kept.  The
+        separation and synthesis rules are the legacy ones."""
+        self._last_synthetic_side = None
+        W = self.assumed_lane_width
+        min_valid_sep = max(0.6, 0.35 * W)
+        min_side_pts = max(3, int(self.min_projected_line_points))
+
+        sides = {'left': [], 'right': []}
+        for pts in (left_3d, right_3d):
+            if pts is None or len(pts) < min_side_pts:
+                continue
+            _, at_robot = self._line_fit(pts)
+            sides['left' if at_robot > 0.0 else 'right'].append((abs(at_robot), at_robot, pts))
+        left = min(sides['left'], key=lambda s: s[0]) if sides['left'] else None
+        right = min(sides['right'], key=lambda s: s[0]) if sides['right'] else None
+
+        if left is not None and right is not None and left[1] - right[1] < min_valid_sep:
+            if len(left[2]) >= len(right[2]):
+                right = None
+            else:
+                left = None
+
+        left_3d = None if left is None else left[2]
+        right_3d = None if right is None else right[2]
+        if left_3d is not None and right_3d is None:
+            right_3d = [(fwd, lat - W) for fwd, lat in left_3d]
+            self._last_synthetic_side = 'right'
+        elif right_3d is not None and left_3d is None:
+            left_3d = [(fwd, lat + W) for fwd, lat in right_3d]
+            self._last_synthetic_side = 'left'
+        return left_3d, right_3d
+
     # ═══════════════════════════════════════════════════════════════════════
     # Local rolling costmap (per-frame)
     # ═══════════════════════════════════════════════════════════════════════
@@ -829,11 +896,22 @@ class LaneDetectionNode(Node):
         nx, ny = W_grid, H
         data = list(g.data)
 
+        whole_line = getattr(self, 'lane_boundary_model', 'legacy') == 'whole_line'
+        if whole_line:
+            lslope = self._line_fit(lpts)[0]
+            rslope = self._line_fit(rpts)[0]
+        prev_rows = None
+
         for col in range(nx):
             fwd = col * res
-            ll = self._interp(lpts, fwd)
-            rl = self._interp(rpts, fwd)
+            if whole_line:
+                ll = self._lateral_along_line(lpts, lslope, fwd)
+                rl = self._lateral_along_line(rpts, rslope, fwd)
+            else:
+                ll = self._interp(lpts, fwd)
+                rl = self._interp(rpts, fwd)
             if ll is None or rl is None:
+                prev_rows = None
                 continue
 
             left_row  = max(0, min(ny - 1, int((ll + self.grid_width_m / 2) / res)))
@@ -853,8 +931,42 @@ class LaneDetectionNode(Node):
                 elif row == lo or row == hi:
                     data[row * nx + col] = 100    # lethal boundary
 
+            if whole_line:
+                self._raster_boundary_runs(
+                    data, nx, col, prev_rows, (left_row, right_row), lo, hi, skip_row)
+                prev_rows = (left_row, right_row)
+
         g.data = data
         return g
+
+    def _lateral_along_line(self, pts, slope, fwd):
+        """'whole_line': the boundary's lateral at fwd.  Between its points as
+        _interp; beyond them it continues from the end point along the slope of
+        its straight-line fit instead of holding the end point's lateral."""
+        if len(pts) < 2:
+            return None
+        if pts[0][0] <= fwd <= pts[-1][0]:
+            return self._interp(pts, fwd)
+        end = pts[0] if fwd < pts[0][0] else pts[-1]
+        return end[1] + slope * (fwd - end[0])
+
+    @staticmethod
+    def _raster_boundary_runs(data, nx, col, prev_rows, rows, lo, hi, skip_row):
+        """'whole_line': where a boundary moves more than one row between two
+        columns, paint the rows in between lethal, in whichever of the two
+        columns has them outside its free band, so the line is 4-connected and
+        unknown cells beyond it cannot be reached through the gap."""
+        if prev_rows is None:
+            return
+        for prev, row in zip(prev_rows, rows):
+            if row == skip_row or abs(prev - row) <= 1:
+                continue
+            a, b = min(prev, row), max(prev, row)
+            target = col if (b <= lo or a >= hi) else col - 1
+            for r in range(a + 1, b):
+                idx = r * nx + target
+                if target == col or data[idx] != 0:
+                    data[idx] = 100
     def _empty_grid(self, stamp=None):
         g = OccupancyGrid()
         g.header.stamp    = self.get_clock().now().to_msg() if stamp is None else stamp
