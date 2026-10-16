@@ -127,6 +127,21 @@ class LaneSegmentationNode(Node):
         self.persist_skip_no_subscribers = bool(
             p('persistent_skip_publish_without_subscribers', True))
         self.persist_pose_source  = p('persistent_pose_source',      'tf')
+        # What a camera frame's map write does when the TF lookup at its
+        # capture stamp fails. 'latest' (the default, what this node has
+        # always done) falls back to the newest odometry, so lanes seen at
+        # capture time are written at the pose of NOW: the image/pose
+        # mismatch the 2026 team saw. 'skip' drops that frame's write
+        # instead. Either way the node counts hits and misses and logs them
+        # with its once-a-second frame line (capture_pose=hits/total).
+        self.capture_pose_fallback = p('capture_pose_fallback',      'latest')
+        if self.capture_pose_fallback not in ('latest', 'skip'):
+            self.get_logger().warn(
+                f'capture_pose_fallback "{self.capture_pose_fallback}" is not '
+                'latest or skip; using "latest".')
+            self.capture_pose_fallback = 'latest'
+        self._capture_pose_hits = 0
+        self._capture_pose_misses = 0
         self.odom_topic           = p('odom_topic',                  '/front_zed_camera_x/zed_node/odom')
         self.local_from_persistent = bool(p('local_costmap_from_persistent', True))
         self.local_publish_hz      = float(p('local_costmap_publish_hz', 10.0))
@@ -779,6 +794,7 @@ class LaneSegmentationNode(Node):
             transform = lookup_tf(
                 self.tf_buffer, self.persist_frame, self.base_frame, stamp)
             if transform is not None:
+                self._capture_pose_hits = getattr(self, '_capture_pose_hits', 0) + 1
                 translation = transform.transform.translation
                 rotation = transform.transform.rotation
                 return (
@@ -788,6 +804,13 @@ class LaneSegmentationNode(Node):
                     yaw_from_quat(rotation.x, rotation.y, rotation.z, rotation.w),
                     rotation,
                 )
+            self._capture_pose_misses = getattr(self, '_capture_pose_misses', 0) + 1
+            if getattr(self, 'capture_pose_fallback', 'latest') == 'skip':
+                self.get_logger().warn(
+                    f'No {self.persist_frame}->{self.base_frame} transform at the '
+                    'capture stamp of this frame; skipping its map write '
+                    '(capture_pose_fallback skip).', throttle_duration_sec=2.0)
+                return None
 
         if self.persist_pose_source == 'odom':
             return self._persistent_pose_from_odom()
@@ -1475,7 +1498,9 @@ class LaneSegmentationNode(Node):
             f'cam[{cam_idx}] mode={self.detection_mode} '
             f'free={free_pts.shape[0]} lane={lane_pts.shape[0]} '
             f'components={len(lane_components)} '
-            f'active_cams={active_cam_count}'
+            f'active_cams={active_cam_count} '
+            f'capture_pose={getattr(self, "_capture_pose_hits", 0)}/'
+            f'{getattr(self, "_capture_pose_hits", 0) + getattr(self, "_capture_pose_misses", 0)}'
             f'{" " + mask_stats if mask_stats else ""}',
             throttle_duration_sec=1.0)
 
