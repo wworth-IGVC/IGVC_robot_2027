@@ -128,6 +128,17 @@ Arguments
                                   nodes run at all (default: true; false is
                                   the leak ablation, nothing of the ground
                                   truth is then in the graph)
+    nav_unknown_reach_m           the navigator's unknown_reach_m (F12): how far
+                                  unknown lane-grid space may be planned through,
+                                  measured from known-free cells and never across
+                                  a lethal cell (default: auto)
+        auto       1.5 with lane_source hough or yolopv2, the navigator's own
+                   default (unknown is open road) with gt, so the ground-truth
+                   run is the one it was
+        off        the navigator's default in every mode
+        a number   metres, in any mode; 0 = unknown is never traversable.
+                   With a blind or lost camera the navigator then has no path
+                   and holds, instead of driving straight on
 """
 
 import json
@@ -176,6 +187,16 @@ SYNTHETIC_BOUNDARY_MODES = ("lethal", "unknown")
 
 # ── obstacle_source: where the planner's barrels come from ───────────────────
 OBSTACLE_SOURCES = ("gt", "gt_map", "none", "nav2_scan", "lidar_map")
+
+# ── nav_unknown_reach_m: the navigator's limit on planning through unknown ───
+# Metres from known-free cells. The ground-truth grid is dense and the paint is
+# lethal, so unknown beyond it is never reached and gt keeps the navigator's
+# default (no limit). A camera grid is sparse: Hough marks free only between
+# its two fitted lines and YOLOPv2 only sparsely, so unknown beyond a line, ahead
+# of the seen ground and in a blind grid read as open road without the limit.
+# 1.5 m bridges the gaps measured in the replay (the camera's near blind zone is
+# about 1.0 m); see igvc_lane_detection/navigator.py (unknown_reach_m).
+UNKNOWN_REACH_DEFAULT = {"gt": None, "hough": 1.5, "yolopv2": 1.5}
 
 
 def _track_without_obstacles(track_file: str) -> str:
@@ -657,6 +678,22 @@ def _setup(context, *args, **kwargs):
         # the section 3.7 contract name, so it needs no Gazebo-specific
         # override to find the simulator's odometry. That is the RQ-03 rename
         # paying for itself.
+        nav_unknown_reach = cfg("nav_unknown_reach_m")
+        if nav_unknown_reach == "auto":
+            unknown_reach = UNKNOWN_REACH_DEFAULT[lane_source]
+        elif nav_unknown_reach == "off":
+            unknown_reach = None
+        else:
+            try:
+                unknown_reach = float(nav_unknown_reach)
+            except ValueError:
+                raise RuntimeError(
+                    "nav_unknown_reach_m:=%s is not auto, off or a number of "
+                    "metres" % nav_unknown_reach)
+        # Only passed when set, so the default gt launch hands the navigator
+        # exactly the parameters it had before.
+        unknown_reach_params = (
+            {} if unknown_reach is None else {"unknown_reach_m": unknown_reach})
         navigator_node = Node(
             package="igvc_lane_detection",
             executable="navigation_node",
@@ -700,6 +737,7 @@ def _setup(context, *args, **kwargs):
                     # value above. With the validator tolerance in navigator.py
                     # the real robot's 0.75 works too (P1b).
                     "max_path_heading_rad": float(cfg("nav_max_path_heading_rad")),
+                    **unknown_reach_params,
                 },
             ],
         )
@@ -865,6 +903,15 @@ def generate_launch_description():
                         "Default 1.57, the value the simulator has used since "
                         "2026-10-08 (the competition's own default is 0.75). "
                         "A diagnosis knob."),
+        DeclareLaunchArgument(
+            "nav_unknown_reach_m", default_value="auto",
+            description="The navigator's unknown_reach_m in the simulator: how "
+                        "far unknown lane-grid space may be planned through, "
+                        "measured from known-free cells and never across a "
+                        "lethal cell. auto = 1.5 with lane_source hough or "
+                        "yolopv2 and the navigator's default (no limit) with "
+                        "gt; off = the navigator's default in every mode; or "
+                        "a number of metres."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),

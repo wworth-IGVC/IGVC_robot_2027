@@ -214,6 +214,7 @@ class IGVCNavigatorNode(Node):
         self._prev_path_bias_radius_m = float(self._p('prev_path_bias_radius_m', 0.30))
         self._fallback_path_length_m = self._p('fallback_path_length_m', 2.0)
         self._allow_straight_fallback = self._p('allow_straight_fallback', False)
+        self._unknown_reach_m = float(self._p('unknown_reach_m', -1.0))
         self._max_odom_age = self._p('max_odom_age_sec', self._max_costmap_age)
         self._max_odom_costmap_skew = self._p(
             'max_odom_costmap_skew_sec', self._max_costmap_age)
@@ -430,6 +431,11 @@ class IGVCNavigatorNode(Node):
             ('prev_path_bias_radius_m', 0.30),
             ('fallback_path_length_m', 2.0),
             ('allow_straight_fallback', False),
+            # How far unknown (-1) lane-grid space may be planned through,
+            # measured from known-free cells and never across a lethal cell.
+            # Negative = no limit (unknown is open at a cost; the original
+            # behaviour). 0.0 = unknown is never traversable.
+            ('unknown_reach_m', -1.0),
             ('max_costmap_age_sec', 2.0),
             ('max_odom_age_sec', 0.75),
             ('max_odom_costmap_skew_sec', 1.5),
@@ -1304,7 +1310,20 @@ class IGVCNavigatorNode(Node):
         # lane paint and obstacles remain blocked.  This prevents
         # "no connected free band" failures without letting UNKNOWN become
         # the preferred path when actual FREE corridor cells exist.
-        traversable = roi < 90
+        passable = roi < 90
+        # With unknown_reach_m >= 0 unknown space is searched only within that
+        # distance of a known-free cell, reached without crossing a lethal
+        # cell.  Unknown beyond a seen lane line, unseen ground far from any
+        # evidence and a blind (all-unknown) grid then block the search, so the
+        # path is empty and the caller holds instead of driving on as if the
+        # unseen space were road.  Only the search is limited: the clearance
+        # field below still comes from `passable`, so a path that stays inside
+        # the reach is the one the default would have chosen.  The default
+        # (negative) is `traversable = passable`.
+        traversable = passable
+        unknown_reach_m = float(getattr(self, '_unknown_reach_m', -1.0))
+        if unknown_reach_m >= 0.0:
+            traversable = self._limit_unknown_reach(roi, unknown_reach_m / res)
         roi_h, roi_w = traversable.shape
         if roi_h < 3 or roi_w < 3 or not traversable.any():
             return []
@@ -1350,7 +1369,7 @@ class IGVCNavigatorNode(Node):
         # corridor medial axis, so Dijkstra will prefer true centerline cells
         # while still passing through tight gaps if that is the only route.
         large = 1.0e6
-        clearance = np.where(traversable, large, 0.0).astype(float)
+        clearance = np.where(passable, large, 0.0).astype(float)
         clearance[0, :] = 0.0
         clearance[-1, :] = 0.0
         clearance[:, 0] = 0.0
@@ -1361,7 +1380,7 @@ class IGVCNavigatorNode(Node):
                         (1, 1, math.sqrt(2.0)), (1, -1, math.sqrt(2.0)))
         for r in range(roi_h):
             for c in range(roi_w):
-                if not traversable[r, c]:
+                if not passable[r, c]:
                     continue
                 for dr, dc, step in forward_pass:
                     rr = r + dr
@@ -1370,7 +1389,7 @@ class IGVCNavigatorNode(Node):
                         clearance[r, c] = min(clearance[r, c], clearance[rr, cc] + step)
         for r in range(roi_h - 1, -1, -1):
             for c in range(roi_w - 1, -1, -1):
-                if not traversable[r, c]:
+                if not passable[r, c]:
                     continue
                 for dr, dc, step in reverse_pass:
                     rr = r + dr
@@ -1523,6 +1542,31 @@ class IGVCNavigatorNode(Node):
             self._prev_centerline_odom = np.column_stack([ox, oy])
 
         return pts
+
+    @staticmethod
+    def _limit_unknown_reach(roi: np.ndarray, reach_cells: float) -> np.ndarray:
+        """Return the traversable mask with unknown cells limited to a reach.
+
+        A free (0) cell is traversable.  An unknown cell is traversable only
+        when it can be reached from a free cell in at most ``reach_cells``
+        steps over non-lethal cells.  Steps are 4-connected, so a lethal line
+        drawn one cell thick (diagonal or not) cannot be stepped around the
+        way the search's own diagonal moves could.  Lethal cells (>= 90) are
+        never traversable.
+        """
+        passable = roi < 90
+        reach = roi == 0
+        for _ in range(int(round(reach_cells))):
+            grown = reach.copy()
+            grown[1:, :] |= reach[:-1, :]
+            grown[:-1, :] |= reach[1:, :]
+            grown[:, 1:] |= reach[:, :-1]
+            grown[:, :-1] |= reach[:, 1:]
+            grown &= passable
+            if np.array_equal(grown, reach):
+                break
+            reach = grown
+        return reach
 
     # ── Path message builder ──────────────────────────────────────────────
 
