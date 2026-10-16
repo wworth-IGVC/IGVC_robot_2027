@@ -1,0 +1,11 @@
+# Merged over gazebo_nav_test_nav2_overrides.yaml by gazebo_nav_test.launch.py
+# when drive:=ros2_control, and only then.
+#
+# That file points collision_monitor at /cmd_vel, which Gazebo's built-in
+# DiffDrive reads. With gz_ros2_control the real diff_drive_controller is in the
+# loop, so the chain ends where the robot's does: on
+# /diff_drive_controller/cmd_vel_unstamped, which a twist_stamper (started by
+# gazebo_sim.launch.py) turns into the TwistStamped the controller takes.
+collision_monitor:
+  ros__parameters:
+    cmd_vel_out_topic: "/diff_drive_controller/cmd_vel_unstamped"

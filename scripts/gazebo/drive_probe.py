@@ -130,7 +130,7 @@ def main():
     subs = n.pub.get_subscription_count()
     if subs == 0:
         print("  PROBE: nothing subscribes to %s after 20 s; the simulator's"
-              " DiffDrive is not listening" % CMD_TOPIC)
+              " drive path is not listening" % CMD_TOPIC)
         print("PROBE_RESULT=HARNESS_FAIL")
         return 2
 

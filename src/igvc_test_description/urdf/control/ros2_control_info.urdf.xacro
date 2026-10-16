@@ -11,7 +11,14 @@
         <plugin>odrive_ros2_control_plugin/ODriveHardwareInterface</plugin>
         <param name="can">can0</param>
       </xacro:if>
-      <xacro:unless value="${hardware_interface_value == 'CanInterface'}">
+      <!-- GazeboSimSystem is gz_ros2_control's own system plugin, not one of
+           grr_hardware's. Only gazebo_sim.launch.py drive:=ros2_control asks for
+           it; the real robot and the Isaac path never name it, so their
+           expansions are unchanged. -->
+      <xacro:if value="${hardware_interface_value == 'GazeboSimSystem'}">
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </xacro:if>
+      <xacro:unless value="${hardware_interface_value == 'CanInterface' or hardware_interface_value == 'GazeboSimSystem'}">
         <plugin>grr_hardware/$(arg hardware_interface)</plugin>
       </xacro:unless>
     </hardware>

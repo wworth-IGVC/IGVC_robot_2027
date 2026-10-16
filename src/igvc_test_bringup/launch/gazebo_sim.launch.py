@@ -6,12 +6,25 @@ into ROS 2. This is the Gazebo counterpart to isaac_nav_test.launch.py, and it
 is the file that turns "we have a simulator image" into "we have a robot that
 drives".
 
-Stage 1. The robot is driven by Gazebo's built-in DiffDrive system, declared in
-urdf/gazebo/gazebo_sim.urdf.xacro. It does not exercise ros2_control, but it
-does exercise the description, physics, sensors, odometry and TF in one go.
-Stage 2 swaps DiffDrive for gz_ros2_control, which since the move to ROS 2
-Jazzy ships as a binary and no longer needs a source build - see RQ-06 before
-starting that.
+Two ways to drive the robot, chosen with drive:=
+  diffdrive     Stage 1, the default. Gazebo's built-in DiffDrive system,
+                declared in urdf/gazebo/gazebo_sim.urdf.xacro. It does not
+                exercise ros2_control, but it does exercise the description,
+                physics, sensors, odometry and TF in one go.
+  ros2_control  Stage 2. gz_ros2_control (a binary on ROS 2 Jazzy; RQ-06 was
+                decided for it on 2026-10-08) runs the real
+                diff_drive_controller and joint_state_broadcaster inside
+                Gazebo, loaded with controllers.yaml and then controllers_sim.yaml,
+                so the sim goes through the controller the robot uses: its
+                30 Hz update rate and its 0.3 s command timeout. Commands end
+                on /diff_drive_controller/cmd_vel_unstamped, as on the robot,
+                and a twist_stamper makes them the TwistStamped the controller
+                takes. A second stamper keeps /cmd_vel (Twist) working for
+                teleop and the test scripts. Odometry is the controller's own,
+                /diff_drive_controller/odom, through the same gazebo_odom_shim.
+                The Gazebo-side /cmd_vel and /sim/odom_body_frame bridge
+                entries are dropped. Docker only: it needs ros-jazzy-twist-
+                stamper, which the pixi route does not have.
 
 The world and this launch file read the SAME track_points.json, so the course
 geometry, the robot spawn pose and igvc_lane_detection's ground-truth navigator
@@ -77,6 +90,11 @@ Arguments
                For GPS tests that must see a heading error (the simulator
                otherwise hides it); the ground-truth lane grid assumes world
                axes, so do not use it with gazebo_nav_test.launch.py.
+    drive              diffdrive | ros2_control   (default: diffdrive)
+        see "Two ways to drive the robot" above. ros2_control needs
+        use_sim_time:=true and the packages gz_ros2_control, controller_manager,
+        diff_drive_controller, joint_state_broadcaster and twist_stamper; the
+        launch refuses to start without them and names the apt line.
 
 Camera budget, measured: three 1280x720 cameras at 30 Hz deliver about 7 Hz
 each. The defaults here are the ones that hold up. Pass sim_cameras:=all (with
@@ -89,7 +107,9 @@ import io
 import json
 import os
 import platform
+import tempfile
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -97,8 +117,10 @@ from launch.actions import (
     ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
+    RegisterEventHandler,
     SetEnvironmentVariable,
 )
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
@@ -132,6 +154,151 @@ def _find(rel_from_repo: str, pkg: str, rel_from_share: str) -> str:
     return os.path.join(_repo_root(), rel_from_repo)
 
 
+# ── drive:=ros2_control ──────────────────────────────────────────────────────
+#
+# gz_ros2_control does not depend on the controllers it runs, so a lean Gazebo
+# image can have the plugin and lack all of the others, and the first symptom
+# would be a spawner timing out after two minutes. Check up front instead.
+ROS2_CONTROL_PACKAGES = ("gz_ros2_control", "controller_manager",
+                         "diff_drive_controller", "joint_state_broadcaster",
+                         "twist_stamper")
+
+# The bridge entries only Gazebo's built-in DiffDrive needs: the Twist it reads
+# and the odometry it publishes. With gz_ros2_control nothing inside Gazebo
+# reads /cmd_vel or writes /sim/odom_body_frame, and dropping them makes that
+# literally true: `gz topic -i -t /cmd_vel` then shows no subscriber, which is
+# how a run proves the command really goes through the controller.
+DIFFDRIVE_BRIDGE_TOPICS = ("/cmd_vel", "/sim/odom_body_frame")
+
+
+def _require_ros2_control(use_sim_time: bool) -> None:
+    if not use_sim_time:
+        raise RuntimeError(
+            "drive:=ros2_control needs use_sim_time:=true. gz_ros2_control "
+            "forces its controller manager onto simulation time, so a false "
+            "value here would split the clocks and the controller would brake "
+            "every command as stale.")
+    missing = []
+    for pkg in ROS2_CONTROL_PACKAGES:
+        try:
+            get_package_share_directory(pkg)
+        except Exception:                             # noqa: BLE001
+            missing.append(pkg)
+    if missing:
+        distro = os.environ.get("ROS_DISTRO", "jazzy")
+        raise RuntimeError(
+            "drive:=ros2_control needs packages that are not installed: %s. "
+            "Install them with: apt-get install %s  (docker/Dockerfile."
+            "gazebo-jazzy lists them; the pixi environment has no twist_stamper, "
+            "so this mode is Docker only)"
+            % (", ".join(missing),
+               " ".join("ros-%s-%s" % (distro, p.replace("_", "-"))
+                        for p in missing)))
+
+
+def _bridge_without(src: str, ros_topics) -> str:
+    """src, a bridge config, with the entries named in ros_topics removed.
+
+    Written to a temp file so config/gazebo_bridge.yaml itself stays the one
+    contract table. The copy is regenerated on every launch and is not meant
+    to be edited. Refuses to continue if any named entry is not there, because
+    that means the bridge file changed shape and /cmd_vel may still be bridged.
+    """
+    with io.open(src, encoding="utf-8") as fh:
+        entries = yaml.safe_load(fh)
+    kept = [e for e in entries if e.get("ros_topic_name") not in ros_topics]
+    if len(entries) - len(kept) != len(ros_topics):
+        raise RuntimeError(
+            "%s: expected to drop exactly the entries for %s, dropped %d of "
+            "%d. Update DIFFDRIVE_BRIDGE_TOPICS in gazebo_sim.launch.py."
+            % (src, ", ".join(ros_topics), len(entries) - len(kept),
+               len(ros_topics)))
+    out = os.path.join(tempfile.gettempdir(),
+                       "igvc_gazebo_bridge_ros2_control.yaml")
+    with io.open(out, "w", encoding="utf-8") as fh:
+        fh.write("# Generated by gazebo_sim.launch.py (drive:=ros2_control) "
+                 "from\n# %s\n# without %s. Edit the original, not this.\n"
+                 % (src, ", ".join(ros_topics)))
+        yaml.safe_dump(kept, fh, default_flow_style=False, sort_keys=False)
+    return out
+
+
+def _ros2_control_actions(spawn, use_sim_time: bool) -> list:
+    """The controller spawners and the command stampers for drive:=ros2_control.
+
+    Same shape as the gz_ros2_control demos and motor_controllers.launch.py:
+    once the entity is spawned, load joint_state_broadcaster, and once that is
+    done, diff_drive_controller. The controller manager exists only after the
+    entity has been created inside Gazebo, so a spawner started earlier just
+    waits, up to its timeout. OnProcessExit also fires when `create` FAILED, in
+    which case the symptom is the first spawner timing out; judge a run by
+    `ros2 control list_controllers`, not by this launch's exit code.
+
+    EVERY node here takes use_sim_time. The stampers stamp with their own clock
+    and the controller compares that stamp with simulation time against its
+    0.3 s command timeout, so a wall-clock stamp reads as years old and the
+    controller brakes forever.
+    """
+    def spawner(controller):
+        return Node(
+            package="controller_manager",
+            executable="spawner",
+            # The switch waits for controller-manager update cycles, which run
+            # on simulation time; at start-up the simulator can be slow enough
+            # that the spawner's 5 s default expires (seen 2026-10-16:
+            # joint_state_broadcaster "Switch controller timed out").
+            arguments=[controller,
+                       "--controller-manager", "/controller_manager",
+                       "--controller-manager-timeout", "120",
+                       "--switch-timeout", "30",
+                       "--service-call-timeout", "30"],
+            parameters=[{"use_sim_time": use_sim_time}],
+            output="screen",
+        )
+
+    jsb_spawner = spawner("joint_state_broadcaster")
+    ddc_spawner = spawner("diff_drive_controller")
+
+    # The real chain's last hop, as igvc_fused_drive.launch.py has it: Nav2's
+    # collision_monitor ends on /diff_drive_controller/cmd_vel_unstamped, and a
+    # twist_stamper makes it the TwistStamped the Jazzy controller takes.
+    cmd_stamper = Node(
+        package="twist_stamper",
+        executable="twist_stamper",
+        name="igvc_cmd_stamper",
+        output="screen",
+        parameters=[{"use_sim_time": use_sim_time, "frame_id": "base_link"}],
+        remappings=[
+            ("cmd_vel_in", "/diff_drive_controller/cmd_vel_unstamped"),
+            ("cmd_vel_out", "/diff_drive_controller/cmd_vel"),
+        ],
+    )
+    # /cmd_vel (Twist) is what teleop_twist_keyboard, drive_probe.py and the
+    # smoke test publish, and Gazebo no longer reads it in this mode. A second
+    # stamper keeps all of them working unchanged. Two publishers on one topic
+    # are harmless only while one source is active at a time: if Nav2 is
+    # running, do not publish /cmd_vel by hand, the same rule as today.
+    compat_stamper = Node(
+        package="twist_stamper",
+        executable="twist_stamper",
+        name="igvc_cmd_stamper_compat",
+        output="screen",
+        parameters=[{"use_sim_time": use_sim_time, "frame_id": "base_link"}],
+        remappings=[
+            ("cmd_vel_in", "/cmd_vel"),
+            ("cmd_vel_out", "/diff_drive_controller/cmd_vel"),
+        ],
+    )
+    return [
+        RegisterEventHandler(OnProcessExit(
+            target_action=spawn, on_exit=[jsb_spawner])),
+        RegisterEventHandler(OnProcessExit(
+            target_action=jsb_spawner, on_exit=[ddc_spawner])),
+        cmd_stamper,
+        compat_stamper,
+    ]
+
+
 def _setup(context, *args, **kwargs):
     def cfg(name):
         return LaunchConfiguration(name).perform(context)
@@ -146,6 +313,12 @@ def _setup(context, *args, **kwargs):
     odom_axes = cfg("odom_axes")
     if odom_axes not in ("world", "robot"):
         raise RuntimeError("odom_axes:=%s is not world or robot" % odom_axes)
+    drive = cfg("drive")
+    if drive not in ("diffdrive", "ros2_control"):
+        raise RuntimeError("drive:=%s is not diffdrive or ros2_control" % drive)
+    use_ros2_control = drive == "ros2_control"
+    if use_ros2_control:
+        _require_ros2_control(use_sim_time)
 
     # Which robot: 2027 (default since 2026-10-15, the team's Onshape model,
     # urdf/robot_2027/) or 2026 (urdf/robots/test_robot.urdf.xacro). Both use
@@ -208,14 +381,41 @@ def _setup(context, *args, **kwargs):
         os.path.join(*xacro_rel),
     )
 
-    robot_description = Command([
+    xacro_cmd = [
         "xacro ", xacro_file,
         " sim:=true",
         " sim_cameras:=", cfg("sim_cameras"),
         " sim_camera_width:=", cfg("sim_camera_width"),
         " sim_camera_height:=", cfg("sim_camera_height"),
         " sim_camera_hz:=", cfg("sim_camera_hz"),
-    ])
+    ]
+    if use_ros2_control:
+        # hardware_interface:=GazeboSimSystem is the one switch the xacro reads
+        # (ros2_control_info.urdf.xacro and gazebo_sim.urdf.xacro), so the
+        # launch argument cannot disagree with the description. The real
+        # controllers.yaml goes first and controllers_sim.yaml over it.
+        controllers_file = _find(
+            os.path.join("src", "igvc_test_bringup", "config",
+                         "controllers.yaml"),
+            "igvc_test_bringup",
+            os.path.join("config", "controllers.yaml"))
+        # The 2027 robot has its own wheel geometry (controllers_sim_2027.yaml).
+        sim_name = ("controllers_sim_2027.yaml" if robot == "2027"
+                    else "controllers_sim.yaml")
+        controllers_sim_file = _find(
+            os.path.join("src", "igvc_test_bringup", "config", sim_name),
+            "igvc_test_bringup",
+            os.path.join("config", sim_name))
+        for path in (controllers_file, controllers_sim_file):
+            if not os.path.isfile(path):
+                raise RuntimeError("drive:=ros2_control: %s does not exist"
+                                   % path)
+        xacro_cmd += [
+            " hardware_interface:=GazeboSimSystem",
+            " controllers_file:=", controllers_file,
+            " controllers_sim_file:=", controllers_sim_file,
+        ]
+    robot_description = Command(xacro_cmd)
 
     # macOS is different in two ways, and both are handled here so that no
     # script or document has to know about them.
@@ -286,6 +486,8 @@ def _setup(context, *args, **kwargs):
         "igvc_test_bringup",
         os.path.join("config", "gazebo_bridge.yaml"),
     )
+    if use_ros2_control:
+        bridge_cfg = _bridge_without(bridge_cfg, DIFFDRIVE_BRIDGE_TOPICS)
 
     # ── pacing for the camera streams ────────────────────────────────────────
     #
@@ -338,6 +540,14 @@ def _setup(context, *args, **kwargs):
     # TF lookup at all. Raw Gazebo odometry puts the local costmap 135 deg away
     # from the robot with every topic still green. This node rotates it back
     # and owns odom -> base_link. See docs/GAZEBO_SETUP.md 9.3.
+    #
+    # With drive:=ros2_control the odometry is the controller's, which also
+    # starts at identity, so its axes follow the spawn heading just the same
+    # and the shim is needed just the same. Only its input topic changes. The
+    # controller's own TF stays off (enable_odom_tf false), so the shim is still
+    # the only publisher of odom -> base_link.
+    shim_input = ({"input_topic": "/diff_drive_controller/odom"}
+                  if use_ros2_control else {})
     odom_shim = Node(
         package="igvc_test_bringup",
         executable="gazebo_odom_shim",
@@ -348,6 +558,7 @@ def _setup(context, *args, **kwargs):
             # heading, as on the real robot (see the docstring).
             "spawn_yaw_rad": syaw if odom_axes == "world" else 0.0,
             "use_sim_time": use_sim_time,
+            **shim_input,
         }],
     )
 
@@ -363,6 +574,8 @@ def _setup(context, *args, **kwargs):
     # the world slides past. gazebo_sim.rviz is fixed to odom and adds the
     # laser, camera and odometry displays.
     actions = [gz, rsp, spawn, bridge, odom_shim]
+    if use_ros2_control:
+        actions += _ros2_control_actions(spawn, use_sim_time)
 
     # ── the point-cloud re-stamp, one per camera ─────────────────────────────
     #
@@ -418,6 +631,12 @@ def _setup(context, *args, **kwargs):
     print("  world     : %s" % world)
     print("  spawn     : x=%.4f y=%.4f z=%.2f yaw=%.6f" % (sx, sy, sz, syaw))
     print("  cameras   : %s" % cams)
+    if use_ros2_control:
+        print("  drive     : ros2_control (gz_ros2_control: %s, then %s)"
+              % (os.path.basename(controllers_file),
+                 os.path.basename(controllers_sim_file)))
+    else:
+        print("  drive     : diffdrive (Gazebo's built-in DiffDrive)")
     print("  bridge    : %s" % bridge_cfg)
     if odom_axes == "world":
         print("  odom shim : rotating by %.6f rad (%.2f deg)"
@@ -494,6 +713,13 @@ def generate_launch_description():
                         "default, what the ground-truth navigation needs). "
                         "robot: odometry axes along the spawn heading, as on "
                         "the real robot, for GPS heading tests."),
+        DeclareLaunchArgument(
+            "drive", default_value="diffdrive",
+            description="diffdrive: Gazebo's built-in DiffDrive reads /cmd_vel "
+                        "(the default). ros2_control: gz_ros2_control runs the "
+                        "real diff_drive_controller and joint_state_broadcaster "
+                        "(controllers.yaml, then controllers_sim.yaml); needs "
+                        "use_sim_time:=true and the controller packages."),
     ]
 
     return LaunchDescription(

@@ -5,17 +5,21 @@
   Nothing in here is used on the real robot. test_robot.urdf.xacro includes it
   only when sim:=true, so the hardware description is unchanged.
 
-  Stage 1 drives the robot with Gazebo's built-in DiffDrive system, which needs
-  no extra packages. It does not exercise ros2_control, but it proves the
-  description, physics, sensors, odometry and TF in one go.
+  Stage 1, the default, drives the robot with Gazebo's built-in DiffDrive
+  system, which needs no extra packages. It does not exercise ros2_control, but
+  it proves the description, physics, sensors, odometry and TF in one go.
 
-  Stage 2 swaps DiffDrive for the ros2_control path so sim and hardware share
-  controllers.yaml. On ROS 2 Humble that needed a source build, because
-  ros-humble-gz-ros2-control depended on libignition-gazebo6 (Fortress) while
-  this image runs libgz-sim8 (Harmonic). Since the move to Jazzy that is no
-  longer true: ros-jazzy-gz-ros2-control ships as a binary and is installed in
-  the image. Decide RQ-06 before using it - a GazeboDriveHardware topic bridge
-  would avoid the package entirely and keep Gazebo and Isaac symmetrical.
+  Stage 2 swaps DiffDrive for gz_ros2_control so sim and hardware share
+  controllers.yaml and the real diff_drive_controller. RQ-06 was decided for
+  gz_ros2_control on 2026-10-08. It is selected with
+  hardware_interface:=GazeboSimSystem, which gazebo_sim.launch.py sets for
+  drive:=ros2_control, together with controllers_file and controllers_sim_file
+  (the real controllers.yaml, then controllers_sim.yaml on top of it). Only the
+  DiffDrive plugin and the two wheel joints of the JointStatePublisher differ
+  between the two modes; everything else in this file is shared.
+  On ROS 2 Humble this needed a source build, because ros-humble-gz-ros2-control
+  depended on libignition-gazebo6 (Fortress) while this image runs libgz-sim8
+  (Harmonic). Since the move to Jazzy it ships as a binary.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
@@ -46,6 +50,17 @@
        hand. -->
   <xacro:property name="cams_idx"
                   value="${['none','front','all'].index(cams)}" />
+
+  <!-- Which drive path. hardware_interface is the arg ros2_control_info.urdf.xacro
+       already reads; GazeboSimSystem there means gz_ros2_control, and anything
+       else keeps Gazebo's built-in DiffDrive. gazebo_sim.launch.py sets all
+       three args together for drive:=ros2_control and none of them otherwise,
+       so a default expansion is the same as it was before they existed. The two
+       file args are read only when gz_ros2_control is on. -->
+  <xacro:property name="drive_hw" value="$(arg hardware_interface)" />
+  <xacro:property name="use_gz_ros2_control" value="${drive_hw == 'GazeboSimSystem'}" />
+  <xacro:arg name="controllers_file"     default="" />
+  <xacro:arg name="controllers_sim_file" default="" />
 
   <!-- Geometry measured from the model, not copied from controllers.yaml.
        Both values there are wrong for simulation, and one of them looks wrong
@@ -79,6 +94,16 @@
        that compensates for inverted ODrive wiring on the physical robot, and
        applying it in sim makes the robot spin instead of drive. -->
   <gazebo>
+    <!-- With gz_ros2_control (use_gz_ros2_control) the DiffDrive plugin is left
+         out and the plugin after it drives the same two joints from the real
+         diff_drive_controller. wheel_separation and wheel_radius above then
+         feed nothing; controllers_sim.yaml (controllers_sim_2027.yaml for the
+         2027 robot) carries the same two numbers, kept equal by hand.
+         The block is wrapped without re-indenting it, so the diff stays small.
+         Comments in front of an xacro: element are dropped from the expansion;
+         the ones above and inside the plugins are not, which is why those are
+         untouched: a default expansion must not change by a byte. -->
+    <xacro:unless value="${use_gz_ros2_control}">
     <plugin filename="gz-sim-diff-drive-system"
             name="gz::sim::systems::DiffDrive">
       <left_joint>left_wheel_joint</left_joint>
@@ -107,6 +132,21 @@
       <child_frame_id>base_link</child_frame_id>
       <odom_publish_frequency>30</odom_publish_frequency>
     </plugin>
+    </xacro:unless>
+
+    <!-- gz_ros2_control instead of DiffDrive. It loads controller_manager inside
+         Gazebo, so diff_drive_controller and joint_state_broadcaster run the
+         way they do on the robot. Two <parameters> files, later wins:
+         controllers.yaml unchanged, then controllers_sim.yaml. The plugin
+         takes robot_description from the /robot_description topic that
+         robot_state_publisher already publishes, so it needs no robot_param. -->
+    <xacro:if value="${use_gz_ros2_control}">
+      <plugin filename="gz_ros2_control-system"
+              name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(arg controllers_file)</parameters>
+        <parameters>$(arg controllers_sim_file)</parameters>
+      </plugin>
+    </xacro:if>
 
     <!-- Publishes joint positions so robot_state_publisher can animate the
          wheels, and feeds both /joint_states and the contract's
@@ -119,8 +159,16 @@
     <plugin filename="gz-sim-joint-state-publisher-system"
             name="gz::sim::systems::JointStatePublisher">
       <topic>/joint_states</topic>
+      <!-- With gz_ros2_control the two wheel joints are left out: the
+           joint_state_broadcaster is then the only publisher of them on ROS
+           /joint_states, and this publisher keeps the casters, which the
+           broadcaster does not know and robot_state_publisher needs for the
+           caster TF. /isaac_joint_state, the same gz topic bridged twice, then
+           carries the casters only; nothing in src/ subscribes to it. -->
+      <xacro:unless value="${use_gz_ros2_control}">
       <joint_name>left_wheel_joint</joint_name>
       <joint_name>right_wheel_joint</joint_name>
+      </xacro:unless>
       <joint_name>caster_raceway_joint</joint_name>
       <joint_name>caster_wheel_joint</joint_name>
     </plugin>

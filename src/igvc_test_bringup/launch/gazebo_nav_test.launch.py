@@ -248,18 +248,20 @@ def _merge(base: dict, over: dict) -> dict:
     return base
 
 
-def _merged_overrides(base_file: str, extra_file: str) -> str:
+def _merged_overrides(base_file: str, extra_file: str,
+                      out_name: str = "igvc_nav2_overrides_merged.yaml") -> str:
     """base_file with extra_file merged over it, written to a temp file.
 
     navigation_no_docking.launch.py takes one extra_params_file, so the sim's
     fixed overrides and an optional obstacle layer are kept in two files and
-    joined here, rather than copied into a third that could drift.
+    joined here, rather than copied into a third that could drift. A second
+    merge over the first one's result needs its own out_name.
     """
     with open(base_file, encoding="utf-8") as fh:
         base = yaml.safe_load(fh)
     with open(extra_file, encoding="utf-8") as fh:
         extra = yaml.safe_load(fh)
-    out = os.path.join(tempfile.gettempdir(), "igvc_nav2_overrides_merged.yaml")
+    out = os.path.join(tempfile.gettempdir(), out_name)
     with open(out, "w", encoding="utf-8") as fh:
         yaml.safe_dump(_merge(base, extra), fh, default_flow_style=None)
     return out
@@ -437,6 +439,7 @@ def _setup(context, *args, **kwargs):
             "headless": cfg("headless"),
             "rviz": cfg("rviz"),
             "use_sim_time": cfg("use_sim_time"),
+            "drive": cfg("drive"),
         }.items(),
     )
 
@@ -671,6 +674,21 @@ def _setup(context, *args, **kwargs):
             "igvc_test_bringup",
             os.path.join("config", "gazebo_nav_test_nav2_obstacle_scan.yaml")))
     if use_nav2:
+        if cfg("drive") == "ros2_control":
+            # gazebo_nav_test_nav2_overrides.yaml points collision_monitor at
+            # /cmd_vel for Gazebo's DiffDrive. With the real diff_drive_
+            # controller in the loop the chain ends where the robot's does,
+            # on /diff_drive_controller/cmd_vel_unstamped, and a twist_stamper
+            # in gazebo_sim.launch.py takes it from there. The base file is
+            # left as it is, so the default drive is byte-identical.
+            nav2_overrides = _merged_overrides(
+                nav2_overrides,
+                _find(os.path.join("src", "igvc_test_bringup", "config",
+                                   "gazebo_nav_test_nav2_drive_ros2_control.yaml"),
+                      "igvc_test_bringup",
+                      os.path.join("config",
+                                   "gazebo_nav_test_nav2_drive_ros2_control.yaml")),
+                out_name="igvc_nav2_overrides_drive_merged.yaml")
         nav2 = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(_find(
                 os.path.join("src", "igvc_test_bringup", "launch",
@@ -978,5 +996,11 @@ def generate_launch_description():
             description="Odometry topic every consumer is remapped onto. The "
                         "default is the section 3.7 contract name, which is "
                         "what isaac_nav_test.launch.py uses."),
+        DeclareLaunchArgument(
+            "drive", default_value="diffdrive",
+            description="diffdrive (the default) or ros2_control. Passed to "
+                        "gazebo_sim.launch.py, which explains both; with "
+                        "ros2_control, Nav2's last hop is repointed at "
+                        "/diff_drive_controller/cmd_vel_unstamped too."),
         OpaqueFunction(function=_setup),
     ])

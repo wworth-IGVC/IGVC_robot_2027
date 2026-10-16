@@ -6,12 +6,24 @@
 # Only the values that must differ in Gazebo are here, so the two files cannot
 # drift apart on the ~40 lines of shared limit parameters.
 #
-# Used by the Stage 2 gz_ros2_control path. Stage 1 drives through Gazebo's
-# built-in DiffDrive system and reads neither file; those numbers live in
+# Used by the Stage 2 gz_ros2_control path (gazebo_sim.launch.py
+# drive:=ros2_control). Stage 1 drives through Gazebo's built-in DiffDrive
+# system and reads neither file; those numbers live in
 # igvc_test_description/urdf/gazebo/gazebo_sim.urdf.xacro and already match.
+# Keep wheel_separation and wheel_radius equal to those values by hand (the
+# staged consistency check does not read the xacro arguments yet).
+
+controller_manager:
+  ros__parameters:
+    # gz_ros2_control forces this on the controller manager it creates. The
+    # same line on the controllers is defensive: a controller node that did not
+    # inherit it would read wall time, see every sim-stamped command as old,
+    # and brake forever, so the robot would silently never move.
+    use_sim_time: true
 
 diff_drive_controller:
   ros__parameters:
+    use_sim_time: true
 
     # Measured from the model rather than inherited. See the block in
     # controllers.yaml for why the real-robot values are not these.
@@ -23,9 +35,34 @@ diff_drive_controller:
     # wheel joints have axis 0 1 0, so a negative multiplier here makes the
     # left wheel spin backwards and the robot pivots in place instead of
     # driving forward. Must be +1.0 in simulation.
+    #
+    # The odometry uses the same multiplier, so with -1.0 it would still report
+    # forward motion and the drive test would still pass. The frame test
+    # (odometry against the simulator's own pose) is what catches it.
     left_wheel_radius_multiplier: 1.0
     right_wheel_radius_multiplier: 1.0
 
-    # Deliberately NOT changed from controllers.yaml: open_loop, publish_odom
-    # and enable_odom_tf stay false so simulation exercises the same odometry
-    # path as hardware, where the EKF owns odom. Run the EKF in sim too.
+    # Odometry. On the robot open_loop is true: the controller integrates the
+    # command it was given, and the stack's real odometry is the ZED's. In
+    # simulation the controller is the only odometry source (gazebo_odom_shim
+    # reads /diff_drive_controller/odom), and an open-loop one could never
+    # disagree with the command, so a wrong wheel radius or a slipping wheel
+    # would be invisible to the smoke test's comparison with ground truth.
+    # Closed loop integrates the measured wheel positions instead, which
+    # gz_ros2_control provides.
+    open_loop: false
+    position_feedback: true
+
+    # Deliberately NOT changed from controllers.yaml, so simulation exercises
+    # the real values: update_rate, cmd_vel_timeout (0.3 s, the robot stops that
+    # long after the last command), enable_odom_tf (false: gazebo_odom_shim owns
+    # odom -> base_link), publish_limited_velocity, the .NAN velocity and
+    # acceleration limits (velocity_smoother caps acceleration upstream),
+    # odom_frame_id, base_frame_id, the covariances and
+    # velocity_rolling_window_size. use_stamped_vel and publish_odom in
+    # controllers.yaml are not parameters of the Jazzy controller and are
+    # ignored there; do not copy them here.
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_sim_time: true

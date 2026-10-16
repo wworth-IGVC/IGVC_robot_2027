@@ -96,11 +96,16 @@ ENV NVIDIA_DRIVER_CAPABILITIES=all
 # twist-stamper converts Nav2's TwistStamped /cmd_vel into the unstamped Twist
 # Gazebo's DiffDrive subscribes to. The real robot uses the same package for
 # the mirror-image reason, so this is parity rather than a simulator hack.
+#
+# gz-ros2-control does not pull in the controllers drive:=ros2_control runs.
 # ---------------------------------------------------------------------------
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ros-jazzy-ros-gz \
         ros-jazzy-gz-ros2-control \
+        ros-jazzy-diff-drive-controller \
+        ros-jazzy-joint-state-broadcaster \
+        ros-jazzy-ros2controlcli \
         ros-jazzy-simulation-interfaces \
         ros-jazzy-xacro \
         ros-jazzy-robot-state-publisher \

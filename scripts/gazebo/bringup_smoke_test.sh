@@ -28,6 +28,15 @@
 #   CAMERAS=all   exercise all three cameras instead of just the front one
 #                 (robot 2026 only: the 2027 robot has one camera)
 #   ROBOT=2026    test the 2026 robot; the default is the launch file's, 2027
+#   EXTRA_LAUNCH_ARGS="a:=b c:=d"  extra arguments for the launch file,
+#                 appended last, for running the same checks on another
+#                 configuration. Unset, the run is exactly what it was.
+#                 EXTRA_LAUNCH_ARGS="drive:=ros2_control" runs it through
+#                 gz_ros2_control and the real diff_drive_controller; PART 1
+#                 then also checks that both controllers are active and that
+#                 /diff_drive_controller/odom carries data, and PART 2 expects
+#                 the robot to stop on its own after the last command (the
+#                 controller's 0.3 s timeout; DiffDrive holds the last one).
 # ---------------------------------------------------------------------------
 set -o pipefail
 . "$(dirname "$0")/igvc_env.sh" || exit 1
@@ -72,6 +81,13 @@ fi
 # PART 4's ground-truth nodes do not need Nav2 and still run.
 [ "$NAV" = "0" ] || LAUNCH_ARGS="$LAUNCH_ARGS nav2:=false"
 [ -n "${ROBOT:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS robot:=$ROBOT"
+
+# Last, so an argument given here wins over the ones above.
+[ -n "${EXTRA_LAUNCH_ARGS:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS $EXTRA_LAUNCH_ARGS"
+DRIVE_ROS2_CONTROL=0
+case "${EXTRA_LAUNCH_ARGS:-}" in
+    *drive:=ros2_control*) DRIVE_ROS2_CONTROL=1 ;;
+esac
 
 echo "launch file: $LAUNCH_FILE"
 echo "launch args: $LAUNCH_ARGS"
@@ -132,6 +148,36 @@ check_topic /isaac_joint_state sensor_msgs/msg/JointState
 check_topic /odom              nav_msgs/msg/Odometry
 check_topic /front_zed_camera_x/zed_node/odom nav_msgs/msg/Odometry
 check_topic /imu               sensor_msgs/msg/Imu
+
+# drive:=ros2_control only. Every check above passes with either drive path,
+# because /odom, /joint_states and the rest are bridged or shimmed the same way
+# in both. These do not. /diff_drive_controller/odom exists only while that
+# controller is active, and a controller that is loaded but not active moves
+# nothing, so each is checked by state and not by name.
+if [ "$DRIVE_ROS2_CONTROL" = "1" ]; then
+    check_topic /diff_drive_controller/odom nav_msgs/msg/Odometry
+    # Captured first, matched second: see the pipefail note at the TF check.
+    CTRL=$(timeout 30 ros2 control list_controllers 2>&1)
+    if ! printf '%s\n' "$CTRL" | grep -q diff_drive_controller; then
+        # No ros2controlcli in this image, or nothing loaded. Ask the service
+        # the CLI asks, one controller per line.
+        CTRL=$(timeout 30 ros2 service call /controller_manager/list_controllers \
+               controller_manager_msgs/srv/ListControllers 2>&1 \
+               | sed "s/ControllerState(/\n&/g")
+    fi
+    for C in joint_state_broadcaster diff_drive_controller; do
+        # "active" must not match "inactive".
+        if printf '%s\n' "$CTRL" | grep "$C" \
+           | grep -Eq "(^|[^a-z])active([^a-z]|$)"; then
+            printf "  %-58s PASS\n" "controller $C is active"
+            PASS=$((PASS + 1))
+        else
+            printf "  %-58s FAIL\n" "controller $C is active"
+            FAIL=$((FAIL + 1))
+            printf '%s\n' "$CTRL" | head -12 | sed 's/^/      /'
+        fi
+    done
+fi
 
 # Only the cameras that sim_cameras actually created. Every camera in the
 # contract is bridged unconditionally, so left and right are LISTED above even
@@ -313,6 +359,21 @@ if [ "$(probe PROBE_COAST_HELD)" = "yes" ]; then
 elif [ "$(probe PROBE_COAST_HELD)" = "no" ]; then
     echo "  /cmd_vel timeout: the robot stopped on its own, $(probe PROBE_COAST_M) m in"
     echo "  $(probe PROBE_COAST_WINDOW_S) s of sim time after the last command."
+fi
+# With the real controller in the loop the robot must stop by itself: that is
+# its cmd_vel_timeout, and the one thing observably different from DiffDrive,
+# which holds the last command. So this is also the proof that the controller,
+# and not a leftover DiffDrive, is what drives the robot.
+if [ "$DRIVE_ROS2_CONTROL" = "1" ]; then
+    if [ "$(probe PROBE_COAST_HELD)" = "no" ]; then
+        printf "  %-58s PASS\n" "drive:=ros2_control stopped without a command"
+        PASS=$((PASS + 1))
+    else
+        printf "  %-58s FAIL\n" "drive:=ros2_control stopped without a command"
+        echo "      the robot kept driving after the last command, so the 0.3 s"
+        echo "      cmd_vel_timeout of diff_drive_controller is not in the loop."
+        FAIL=$((FAIL + 1))
+    fi
 fi
 
 O_AFTER=$(odom_xy)
