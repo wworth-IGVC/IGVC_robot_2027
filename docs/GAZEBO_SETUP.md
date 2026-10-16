@@ -2845,6 +2845,21 @@ candidates are the navigator's blocked timer and reverse, and a grid that closes
 the lane ahead (the barrel's inflated disc plus the left line), to separate with
 frames from a `held_grid_motion:=odom` lap.
 
+**A defect in `held_grid_motion:=odom`, found the same day (measured).** Every
+lap logs "held_grid_motion odom: no odom->base_link transform ... all-unknown
+grid" 57 to 59 times (the warning is throttled to once per 2 s), so the node
+publishes all-unknown grids again and again, even while lines are seen. A fix
+that moves the 1 s republish to the newest transform instead of `now()` passed
+its tests but changed nothing live (58 and 59 warnings, laps worse) and is not
+committed (`local-notes/staging/P5c_timer/`). An offline study of the turn-round
+(`local-notes/P5d_turn_round_design.md`, measured on odometry and logs) found the
+robot turns round driving forward, never reversing: while the lane path is
+invalid the navigator sends no new goal for 2.3 to 2.9 s, and the last
+`FollowPath` path, in `base_link`, appears to turn with the robot (inferred, RPP
+not re-read). It also found that the navigator's stuck reverse cannot move the
+robot: the velocity smoother's `min_velocity` is 0.0 for x, so the -0.3 m/s
+command is clamped to zero (0 of 14 reverses in four laps moved it).
+
 The default path is unchanged by P5b and P5c (both opt-in): the default
 autonomy check on tree `f840712` passes in both images (Gazebo image 90.1 m,
 worst lane clearance +0.167 m; dev image 90.1 m, +0.152 m; no barrel contact, 0
