@@ -2810,9 +2810,43 @@ grid is in `base_link`, so it turned with the robot; the navigator kept steering
 toward a path end 25 degrees left while the robot swung from 26 degrees right of
 the course to 43 degrees left, and then threaded the narrow gap left of
 `barrel_3` (gap choice saw about 1.6 m where the real gap is 1.14 to 1.44 m).
-Half of the node's once-a-second samples in that lap had no line. A staged
-opt-in fix (move the held grid with odometry) is in `local-notes/staging/P5c/`,
-not applied.
+Half of the node's once-a-second samples in that lap had no line. Applied the
+same day as P5c, 10.31.
+
+### 10.31 Moving a held lane grid with the robot (P5c, 2026-10-16): stays near the lane, turns back before `barrel_3`
+
+New detector parameter `held_grid_motion` (`4cbc346`): `none`, the default, is
+today's republish; `odom` resamples the last grid built from the `base_link` of
+its own stamp into the `base_link` of the new stamp through `odom` (TF at both
+stamps, never the latest), and publishes an all-unknown grid if either
+transform is missing. Sim launch argument `lane_held_grid_motion` (default
+`none`). Tests (`test_held_grid_motion.py`): 10 fail on the shipped code, 15 pass
+fixed. Offline, the default equals the previous grids cell for cell on 272 frame
+and mode combinations.
+
+Live, 2027 robot, `lane_source:=hough lane_synthetic_boundary:=unknown
+lane_boundary_model:=whole_line lane_held_grid_motion:=odom`. Evidence:
+`local-notes/oneshot_evidence/P5c_live_2026-10-16/`.
+
+| Lap | Barrel contacts | LANE worst | Course arc | What happened |
+| --- | --- | --- | --- | --- |
+| 1 | none | -0.377 m | 10.4 m | furthest index 157; turned round between 21 and 27 s, then wandered back toward the start |
+| 2 | none | -0.300 m | 10.2 m | furthest index 156; turned round between 25 and 32 s, later drove the course backwards past the start to index 636 |
+| 3 | none | -0.087 m | 9.8 m | furthest index 157; turned round between 25 and 31 s, then wandered between index 84 and 126 |
+
+No contact in any lap, so every reading is valid, and the lane misses are small
+(the `legacy` control left the lane by 9.0 m). But every lap turns round about
+1 m before `barrel_3` (index 168; the centreline points are 0.1 m apart) and never
+passes it, so the arc stays at about
+10 m of the 73.3 m bar. Not passing. Why it turns round is not established; the
+candidates are the navigator's blocked timer and reverse, and a grid that closes
+the lane ahead (the barrel's inflated disc plus the left line), to separate with
+frames from a `held_grid_motion:=odom` lap.
+
+The default path is unchanged by P5b and P5c (both opt-in): the default
+autonomy check on tree `f840712` passes in both images (Gazebo image 90.1 m,
+worst lane clearance +0.167 m; dev image 90.1 m, +0.152 m; no barrel contact, 0
+retries).
 
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
