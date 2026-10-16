@@ -2783,21 +2783,36 @@ measured offline, only this one gave the planner a path in every frame. Tests
 Live, with P5a, F12 and F21 on. Course arc is the camera-lap measure; the pass
 bar is 73.3 m. Evidence: `local-notes/oneshot_evidence/P5b_live_2026-10-16/`.
 
-| Run | Robot | Arc | LANE worst | Barrels | Note |
-| --- | --- | --- | --- | --- | --- |
-| `legacy` (control) | 2027 | 10.6 m | -9.006 m | none | leaves over the left paint at index 156, as in 10.29 |
-| `whole_line` 1 | 2027 | 50.8 m | -0.749 m | `barrel_3` | past `barrel_3`, brief excursions, back into the lane each time |
-| `whole_line` 2 | 2027 | 15.2 m | -18.543 m | `barrel_2` | out over the right paint at `barrel_3` |
-| `whole_line` 3 | 2027 | 8.8 m | -0.229 m | none | left paint at index 139, then back and forth |
-| `whole_line` | 2026 | 50.8 m | -2.895 m | `barrel_7` | |
-| `whole_line`, cameras off | 2027 | 0.0 m | +1.740 m | none | holds, as it must |
+*(Corrected the same day. The first version of this table gave each lap's arc
+over the whole 100 s window. The track log is odometry, and once the chassis
+touches a barrel the wheels slip and every later reading is void, as the
+check itself prints. The arcs below stop at the first barrel contact.)*
 
-So the robot can now return to the lane after an excursion, which it never did
-before, and two of four laps went five times as far. None passes. What is left
-(inferred from the offline study): a single straight segment per side cannot
-follow the course's curves (the paint curves from slope -0.85 to -3.3 within
-4 m), and the planned path keeps only about 0.1 m between the robot's centre and
-the paint where the chassis needs 0.405 m.
+| Run | Robot | Arc before any barrel contact | First failure |
+| --- | --- | --- | --- |
+| `legacy` (control) | 2027 | 10.6 m (no contact) | left paint at index 156, as in 10.29 |
+| `whole_line` 1 | 2027 | 10.3 m | touched `barrel_3` at 22.9 s, no lane crossing before it |
+| `whole_line` 2 | 2027 | 15.2 m | right paint at index 167, 33.0 s, passing `barrel_3` (touched `barrel_2` at 83.0 s) |
+| `whole_line` 3 | 2027 | 8.8 m (no contact) | left paint at index 139, 25.0 s; came back into the lane, then left it again |
+| `whole_line` | 2026 | 49.5 m | left paint at index 163, 28.6 s, beside `barrel_3`; came back and drove on (touched `barrel_7` at 98.8 s) |
+| `whole_line`, cameras off | 2027 | 0.0 m (no contact) | holds, as it must |
+
+So on the 2027 robot `whole_line` is **not shown to help**: all three laps
+still fail on the `barrel_3` approach (index 139 to 168), with arcs of 8.8 to
+15.2 m against the control's 10.6 m. Only the 2026 robot's lap recovered into
+the lane and went far. None passes.
+
+A second offline study on frames from a `whole_line` lap
+(`local-notes/P5c_hough_next_design.md`, measured open loop) found the first
+failure there to be a **stale held grid**: at 18.9 and 19.9 s Hough found no line,
+`keep_last_grid_on_miss` republished the 17.89 s grid with fresh stamps, and that
+grid is in `base_link`, so it turned with the robot; the navigator kept steering
+toward a path end 25 degrees left while the robot swung from 26 degrees right of
+the course to 43 degrees left, and then threaded the narrow gap left of
+`barrel_3` (gap choice saw about 1.6 m where the real gap is 1.14 to 1.44 m).
+Half of the node's once-a-second samples in that lap had no line. A staged
+opt-in fix (move the held grid with odometry) is in `local-notes/staging/P5c/`,
+not applied.
 
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 

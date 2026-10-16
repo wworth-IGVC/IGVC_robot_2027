@@ -315,10 +315,12 @@ Verified means a command was run and a number came back. Nothing below is
       leave over the left paint about 2 m before `barrel_3`, on both robots,
       gap choice on or off; the Hough grid extends a seen line straight ahead
       past its end and marks free space beyond the real paint. P5b
-      (`lane_boundary_model:=whole_line`, 10.30): course arc 50.8, 15.2 and
-      8.8 m on the 2027 robot, 50.8 m on the 2026 robot (control 10.6 m; bar
-      73.3 m); it now recovers into the lane, still not passing. Next: follow
-      the curve (more than one segment per side) and the chassis margin.
+      (`lane_boundary_model:=whole_line`, 10.30): arcs before any barrel
+      contact 10.3, 15.2 and 8.8 m on the 2027 robot (control 10.6 m; bar
+      73.3 m), 49.5 m on the 2026 robot; not shown to help on the 2027 robot.
+      Next: the held grid that does not move with the robot
+      (`local-notes/P5c_hough_next_design.md`, staged), and a ground-truth pose
+      log so lane numbers survive a barrel contact.
 - [ ] **YOLOPv2 in the loop never leaves the start (P6-mini, 2026-10-09,
       `GAZEBO_SETUP.md` 10.23).** `lane_source:=yolopv2` in `igvc_dev_jazzy`: model
       ready on `cuda:0`, L3 passes, but at the start pose the model's raw masks are
