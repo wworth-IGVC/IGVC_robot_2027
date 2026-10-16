@@ -17,6 +17,7 @@ from cv_bridge import CvBridge
 class LaneDetectionNode(Node):
     _SYNTHETIC_BOUNDARY_MODES = ('lethal', 'unknown')
     _BOUNDARY_MODELS = ('legacy', 'whole_line')
+    _HELD_GRID_MOTIONS = ('none', 'odom')
 
     def __init__(self):
         super().__init__('lane_detection_node')
@@ -69,6 +70,26 @@ class LaneDetectionNode(Node):
                 f'lane_boundary_model "{self.lane_boundary_model}" is not one of '
                 f'{self._BOUNDARY_MODELS}; using "legacy".')
             self.lane_boundary_model = 'legacy'
+
+        # What a held grid does while the robot moves (keep_last_grid_on_miss).
+        # 'none' (the default, and what this node has always done) republishes
+        # the last grid unchanged with a new stamp: a base_link grid then turns
+        # and moves with the robot, and the navigator's age and skew checks see
+        # a fresh grid, so the robot keeps steering at a path that turns with
+        # it.  'odom' moves the held grid with the robot instead: the last
+        # grid built is resampled from the base_link of the frame that built
+        # it into the base_link of the new stamp, through odom_frame (TF at
+        # both stamps, no fallback to the latest transform).  If either
+        # transform is missing the node publishes an all-unknown grid.  Only a
+        # base_link grid (occupancy_grid_frame == base_frame) is moved.
+        self.held_grid_motion       = p('held_grid_motion',         'none')
+        if self.held_grid_motion not in self._HELD_GRID_MOTIONS:
+            self.get_logger().warn(
+                f'held_grid_motion "{self.held_grid_motion}" is not one of '
+                f'{self._HELD_GRID_MOTIONS}; using "none".')
+            self.held_grid_motion = 'none'
+        self.odom_frame             = p('odom_frame',               'odom')
+        self._held_src = None
 
         # ── Chassis / ROI exclusion ────────────────────────────────────────
         self.chassis_mask_frac  = p('chassis_mask_frac',   0.15)
@@ -360,11 +381,16 @@ class LaneDetectionNode(Node):
                 fused_left, fused_right, rgb_msg.header.stamp,
                 synthetic_side=self._last_synthetic_side)
             self.latest_grid = new_grid
+            if self._moves_held_grid():
+                self._held_src = (new_grid, rgb_msg.header.stamp)
             self.grid_pub.publish(self.latest_grid)
             # ── Accumulate into the persistent map ─────────────────────
             self._update_persistent_map(fused_left, fused_right, rgb_msg.header.stamp)
         elif self.keep_last_grid_on_miss:
-            self.latest_grid.header.stamp = rgb_msg.header.stamp
+            if self._moves_held_grid():
+                self.latest_grid = self._moved_held_grid(rgb_msg.header.stamp)
+            else:
+                self.latest_grid.header.stamp = rgb_msg.header.stamp
             self.grid_pub.publish(self.latest_grid)
         else:
             self.latest_grid = self._empty_grid(rgb_msg.header.stamp)
@@ -1041,8 +1067,93 @@ class LaneDetectionNode(Node):
         return None
 
     def _republish_grid(self):
+        if self._moves_held_grid():
+            self.latest_grid = self._moved_held_grid(self.get_clock().now().to_msg())
+            self.grid_pub.publish(self.latest_grid)
+            return
         self.latest_grid.header.stamp = self.get_clock().now().to_msg()
         self.grid_pub.publish(self.latest_grid)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Held grid motion (held_grid_motion 'odom')
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _moves_held_grid(self):
+        return (getattr(self, 'held_grid_motion', 'none') == 'odom'
+                and self.occupancy_grid_frame == self.base_frame)
+
+    def _moved_held_grid(self, stamp):
+        """The last grid built, moved into the base_link of `stamp` via odom."""
+        src = getattr(self, '_held_src', None)
+        if src is None:
+            self.latest_grid.header.stamp = stamp
+            return self.latest_grid
+        grid, src_stamp = src
+        then = self._planar_pose(self._lookup_tf_exact(
+            self.odom_frame, self.base_frame, src_stamp))
+        now = self._planar_pose(self._lookup_tf_exact(
+            self.odom_frame, self.base_frame, stamp))
+        if then is None or now is None:
+            self.get_logger().warn(
+                f'held_grid_motion odom: no {self.odom_frame}->{self.base_frame} '
+                'transform at the held grid\'s or the new stamp; publishing an '
+                'all-unknown grid.', throttle_duration_sec=2.0)
+            return self._empty_grid(stamp)
+        return self._resample_grid(grid, then, now, stamp)
+
+    def _lookup_tf_exact(self, target_frame, source_frame, stamp):
+        """Like _lookup_tf, but never falls back to the latest transform."""
+        try:
+            return self.tf_buffer.lookup_transform(
+                target_frame, source_frame, Time.from_msg(stamp),
+                timeout=Duration(seconds=0.05))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _planar_pose(tf):
+        if tf is None:
+            return None
+        t = tf.transform.translation
+        q = tf.transform.rotation
+        yaw = float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y),
+                               1.0 - 2.0 * (q.y * q.y + q.z * q.z)))
+        return float(t.x), float(t.y), yaw
+
+    def _resample_grid(self, grid, then, now, stamp):
+        """`grid` (built in base_link at pose `then`, an odom (x, y, yaw)) as
+        seen from base_link at pose `now`: each cell takes the value of the
+        source cell under its centre, unknown (-1) where none is."""
+        g = self._empty_grid(stamp)
+        g.info.resolution = grid.info.resolution
+        g.info.width = grid.info.width
+        g.info.height = grid.info.height
+        g.info.origin.position.x = grid.info.origin.position.x
+        g.info.origin.position.y = grid.info.origin.position.y
+        ny, nx = grid.info.height, grid.info.width
+        res = grid.info.resolution
+        ox = grid.info.origin.position.x
+        oy = grid.info.origin.position.y
+        src = np.asarray(grid.data, dtype=np.int16).reshape(ny, nx)
+        rows, cols = np.mgrid[0:ny, 0:nx]
+        fwd = ox + (cols + 0.5) * res
+        lat = oy + (rows + 0.5) * res
+        x1, y1, w1 = now
+        c1, s1 = np.cos(w1), np.sin(w1)
+        wx = x1 + c1 * fwd - s1 * lat
+        wy = y1 + s1 * fwd + c1 * lat
+        x0, y0, w0 = then
+        c0, s0 = np.cos(w0), np.sin(w0)
+        dx, dy = wx - x0, wy - y0
+        fwd0 = c0 * dx + s0 * dy
+        lat0 = -s0 * dx + c0 * dy
+        col0 = np.floor((fwd0 - ox) / res).astype(int)
+        row0 = np.floor((lat0 - oy) / res).astype(int)
+        inside = (col0 >= 0) & (col0 < nx) & (row0 >= 0) & (row0 < ny)
+        out = np.full((ny, nx), -1, dtype=np.int16)
+        out[inside] = src[row0[inside], col0[inside]]
+        g.data = out.ravel().tolist()
+        return g
 
     def _publish_overlay(self, idx, bgr, hough, left_px, right_px, rgb_msg):
         ov = bgr.copy()

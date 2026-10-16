@@ -187,6 +187,9 @@ SYNTHETIC_BOUNDARY_MODES = ("lethal", "unknown")
 # lane_boundary_model: legacy splits a line seen across the heading by lateral
 # sign and holds each piece's end lateral to the grid edge (P5b).
 LANE_BOUNDARY_MODELS = ("legacy", "whole_line")
+# held_grid_motion: none republishes a held grid unchanged, so it turns with
+# the robot; odom moves it with the robot through odom->base_link (P5c).
+HELD_GRID_MOTIONS = ("none", "odom")
 
 # ── obstacle_source: where the planner's barrels come from ───────────────────
 OBSTACLE_SOURCES = ("gt", "gt_map", "none", "nav2_scan", "lidar_map")
@@ -327,6 +330,11 @@ def _setup(context, *args, **kwargs):
         raise RuntimeError("lane_boundary_model:=%s is not one of %s"
                            % (lane_boundary_model,
                               ", ".join(LANE_BOUNDARY_MODELS)))
+    lane_held_grid_motion = cfg("lane_held_grid_motion")
+    if lane_held_grid_motion not in HELD_GRID_MOTIONS:
+        raise RuntimeError("lane_held_grid_motion:=%s is not one of %s"
+                           % (lane_held_grid_motion,
+                              ", ".join(HELD_GRID_MOTIONS)))
     # Only what differs from the competition node's defaults is passed on, so
     # the default launch hands the detector exactly the parameters it did before.
     hough_grid_params = {}
@@ -334,6 +342,8 @@ def _setup(context, *args, **kwargs):
         hough_grid_params["synthetic_boundary"] = lane_synthetic_boundary
     if lane_boundary_model != "legacy":
         hough_grid_params["lane_boundary_model"] = lane_boundary_model
+    if lane_held_grid_motion != "none":
+        hough_grid_params["held_grid_motion"] = lane_held_grid_motion
     if hough_grid_params and lane_source != "hough":
         print("NOTE: %s only apply to lane_source:=hough; ignored."
               % ", ".join(sorted(hough_grid_params)))
@@ -898,6 +908,14 @@ def generate_launch_description():
                         "whole_line keeps it whole, sides it by where it "
                         "passes the robot, extends it along its own "
                         "direction and paints it 4-connected (P5b)."),
+        DeclareLaunchArgument(
+            "lane_held_grid_motion", default_value="none",
+            description="lane_source:=hough only: what the grid the node "
+                        "holds when a frame finds no lane line does while "
+                        "the robot moves. none (the competition's behaviour, "
+                        "the default) republishes it unchanged, so it turns "
+                        "with the robot; odom moves it with the robot through "
+                        "odom->base_link (P5c)."),
         DeclareLaunchArgument(
             "yolopv2_weights", default_value="",
             description="lane_source:=yolopv2: path to the weights. Empty "
