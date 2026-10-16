@@ -169,6 +169,10 @@ LANE_SOURCES = ("gt", "hough", "yolopv2")
 # to be replaced by what test W5 measures (the navigator must not move the robot
 # before there is lane evidence on /lane_costmap).
 LANE_WARMUP_DEFAULT = {"gt": 0.0, "hough": 5.0, "yolopv2": 45.0}
+# lane_detection_node parameters the simulator may switch (lane_source:=hough).
+# The defaults are the competition node's own, so leaving them alone changes
+# nothing; see igvc_lane_detection/lane_detection.py.
+SYNTHETIC_BOUNDARY_MODES = ("lethal", "unknown")
 
 # ── obstacle_source: where the planner's barrels come from ───────────────────
 OBSTACLE_SOURCES = ("gt", "gt_map", "none", "nav2_scan", "lidar_map")
@@ -289,6 +293,19 @@ def _setup(context, *args, **kwargs):
     if lane_source not in LANE_SOURCES:
         raise RuntimeError("lane_source:=%s is not one of %s"
                            % (lane_source, ", ".join(LANE_SOURCES)))
+    lane_synthetic_boundary = cfg("lane_synthetic_boundary")
+    if lane_synthetic_boundary not in SYNTHETIC_BOUNDARY_MODES:
+        raise RuntimeError("lane_synthetic_boundary:=%s is not one of %s"
+                           % (lane_synthetic_boundary,
+                              ", ".join(SYNTHETIC_BOUNDARY_MODES)))
+    # Only what differs from the competition node's defaults is passed on, so
+    # the default launch hands the detector exactly the parameters it did before.
+    hough_grid_params = {}
+    if lane_synthetic_boundary != "lethal":
+        hough_grid_params["synthetic_boundary"] = lane_synthetic_boundary
+    if hough_grid_params and lane_source != "hough":
+        print("NOTE: %s only apply to lane_source:=hough; ignored."
+              % ", ".join(sorted(hough_grid_params)))
     obstacle_source = cfg("obstacle_source")
     if obstacle_source not in OBSTACLE_SOURCES:
         raise RuntimeError("obstacle_source:=%s is not one of %s"
@@ -573,7 +590,7 @@ def _setup(context, *args, **kwargs):
                     # simulator has the front one, sim_cameras:=front.
                     "num_cameras": 1,
                 },
-            ],
+            ] + ([hough_grid_params] if hough_grid_params else []),
         )
     elif lane_source == "yolopv2":
         detector = Node(
@@ -808,6 +825,12 @@ def generate_launch_description():
                         "detector to the navigator. auto = hough 5, yolopv2 "
                         "45; a number overrides. The detector starts with "
                         "Nav2, at nav2_delay."),
+        DeclareLaunchArgument(
+            "lane_synthetic_boundary", default_value="lethal",
+            description="lane_source:=hough only: how the boundary the node "
+                        "invents when it sees only one lane line is painted. "
+                        "lethal (the competition's behaviour, the default) "
+                        "or unknown."),
         DeclareLaunchArgument(
             "yolopv2_weights", default_value="",
             description="lane_source:=yolopv2: path to the weights. Empty "

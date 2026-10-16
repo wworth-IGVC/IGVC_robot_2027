@@ -15,6 +15,8 @@ from cv_bridge import CvBridge
 
 
 class LaneDetectionNode(Node):
+    _SYNTHETIC_BOUNDARY_MODES = ('lethal', 'unknown')
+
     def __init__(self):
         super().__init__('lane_detection_node')
         self.bridge = CvBridge()
@@ -36,6 +38,19 @@ class LaneDetectionNode(Node):
         self.keep_last_grid_on_miss = p('keep_last_grid_on_miss',    True)
         self.min_lane_points        = p('min_lane_points',            3)
         self.occupancy_grid_frame   = p('occupancy_grid_frame',      self.base_frame)
+
+        # When only one boundary is seen, _fill_missing invents the other one
+        # one assumed_lane_width_m away.  'lethal' (the default, and what this
+        # node has always done) paints that invented boundary 100, so the
+        # navigator centres itself between the seen line and a wall nobody
+        # saw.  'unknown' leaves the invented boundary unpainted (-1) and keeps
+        # the free band up to it.
+        self.synthetic_boundary     = p('synthetic_boundary',       'lethal')
+        if self.synthetic_boundary not in self._SYNTHETIC_BOUNDARY_MODES:
+            self.get_logger().warn(
+                f'synthetic_boundary "{self.synthetic_boundary}" is not one of '
+                f'{self._SYNTHETIC_BOUNDARY_MODES}; using "lethal".')
+            self.synthetic_boundary = 'lethal'
 
         # ── Chassis / ROI exclusion ────────────────────────────────────────
         self.chassis_mask_frac  = p('chassis_mask_frac',   0.15)
@@ -108,6 +123,7 @@ class LaneDetectionNode(Node):
 
         self.latest_grid = self._empty_grid()
         self._cam_state  = {}
+        self._last_synthetic_side = None   # set by _fill_missing
 
         self.tf_buffer   = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -322,7 +338,9 @@ class LaneDetectionNode(Node):
         fused_left, fused_right = self._fill_missing(fused_left, fused_right)
 
         if fused_left is not None and fused_right is not None:
-            new_grid = self._build_grid(fused_left, fused_right, rgb_msg.header.stamp)
+            new_grid = self._build_grid(
+                fused_left, fused_right, rgb_msg.header.stamp,
+                synthetic_side=self._last_synthetic_side)
             self.latest_grid = new_grid
             self.grid_pub.publish(self.latest_grid)
             # ── Accumulate into the persistent map ─────────────────────
@@ -703,6 +721,7 @@ class LaneDetectionNode(Node):
         return overlay_left, overlay_right
 
     def _fill_missing(self, left_3d, right_3d):
+        self._last_synthetic_side = None
         W = self.assumed_lane_width
         min_valid_sep = max(0.6, 0.35 * W)
         side_tol = 0.08
@@ -767,13 +786,17 @@ class LaneDetectionNode(Node):
                 right_count = len(right_3d)
                 if left_count >= right_count:
                     right_3d = [(fwd, lat - W) for fwd, lat in left_3d]
+                    self._last_synthetic_side = 'right'
                 else:
                     left_3d = [(fwd, lat + W) for fwd, lat in right_3d]
+                    self._last_synthetic_side = 'left'
 
         if left_3d is not None and right_3d is None:
             right_3d = [(fwd, lat - W) for fwd, lat in left_3d]
+            self._last_synthetic_side = 'right'
         elif right_3d is not None and left_3d is None:
             left_3d  = [(fwd, lat + W) for fwd, lat in right_3d]
+            self._last_synthetic_side = 'left'
         # If both missing → return None, None (already handled upstream)
         return left_3d, right_3d
 
@@ -781,7 +804,7 @@ class LaneDetectionNode(Node):
     # Local rolling costmap (per-frame)
     # ═══════════════════════════════════════════════════════════════════════
 
-    def _build_grid(self, left_pts, right_pts, stamp):
+    def _build_grid(self, left_pts, right_pts, stamp, synthetic_side=None):
         g = self._empty_grid(stamp)
         if left_pts is None or right_pts is None:
             return g
@@ -816,10 +839,17 @@ class LaneDetectionNode(Node):
             left_row  = max(0, min(ny - 1, int((ll + self.grid_width_m / 2) / res)))
             right_row = max(0, min(ny - 1, int((rl + self.grid_width_m / 2) / res)))
             lo, hi = min(left_row, right_row), max(left_row, right_row)
+            skip_row = -1
+            if synthetic_side is not None and lo != hi and getattr(
+                    self, 'synthetic_boundary', 'lethal') == 'unknown':
+                # the boundary nobody saw stays unknown instead of lethal
+                skip_row = left_row if synthetic_side == 'left' else right_row
 
             for row in range(ny):
                 if lo < row < hi:
                     data[row * nx + col] = 0      # free
+                elif row == skip_row:
+                    continue
                 elif row == lo or row == hi:
                     data[row * nx + col] = 100    # lethal boundary
 
