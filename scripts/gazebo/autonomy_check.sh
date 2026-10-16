@@ -162,6 +162,8 @@ else
     ARGS="headless:=true"
     [ "${RVIZ:-0}" = "1" ] && ARGS="headless:=false rviz:=true"
     [ -n "$NAV2_DELAY" ] && ARGS="$ARGS nav2_delay:=$NAV2_DELAY"
+    # Before LAUNCH_ARGS, so a drive named there wins (igvc_env.sh).
+    [ -n "${IGVC_DEFAULT_DRIVE:-}" ] && ARGS="$ARGS drive:=$IGVC_DEFAULT_DRIVE"
     [ -n "${LAUNCH_ARGS:-}" ] && ARGS="$ARGS $LAUNCH_ARGS" \
         && echo "extra launch arguments: $LAUNCH_ARGS"
 

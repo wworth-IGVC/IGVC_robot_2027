@@ -82,15 +82,21 @@ fi
 # PART 4's ground-truth nodes do not need Nav2 and still run.
 [ "$NAV" = "0" ] || LAUNCH_ARGS="$LAUNCH_ARGS nav2:=false"
 [ -n "${ROBOT:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS robot:=$ROBOT"
+[ -n "${IGVC_DEFAULT_DRIVE:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS drive:=$IGVC_DEFAULT_DRIVE"
 
 # Last, so an argument given here wins over the ones above.
 [ -n "${EXTRA_LAUNCH_ARGS:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS $EXTRA_LAUNCH_ARGS"
 # drive:=ros2_control is the launch files' default since 2026-10-16;
 # EXTRA_LAUNCH_ARGS="drive:=diffdrive" checks Gazebo's DiffDrive instead.
+# The drive in effect is the last drive:= in LAUNCH_ARGS (EXTRA_LAUNCH_ARGS
+# wins), else the launch default, ros2_control.
 DRIVE_ROS2_CONTROL=1
-case "${EXTRA_LAUNCH_ARGS:-}" in
-    *drive:=diffdrive*) DRIVE_ROS2_CONTROL=0 ;;
-esac
+for a in $LAUNCH_ARGS; do
+    case "$a" in
+        drive:=diffdrive) DRIVE_ROS2_CONTROL=0 ;;
+        drive:=ros2_control) DRIVE_ROS2_CONTROL=1 ;;
+    esac
+done
 
 echo "launch file: $LAUNCH_FILE"
 echo "launch args: $LAUNCH_ARGS"

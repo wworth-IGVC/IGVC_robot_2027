@@ -17,6 +17,10 @@
 #   REPO           the repository root
 #   WS             the colcon workspace (build/, install/, log/ live here)
 #   IGVC_RUNTIME   docker | pixi
+#   IGVC_DEFAULT_DRIVE  the drive the scripts pass when the user names none:
+#                  empty under docker (the launch files' default,
+#                  ros2_control), diffdrive under pixi, whose RoboStack
+#                  environment has no gz_ros2_control or twist_stamper
 #   IGVC_ROS_PREFIX  where ROS itself is installed
 # and these helpers exist:
 #   igvc_source_ws       source the workspace overlay after a build
@@ -29,6 +33,15 @@ IGVC_RUNTIME="${IGVC_RUNTIME:-docker}"
 REPO="${IGVC_REPO:-$(cd "$IGVC_SCRIPTS/../.." && pwd)}"
 WS="${IGVC_WS:-/root/ros2_ws}"
 IGVC_ROS_PREFIX="${IGVC_ROS_PREFIX:-/opt/ros/${ROS_DISTRO:-jazzy}}"
+# drive:=ros2_control (the launch default since 2026-10-16) needs
+# gz_ros2_control, the controllers and twist_stamper, which pixi.toml does not
+# install (RoboStack does not package twist_stamper). Under pixi the scripts
+# therefore ask for Gazebo's DiffDrive unless the user names a drive.
+if [ "$IGVC_RUNTIME" = "pixi" ]; then
+    IGVC_DEFAULT_DRIVE="${IGVC_DEFAULT_DRIVE-diffdrive}"
+else
+    IGVC_DEFAULT_DRIVE="${IGVC_DEFAULT_DRIVE-}"
+fi
 
 if [ "$IGVC_RUNTIME" = "pixi" ]; then
     # The pixi environment is activated by `pixi run` / `pixi shell`, which is
