@@ -70,8 +70,20 @@ controller_server:
       # Very lenient so MPPI warm-up / brief stalls near lane paint
       # don't abort the goal.  Lane-following courses may legitimately
       # need >15 s to squeeze past tight features.
+      #
+      # 2026-10-16: effectively OFF (one day). The local costmap below is
+      # robot-centric on purpose (global_frame: base_link), and the controller
+      # reads the robot's pose in that frame, where it is always (0, 0). So
+      # this checker never sees movement and aborted every FollowPath goal
+      # exactly movement_time_allowance after it started, even at full speed
+      # (measured in the simulator: abort 45 s after "Received a goal" with
+      # the robot driving at 0.9 m/s throughout; in about a third of all saved
+      # runs since 2026-09-29). Each abort sent the navigator into its abort
+      # backoff. It could never detect a real stall in this frame; the
+      # navigator's own blocked timer and reverse do that. docs/GAZEBO_SETUP.md
+      # 11.4.
       required_movement_radius: 0.1
-      movement_time_allowance: 45.0
+      movement_time_allowance: 86400.0
 
     goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
