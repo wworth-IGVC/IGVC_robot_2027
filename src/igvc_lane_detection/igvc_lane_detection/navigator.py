@@ -205,6 +205,9 @@ class IGVCNavigatorNode(Node):
         self._max_path_lateral_jump_m = self._p('max_path_lateral_jump_m', 0.35)
         self._max_path_heading_rad = float(self._p('max_path_heading_rad', 0.75))
         self._centerline_gap_tolerance_m = self._p('centerline_gap_tolerance_m', 0.25)
+        self._gap_choice_enabled = bool(self._p('gap_choice_enabled', False))
+        self._gap_choice_half_width_m = float(self._p('gap_choice_half_width_m', 0.405))
+        self._gap_choice_margin_m = float(self._p('gap_choice_margin_m', 0.15))
         # Hysteresis: discount Dijkstra edge cost for cells lying near the
         # previously chosen centerline so the planner commits to a side of
         # an obstacle instead of flipping each frame when both sides are
@@ -427,6 +430,12 @@ class IGVCNavigatorNode(Node):
             ('max_path_lateral_jump_m', 0.35),
             ('max_path_heading_rad', 0.75),
             ('centerline_gap_tolerance_m', 0.25),
+            # Gap choice (F21): when obstacles split the free band, plan only
+            # through branches the robot fits through, if one reaches the end
+            # of the lookahead. Off by default: off is today's planner.
+            ('gap_choice_enabled', False),
+            ('gap_choice_half_width_m', 0.405),
+            ('gap_choice_margin_m', 0.15),
             ('prev_path_bias_weight',   0.4),
             ('prev_path_bias_radius_m', 0.30),
             ('fallback_path_length_m', 2.0),
@@ -1233,6 +1242,62 @@ class IGVCNavigatorNode(Node):
 
     # ── Centerline extraction ─────────────────────────────────────────────
 
+    def _gap_choice_mask(self, roi: np.ndarray, traversable: np.ndarray,
+                         start: tuple[int, int], res: float,
+                         roi_orig_x: float) -> np.ndarray:
+        """Traversable cells the robot fits on, or `traversable` if no such
+        branch reaches the end of the ROI.
+
+        A cell is kept when it is FREE and no lethal cell lies within
+        half_width + margin of it (the ROI edge counts as open: nothing is
+        known beyond it).  Unknown cells are not kept: outside the paint they
+        are wide open, and a path that slipped out of the lane would count as
+        an adequate branch.  Cells within 1 m of the robot are always kept (if
+        traversable), so a robot already close to the paint or to a barrel can
+        leave.  Sets `_last_gap_choice` to 'adequate' (the mask is applied) or
+        'none' (no adequate branch: the search runs as before).
+        """
+        need_m = (float(getattr(self, '_gap_choice_half_width_m', 0.405))
+                  + float(getattr(self, '_gap_choice_margin_m', 0.15)))
+        roi_h, roi_w = roi.shape
+        reach = need_m / res
+        rad = int(math.ceil(reach))
+        blocked = np.pad(roi >= 90, rad, mode='constant', constant_values=False)
+        fits = np.ones((roi_h, roi_w), dtype=bool)
+        for dr in range(-rad, rad + 1):
+            for dc in range(-rad, rad + 1):
+                if dr * dr + dc * dc <= reach * reach:
+                    fits &= ~blocked[rad + dr:rad + dr + roi_h,
+                                     rad + dc:rad + dc + roi_w]
+        near_field = (roi_orig_x + (np.arange(roi_w) + 0.5) * res) < 1.0
+        allowed = traversable & (near_field[None, :] | (fits & (roi == 0)))
+        # Forward-only flood fill from the start, with the search's own moves.
+        seen = np.zeros((roi_h, roi_w), dtype=bool)
+        seen[start] = True
+        queue = deque([start])
+        last_col = roi_w - 2
+        while queue:
+            r, c = queue.popleft()
+            if c >= last_col:
+                self._last_gap_choice = 'adequate'
+                self.get_logger().info(
+                    'Gap choice: %d cells too narrow for the robot are not '
+                    'searched.' % int(traversable.sum() - allowed.sum()),
+                    throttle_duration_sec=5.0)
+                return allowed
+            for dr, dc in ((-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)):
+                rr = r + dr
+                cc = c + dc
+                if (0 <= rr < roi_h and 0 <= cc < roi_w
+                        and allowed[rr, cc] and not seen[rr, cc]):
+                    seen[rr, cc] = True
+                    queue.append((rr, cc))
+        self._last_gap_choice = 'none'
+        self.get_logger().info(
+            'Gap choice: no branch wide enough reaches the end of the '
+            'lookahead; searching as before.', throttle_duration_sec=5.0)
+        return traversable
+
     def _extract_centerline(self) -> list[tuple[float, float]]:
         """
         Derive the lane centerline from /lane_costmap.  Ground-truth mode
@@ -1397,6 +1462,18 @@ class IGVCNavigatorNode(Node):
                     if 0 <= rr < roi_h and 0 <= cc < roi_w:
                         clearance[r, c] = min(clearance[r, c], clearance[rr, cc] + step)
         clearance_m = clearance * res
+
+        # Gap choice (F21).  The search below treats a barrel-to-paint gap
+        # narrower than the robot like any other corridor: it costs a little
+        # more, so which side the path takes depends on where the robot is and
+        # which way it points, not on where it fits.  When enabled, cells too
+        # close to a blocked cell for the robot are dropped from the search,
+        # provided a path through the rest still reaches the end of the
+        # lookahead.  Otherwise the search is untouched.
+        self._last_gap_choice = 'off'
+        if getattr(self, '_gap_choice_enabled', False):
+            traversable = self._gap_choice_mask(
+                roi, traversable, start, res, orig_x + min_col * res)
 
         # Previous-path hysteresis: build a boolean mask of ROI cells lying
         # near the last accepted centerline so the Dijkstra search can discount

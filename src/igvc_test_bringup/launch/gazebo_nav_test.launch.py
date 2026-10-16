@@ -720,6 +720,16 @@ def _setup(context, *args, **kwargs):
                     "max_costmap_age_sec": 5.0,
                     "max_odom_age_sec": 0.5,
                     "max_odom_costmap_skew_sec": 5.0,
+                    # F21: when a barrel splits the free band, plan through a
+                    # branch the robot fits through (half-width 0.405 m plus
+                    # this margin) if one reaches the end of the lookahead,
+                    # instead of the side nearest where the robot points. The
+                    # navigator's own default is off (today's planner); the
+                    # simulator turns it on here. nav_gap_choice:=false is
+                    # the shipped planner.
+                    "gap_choice_enabled": cfg("nav_gap_choice").lower() in (
+                        "true", "1", "yes"),
+                    "gap_choice_margin_m": float(cfg("nav_gap_choice_margin_m")),
                     # The competition navigator (67a6934) rejects any path that
                     # turns more than max_path_heading_rad (default 0.75, 43
                     # deg) from the robot and then holds and reverses. The
@@ -897,6 +907,16 @@ def generate_launch_description():
             description="obstacle_source:=lidar_map only: the lidar map's "
                         "minimum range, default the competition's 0.15 m. "
                         "A diagnosis knob."),
+        DeclareLaunchArgument(
+            "nav_gap_choice", default_value="true",
+            description="The navigator's gap_choice_enabled in the simulator: "
+                        "avoid a gap between a barrel and the paint that is "
+                        "narrower than the robot when a wider branch exists "
+                        "(F21). false is the shipped planner."),
+        DeclareLaunchArgument(
+            "nav_gap_choice_margin_m", default_value="0.15",
+            description="The navigator's gap_choice_margin_m: clearance added "
+                        "to the robot half-width 0.405 m. A diagnosis knob."),
         DeclareLaunchArgument(
             "nav_max_path_heading_rad", default_value="1.57",
             description="The navigator's max_path_heading_rad in the simulator. "
