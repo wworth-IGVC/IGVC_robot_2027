@@ -104,7 +104,34 @@ pixi run smoke          # the topic contract, and does it drive
 pixi run render-check   # is the GPU rendering
 ```
 
-To drive by keyboard, `pixi run sim` in one Terminal, then in a second:
+**Pass `drive:=diffdrive` on this path.** Since 2026-10-16 the launch files
+default to `drive:=ros2_control`, the real robot's `diff_drive_controller`
+(`docs/GAZEBO_SETUP.md` 10.32). That mode needs `twist_stamper`, which
+RoboStack does not package, so the launch file refuses to start it here, and
+`pixi run bootstrap`, `smoke`, `autonomy` and `sim` fail as written above.
+Give the checks Gazebo's DiffDrive instead (`pixi run` keeps these
+variables):
+
+```bash
+EXTRA_LAUNCH_ARGS="drive:=diffdrive" pixi run bootstrap
+EXTRA_LAUNCH_ARGS="drive:=diffdrive" pixi run smoke
+LAUNCH_ARGS="drive:=diffdrive" pixi run autonomy
+```
+
+`start_sim.sh` has no way to pass it, so start the simulator by hand:
+
+```bash
+pixi shell
+source .ws/install/setup.bash
+ros2 launch igvc_test_bringup gazebo_sim.launch.py drive:=diffdrive rviz:=true
+```
+
+The autonomy check's barrels come from the simulated lidar by default
+(`obstacle_source:=lidar_map`, since 2026-10-16), which has not been run on the
+pixi path. Add `obstacle_source:=gt` to `LAUNCH_ARGS` for the barrels from
+`track_points.json`, as in the measurements below.
+
+To drive by keyboard, start the simulator (above) in one Terminal, then in a second:
 
 ```bash
 pixi shell
@@ -123,7 +150,8 @@ other. (Expected from how DDS works; not yet observed on a Mac.)
 Measured in the Linux dry run, which uses the same pixi environment and the
 same commands on a clean Ubuntu container **with software rendering**. On a
 Mac, expect **tier M** instead of tier C and faster cameras; the shapes are the
-same.
+same. They ran before 2026-10-16, with Gazebo's DiffDrive and the barrels from
+`track_points.json`: the same as `drive:=diffdrive obstacle_source:=gt` now.
 
 | Command | Expect | Dry-run measurement |
 | --- | --- | --- |
@@ -170,7 +198,7 @@ the robot, the lidar and the camera:
 ```bash
 pixi shell
 source .ws/install/setup.bash
-ros2 launch igvc_test_bringup gazebo_sim.launch.py headless:=true rviz:=true
+ros2 launch igvc_test_bringup gazebo_sim.launch.py headless:=true rviz:=true drive:=diffdrive
 ```
 
 ---

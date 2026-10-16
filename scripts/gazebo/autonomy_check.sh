@@ -9,9 +9,11 @@
 #
 # NOTHING IN THIS SCRIPT PUBLISHES /cmd_vel. That is the point. Every command
 # the robot receives comes from Nav2, driven by igvc_navigator reading the
-# ground-truth lane costmap. If the script has to push the robot, the test is
-# meaningless - which is exactly the trap the earlier smoke test fell into,
-# where a scripted `ros2 topic pub` looked like autonomy and was not.
+# ground-truth lane costmap and, by default since 2026-10-16, the lidar
+# obstacle map (obstacle_source:=lidar_map). If the script has to push the
+# robot, the test is meaningless - which is exactly the trap the earlier smoke
+# test fell into, where a scripted `ros2 topic pub` looked like autonomy and
+# was not.
 #
 # What can fail here, deliberately:
 #   * the robot never moves                      -> nav stack not closing
@@ -54,8 +56,12 @@
 #   LAUNCH_ARGS="a:=b c:=d"  extra arguments for gazebo_nav_test.launch.py,
 #                  appended last, for running the same check on another
 #                  configuration (a perception source, say). The default run
-#                  passes none, so the default meaning of this check is
-#                  unchanged: ground-truth lanes and barrels.
+#                  passes none, so it checks the launch file's defaults:
+#                  ground-truth lanes and, since 2026-10-16, the real
+#                  diff_drive_controller (drive:=ros2_control) and the barrels
+#                  from the lidar (obstacle_source:=lidar_map). The previous
+#                  defaults, ground-truth barrels and Gazebo's DiffDrive:
+#                  LAUNCH_ARGS="drive:=diffdrive obstacle_source:=gt".
 #   ANALYSE_ONLY=<track_log>  do not run a simulator: score a saved run. The
 #                  same Python block that grades a live run reads the file.
 #                  Optional companions, because a live run measures them and a

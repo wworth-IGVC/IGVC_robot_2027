@@ -534,6 +534,14 @@ Expect, on tier A:
   Your GPU tier: A
 ```
 
+That output is from before 2026-10-16, when the simulator drove through
+Gazebo's DiffDrive. The default is now `drive:=ros2_control`, the real
+`diff_drive_controller`, and the smoke test then has four more checks (both
+controllers active, the controller's odometry topic, and the robot stopping by
+itself): measured 2026-10-16, `topic checks passed: 22   failed: 0`, with a
+drive test of about 1.3 m (`docs/GAZEBO_SETUP.md` 10.32). 18 is right with
+`EXTRA_LAUNCH_ARGS="drive:=diffdrive"`.
+
 **Now read your tier off that output and go to section 6 (A or B) or section 7
 (C).**
 
@@ -708,9 +716,10 @@ docker exec -it igvc_gazebo bash -c \
 ```
 
 **Note on `CAMERAS=none`:** it is the fastest configuration, but
-`bringup_smoke_test.sh` checks four camera topics as part of its 18 checks, so
-a camera-less run **can never reach 18 of 18**. Keep the front camera if you
-want the gate to pass.
+`bringup_smoke_test.sh` checks four camera topics as part of its checks (22
+with the default drive, 18 with `drive:=diffdrive`), so a camera-less run
+**can never pass all of them**. Keep the front camera if you want the gate to
+pass.
 
 ### What you will and will not see
 
@@ -771,15 +780,22 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 focus.
 
 **The repo's own `teleop.launch.py` does not work here.** It wants a physical
-joystick at `/dev/input/js0`, pulls in the ros2_control stack the simulator does
-not use, and publishes to a different topic. Use the command above.
+joystick at `/dev/input/js0`, pulls in the real robot's own ros2_control stack
+(`motor_controllers.launch.py`, a second controller manager beside the
+simulator's), and publishes to a different topic. Use the command above.
 
-Gazebo's DiffDrive **holds the last command it was given**, so if you drive
-forward and let go of the key, the robot keeps going. Press `k`. Measured: it
-travelled a further **3.672 m in the 4 s after `/cmd_vel` stopped**. Whether
-that is a true absence of timeout or a long one is still an open question, and
-`diff_drive_controller` on the real robot does time out, so the simulator is
-the less safe of the two.
+**Since 2026-10-16 the simulator drives through the real
+`diff_drive_controller` by default** (`drive:=ros2_control`), which stops the
+robot 0.3 s after the last command, as on the real robot. Measured: after a 3 s
+burst at 0.40 m/s it coasted 0.095 m and stopped (`docs/GAZEBO_SETUP.md` 10.32).
+Teleop still publishes on `/cmd_vel`; the simulator passes it on to the
+controller.
+
+With `drive:=diffdrive` (the default before 2026-10-16), Gazebo's DiffDrive
+**holds the last command it was given**, so if you drive forward and let go of
+the key, the robot keeps going. Press `k`. Measured: it travelled a further
+**3.672 m in the 4 s after `/cmd_vel` stopped**. Whether that is a true
+absence of timeout or a long one is still an open question.
 
 ---
 
@@ -847,6 +863,21 @@ section 11.4). To
 test the 2026 robot instead, run the smoke test with `ROBOT=2026` and the
 autonomy check with `LAUNCH_ARGS="robot:=2026"` set before the command.
 
+**Which drive and barrels those numbers are from.** All of them were measured
+with Gazebo's DiffDrive and the barrels stamped from `track_points.json`. Since
+2026-10-16 the defaults are the real robot's: `drive:=ros2_control` (the real
+`diff_drive_controller`; `/odom` from its wheel odometry) and
+`obstacle_source:=lidar_map` (the barrels from the simulated lidar, through the
+competition's `lidar_obstacle_costmap`). Each passed on its own on the 2027
+robot: `ros2_control` 3 of 3 autonomy laps and the smoke test 22 of 22,
+`lidar_map` 5 of 5 laps (`docs/GAZEBO_SETUP.md` 10.32, 10.33). Together, the
+freeze rule passed in the Gazebo image on 2026-10-16: smoke test 22 of 22 three
+times, autonomy check 3 of 3 (about 90 m, worst lane clearance +0.30 m, no
+barrel contact), and the 2026 robot too; the dev image is not yet rerun on them. For the
+previous behaviour, run the smoke test with
+`EXTRA_LAUNCH_ARGS="drive:=diffdrive"` and the autonomy check with
+`LAUNCH_ARGS="drive:=diffdrive obstacle_source:=gt"`.
+
 **The lane criterion is `LANE`: the chassis must never cross the painted
 boundary.** (Until 2026-10-07 it was `IN LANE`, a flat 2.00 m from the
 centreline, which failed runs that never touched the paint because the lane is
@@ -894,6 +925,15 @@ means something is pulling from Hub. The Gazebo image comes from GHCR, which
 does not rate-limit anonymous pulls the way Hub does. Hub's limit is counted
 per source IP, so everyone behind the room's NAT shares one allowance.
 
+**`drive:=ros2_control needs packages that are not installed`.** Your image
+is older than 2026-10-16, when `diff_drive_controller` and
+`joint_state_broadcaster` were added to `docker/Dockerfile.gazebo-jazzy` for the
+new default drive. Build the image (`BUILD_IMAGE=1 bash
+scripts/gazebo/bootstrap.sh`), or use Gazebo's DiffDrive for now:
+`EXTRA_LAUNCH_ARGS="drive:=diffdrive"` before the smoke test,
+`LAUNCH_ARGS="drive:=diffdrive"` before the autonomy check, `drive:=diffdrive`
+on `ros2 launch`.
+
 **"A simulator is ALREADY RUNNING in this container."** Exactly what it says.
 Reset: `docker compose -f docker-compose.windows.yml restart igvc_gazebo`.
 
@@ -936,15 +976,22 @@ docker exec igvc_gazebo ps -ef | grep -cE "gz sim|rviz2"
 **It does:** run the real 2026 navigation stack, that is the ground-truth lane
 grid, the IGVC navigator, Nav2's controller, velocity smoother and collision
 monitor, against Gazebo, with none of those nodes modified. The robot drives
-the course, stays between the lines and goes around the barrels.
+the course, stays between the lines and goes around the barrels. Since
+2026-10-16, by default, it drives through the real `diff_drive_controller`
+(`drive:=ros2_control`) and finds the barrels with the simulated lidar
+(`obstacle_source:=lidar_map`, the competition's `lidar_obstacle_costmap`), as
+on the real robot. `drive:=diffdrive obstacle_source:=gt` gives the previous
+behaviour.
 
-**It does not perceive anything.** This is the important one and it is easy to
-misreport. The lane lines and the barrel positions come out of
-`IGVC_track_generator/track_points.json`, not out of the camera or the lidar.
-More precisely, `gazebo_nav_test_nav2_overrides.yaml` replaces the costmap
-`plugins` list with `["lane_layer", "inflation_layer"]`, so Nav2's
-`obstacle_layer` is **never instantiated**. Every obstacle the robot has ever
-avoided in this simulator came from the JSON.
+**It does not perceive the lanes.** This is the important one and it is easy to
+misreport. The lane lines come out of
+`IGVC_track_generator/track_points.json`, not out of the camera
+(`lane_source:=gt`, still the default). With `obstacle_source:=gt` the barrel
+positions come out of the JSON too, as they did in every run before
+2026-10-16. Nav2's own `obstacle_layer` is **never instantiated**:
+`gazebo_nav_test_nav2_overrides.yaml` replaces the costmap `plugins` list with
+`["lane_layer", "inflation_layer"]`, and the lidar map reaches the planner
+through the navigator instead.
 
 **The Hough lane detector does run** and needs nothing extra: CLAHE, Canny and
 `HoughLinesP`, no torch. It produced 253 occupied cells in `/lane_map` over a
@@ -956,13 +1003,15 @@ docker-compose.windows.yml build igvc_dev_jazzy`, 14.9 GB), and scored a hit
 rate of 0.166 against a ground-truth ceiling of 0.676 on 2026-09-29: running,
 not yet good enough to steer by.
 
-**The camera point cloud is rotated 90 degrees.** Measured, not suspected, and
-deliberately not fixed, because fixing it connects a Nav2 consumer that has
-never been connected.
+**The camera point cloud was rotated 90 degrees; fixed 2026-10-07**
+(`docs/GAZEBO_SETUP.md` 10.13). Nav2's obstacle layer is still not connected
+to it.
 
-**`/fix` is not published** and **ros2_control is not in the loop**: Nav2's
-twist goes straight to Gazebo's DiffDrive, so joint limits and the controller
-update rate are untested in simulation.
+**`/fix` is published** since 2026-10-07 (`docs/GAZEBO_SETUP.md` 10.14).
+**ros2_control is in the loop by default** since 2026-10-16: Nav2's twist goes
+to `/diff_drive_controller/cmd_vel_unstamped` and the real controller, with its
+30 Hz update rate and 0.3 s command timeout. With `drive:=diffdrive` it goes
+straight to Gazebo's DiffDrive and neither is tested.
 
 **It is not a ZED camera.** The simulated cameras publish on the same topics
 with the same frame ids and intrinsics as the real ZED wrapper, so downstream
@@ -1017,9 +1066,11 @@ docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/aut
 
 | Topic | What |
 | --- | --- |
-| `/cmd_vel` | velocity in, the only thing flowing into the simulator |
-| `/odom` | corrected odometry, world-aligned, origin at the spawn point |
+| `/cmd_vel` | velocity in, for teleop and the test scripts |
+| `/diff_drive_controller/cmd_vel_unstamped` | Nav2's velocity, with the default `drive:=ros2_control` (as on the real robot) |
+| `/odom` | corrected odometry, world-aligned, origin at the spawn point. By default from the controller's wheel odometry; from Gazebo's DiffDrive with `drive:=diffdrive` |
 | `/scan` | RPLidar C1 |
+| `/lidar_obstacle_map` | the barrels from the lidar, with the default `obstacle_source:=lidar_map` |
 | `/front_zed_camera_x/zed_node/rgb/color/rect/image` | front camera, ZED contract name |
 | `/lane_ground_truth`, `/lane_map`, `/lane_costmap` | the ground-truth lane grids |
-| `/sim/odom_body_frame` | Gazebo's RAW odometry. Do not use it; see `GAZEBO_SETUP.md` 9.3 |
+| `/diff_drive_controller/odom`, `/sim/odom_body_frame` | RAW odometry: the controller's (default), Gazebo DiffDrive's (`drive:=diffdrive` only). Do not use either; see `GAZEBO_SETUP.md` 9.3 |

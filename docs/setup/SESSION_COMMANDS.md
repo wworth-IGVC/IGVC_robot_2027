@@ -286,7 +286,7 @@ WSL, graphics card and tier:
 docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/render_check.sh"
 ```
 
-WSL, the main test, wants `18 failed: 0`:
+WSL, the main test, wants `22   failed: 0` (18 with `drive:=diffdrive`):
 
 ```bash
 docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/bringup_smoke_test.sh"
@@ -296,6 +296,14 @@ WSL, does it drive the course by itself:
 
 ```bash
 docker exec -it igvc_gazebo bash -c "bash src/IGVC_robot_2026/scripts/gazebo/autonomy_check.sh"
+```
+
+WSL, the same two with the defaults before 2026-10-16 (Gazebo's DiffDrive,
+barrels from `track_points.json`):
+
+```bash
+docker exec -it igvc_gazebo bash -c "EXTRA_LAUNCH_ARGS='drive:=diffdrive' bash src/IGVC_robot_2026/scripts/gazebo/bringup_smoke_test.sh"
+docker exec -it igvc_gazebo bash -c "LAUNCH_ARGS='drive:=diffdrive obstacle_source:=gt' bash src/IGVC_robot_2026/scripts/gazebo/autonomy_check.sh"
 ```
 
 ---

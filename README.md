@@ -71,10 +71,23 @@ Verified means a command was run and a number came back. Measured on Windows
 - **The simulated robot is the 2027 robot, since 2026-10-15.** It is built from
   the team's Onshape model by `scripts/gazebo/generate_robot_2027.py` and has
   **one camera, the front ZED X**. The 2026 robot is still there as
-  `robot:=2026`. Freeze rule met on 2026-10-16 in both images: smoke test 18 of
+  `robot:=2026`. Freeze rule met on 2026-10-16 in both images, with the
+  previous defaults (DiffDrive, barrels from `track_points.json`): smoke test 18 of
   18 three times, autonomy check PASS 3 of 3 on the 2027 robot (about 90 m, no
   barrel contact), and the 2026 robot passes both. The numbers in the rest of this list were measured earlier, on the
   2026 robot. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) section 11.
+- **Since 2026-10-16 the simulator drives and sees barrels the way the real
+  robot does, by default.** `drive:=ros2_control`: `gz_ros2_control` runs the
+  real `diff_drive_controller`, and `/odom` comes from its wheel odometry.
+  `obstacle_source:=lidar_map`: the barrels come from the simulated lidar
+  through the competition's `lidar_obstacle_costmap`. Lanes are still ground
+  truth (`lane_source:=gt`). Each passed on its own: `ros2_control` 3 of 3
+  autonomy laps (smoke test 22 of 22), `lidar_map` 5 of 5. Together, the freeze
+  rule passed in the Gazebo image on 2026-10-16 (smoke 22 of 22 three times,
+  autonomy 3 of 3 at about 90 m, no barrel contact, and the 2026 robot); the dev
+  image has not been rerun on them yet.
+  `drive:=diffdrive obstacle_source:=gt` gives the previous behaviour.
+  `docs/GAZEBO_SETUP.md` 10.32 and 10.33.
 - **The whole workspace is on ROS 2 Jazzy.** All 22 packages build and every
   Python module imports in the Jazzy dev image `igvc-dev-jazzy`, which
   replaced the Humble torch image on 2026-09-29. Nothing on the simulator's
@@ -82,13 +95,15 @@ Verified means a command was run and a number came back. Measured on Windows
 
 **Does not work, or is not what it looks like:**
 
-- **Nothing perceives anything.** The lane lines and barrel positions come out
-  of `track_points.json`, not out of the camera or the lidar. Nav2's
-  `obstacle_layer` is never even instantiated in the sim launch. Both the
-  camera and the lidar publish and **nothing plans on either**. This is
-  deliberate, so that when perception is added a failure can be blamed on
-  perception rather than navigation, but it must not be reported as obstacle
-  detection.
+- **The lanes are not perceived.** The lane lines come out of
+  `track_points.json`, not out of the camera, and nothing plans on the camera.
+  This is deliberate, so that when lane perception is added a failure can be
+  blamed on perception rather than navigation, but it must not be reported as
+  lane detection. The barrels, by default since 2026-10-16, come from the lidar
+  (`obstacle_source:=lidar_map`, above); with `obstacle_source:=gt` they come
+  out of `track_points.json` too, as they always did before. Nav2's own
+  `obstacle_layer` is not instantiated in either mode: the navigator overlays
+  the lidar map itself.
 - **The camera point cloud was rotated 90 degrees; fixed 2026-10-07.** The
   bridge sends it to `/sim/<cam>_zed/points_optical_stamp` and
   `gazebo_cloud_restamp` republishes it on the ZED contract name in the body
@@ -107,7 +122,6 @@ Verified means a command was run and a number came back. Measured on Windows
   boundary (the old flat 2.00 m `IN LANE` limit is gone). The clearance it
   measures is thin, 1.4 to 8.4 cm in recent runs, and good to about 3 cm, so
   read the number as well as the verdict (`docs/GAZEBO_SETUP.md` 10.9).
-- **`/fix` is not published** and ros2_control is not in the loop.
 - **The 2027 robot's masses, lidar pose and GPS pose are placeholders.** The CAD
   has no materials and does not contain the lidar or the GPS antenna, so those
   keep the 2026 values (chassis 20 kg, a placeholder). Wheel radius and
@@ -150,9 +164,10 @@ evidence for each line and the retractions kept visible on purpose.
 - **The simulator works, and the robot drives the IGVC course by itself.**
   Gazebo Harmonic on ROS 2 Jazzy, running the real 2026 navigation stack -
   ground-truth lane grid, IGVC navigator, Nav2 - with none of those nodes
-  modified. It is **not** perceiving anything yet; the lane lines and barrels
-  come from `track_points.json`. See
-  [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) sections 9 and 10.
+  modified. It is **not** perceiving the lanes yet; the lane lines come from
+  `track_points.json`. Since 2026-10-16 it drives through the real
+  `diff_drive_controller` and takes the barrels from the lidar by default; see
+  above. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) sections 9 and 10.
 
 Every change, its root cause, and how it was verified is recorded in
 [docs/DOCKER_CHANGES.md](docs/DOCKER_CHANGES.md).

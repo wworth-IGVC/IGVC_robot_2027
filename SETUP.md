@@ -67,6 +67,20 @@ front ZED X, and its masses, lidar pose and GPS pose are placeholders.
 `start_sim.sh` (including `ROBOT=2026 pixi run sim`). Details:
 `docs/GAZEBO_SETUP.md` section 11.
 
+**Which drive and barrels you get.** Since 2026-10-16 the launch files default
+to what the real robot does: `drive:=ros2_control` (`gz_ros2_control` runs the
+real `diff_drive_controller`, and `/odom` comes from its wheel odometry) and
+`obstacle_source:=lidar_map` (the barrels come from the simulated lidar, not
+from `track_points.json`). The lanes still come from `track_points.json`. For
+the previous behaviour, pass `drive:=diffdrive obstacle_source:=gt`:
+`EXTRA_LAUNCH_ARGS="drive:=diffdrive"` before the smoke test and
+`LAUNCH_ARGS="drive:=diffdrive obstacle_source:=gt"` before the autonomy check.
+**On the pixi path (Mac, Linux native), `drive:=ros2_control` cannot start**:
+the pixi environment has no `twist_stamper` (RoboStack does not package it)
+and the launch file refuses the mode without it. Use `drive:=diffdrive` there;
+the Mac guide, section 3, has the commands. Details: `docs/GAZEBO_SETUP.md`
+10.32 and 10.33.
+
 **Set a `ROS_DOMAIN_ID` of your own on every path**, before starting anything,
 if anyone else on the same network is running ROS. Two simulators on one
 domain both publish `/clock`, `/odom` and `/tf`, and the results look real and

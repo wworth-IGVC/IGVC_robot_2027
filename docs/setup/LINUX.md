@@ -37,6 +37,16 @@ pixi shell            # a shell with ros2 on PATH, e.g. for teleop
 pixi run autonomy     # the robot drives the course by itself
 ```
 
+**On pixi, pass `drive:=diffdrive`.** Since 2026-10-16 the launch files default
+to `drive:=ros2_control` (the real robot's `diff_drive_controller`), which needs
+`twist_stamper`; RoboStack does not package it, so the launch file refuses that
+mode here and the commands above fail as written. The Mac guide, section 3,
+has the same commands with `drive:=diffdrive`
+(`EXTRA_LAUNCH_ARGS="drive:=diffdrive" pixi run bootstrap`, and so on). The
+Docker image has `twist_stamper`; its controller packages were added to
+`docker/Dockerfile.gazebo-jazzy` on 2026-10-16, so an image older than that
+refuses the default too (pass `drive:=diffdrive`, or rebuild).
+
 **Do not install ROS from apt as well** and source it in the same shell. Two
 ROS installations on one PATH produce errors that point at neither.
 

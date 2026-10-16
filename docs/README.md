@@ -97,8 +97,10 @@ GPS poses), and what was measured. Sections 1 to 10 describe the 2026 robot.
 **The four things worth knowing before you touch anything:** rendering can fail
 silently (section 3); `real_time_factor` lies about sensor rates because
 physics and rendering run on separate threads, so you must count messages
-(section 4); **the robot is not perceiving anything** - lane lines and barrels
-come from `track_points.json`, not the camera (section 10.3); and two
+(section 4); **the robot is not perceiving the lanes** - lane lines come from
+`track_points.json`, not the camera (section 10.3; barrels come from the lidar
+by default since 2026-10-16, `obstacle_source:=gt` takes them from the JSON as
+before, section 10.33); and two
 simulators running at once produce results that look entirely plausible and are
 worthless (section 10.5).
 

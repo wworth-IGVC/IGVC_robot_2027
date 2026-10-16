@@ -13,9 +13,18 @@
 #   CAMERAS=all   all three cameras instead of just the front one
 #                 (robot 2026 only: the 2027 robot has one camera)
 #   ROBOT=2026    the 2026 robot; the default is the launch file's, 2027
-#   NAV=1         also start the ground-truth navigation inputs
+#   NAV=1         also start the navigation inputs: the ground-truth lanes
 #                 (track_ground_truth_node, gt_nav_bridge_node, localization),
 #                 i.e. gazebo_nav_test.launch.py instead of gazebo_sim
+#
+# The drive and the barrels are the launch files' defaults. Since 2026-10-16:
+# drive:=ros2_control (gz_ros2_control and the real diff_drive_controller,
+# which stops the robot 0.3 s after the last command; /odom from its wheel
+# odometry) and, with NAV=1, obstacle_source:=lidar_map (the barrels from the
+# simulated lidar). This script does not pass drive:=diffdrive or
+# obstacle_source:=gt, the previous defaults; for those run ros2 launch by
+# hand. The pixi path has no twist_stamper, so it needs drive:=diffdrive
+# (docs/setup/MACOS.md section 3).
 #
 # TO DRIVE IT you need a second shell in the SAME container, which is the one
 # awkward part of the workflow and is worth reading before the meeting.
