@@ -311,7 +311,11 @@ Verified means a command was run and a number came back. Nothing below is
       and stays in the lane about 9.5 m, then leaves it. F12 (`nav_unknown_reach_m`,
       auto 1.5 m in camera modes) makes the blind control hold at 0.0 m instead of
       driving 90 m off the course; Hough with both still leaves the lane (LANE
-      -8.8 m). Still not passing.
+      -8.8 m). Still not passing. Where and why (10.29): all seven later laps
+      leave over the left paint about 2 m before `barrel_3`, on both robots,
+      gap choice on or off; the Hough grid extends a seen line straight ahead
+      past its end and marks free space beyond the real paint. Next: the
+      offline study `local-notes/P5b_hough_grid_design.md`.
 - [ ] **YOLOPv2 in the loop never leaves the start (P6-mini, 2026-10-09,
       `GAZEBO_SETUP.md` 10.23).** `lane_source:=yolopv2` in `igvc_dev_jazzy`: model
       ready on `cuda:0`, L3 passes, but at the start pose the model's raw masks are

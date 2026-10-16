@@ -2719,6 +2719,44 @@ Offline replay of the lap-2 approach with the real navigator: left gap in 15 of 
 starts shipped, 0 of 36 fixed; with the default, identical paths on 653 logged
 poses. Live: section 11.4. Design and replay tools: `local-notes/F21_gap_choice_design.md`.
 
+### 10.29 Camera lanes: where and why the Hough laps leave the lane (2026-10-16, measured, not passing)
+
+With the 2026-10-16 fixes on (`lane_source:=hough lane_synthetic_boundary:=unknown`,
+F12's 1.5 m reach, F21's gap choice), every camera lap still fails `LANE`, and
+always in the same place. Seven laps (2027 robot x6, one of them with
+`nav_gap_choice:=false`; 2026 robot x1): the chassis first crosses the **left**
+paint at centreline index 146 to 156, 21.9 to 29.5 s of simulation time, about
+1.5 to 2 m before `barrel_3` (index 168). Worst lane clearance -6.0 to -10.8 m;
+the robot then wanders off the course. So it is not the robot description (the
+2026 robot does the same; the two front cameras are mounted within 1 cm of each
+other) and not F21 (the same with gap choice off).
+
+What the detector saw (`scripts/gazebo/measurements/grab_frames.py`, frames
+each second from 12 to 28 s; Hough-against-ground-truth grid pictures from
+`map_compare.py`):
+
+- At 18 s `barrel_3` is straight ahead. The robot steers left of it, and by 20 s
+  it faces the left paint at 45 to 55 degrees: the paint runs across the image.
+  Hough fits it correctly in the image as one straight line (labelled left).
+- In the grid, that line is lethal only over the span the camera saw. Beyond its
+  far end the boundary is held at its last lateral offset, so it runs straight
+  ahead, parallel to the robot's heading, to the edge of the 20 m grid
+  (`_interp` in `lane_detection.py` clamps). Cells beside that phantom wall are
+  free, including cells beyond the real paint (sim 22 s: the real line crosses
+  the robot's heading about 4.4 m ahead; the Hough grid is free straight ahead to
+  5.9 m and beyond).
+- Earlier, while the robot still points along the lane, Hough's single line is
+  0.6 to 1.3 m inside the real paint and at the wrong angle (sim 16 to 20 s, both
+  robots): the course curves right, and one straight segment cannot follow it.
+
+The grid models a lane line as "lateral offset as a function of distance ahead",
+and `_fill_missing` splits detected points into left and right by the sign of
+their lateral offset. Neither holds when the robot faces a line. That is a
+property of the competition detector, not of the simulator. An offline study
+on the captured frames is staged (`local-notes/P5b_hough_grid_design.md`); no
+code is changed yet. Evidence: `local-notes/oneshot_evidence/camlanes_F21_2026-10-16/`
+(`grab_c2/` has the frames, `pic_c2left/` and `pic_c2r2026/` the grid pictures).
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model
