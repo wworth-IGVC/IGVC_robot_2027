@@ -2320,6 +2320,10 @@ default runs (and 0 in 3 `gt_map` runs); the earlier default run of the day on
 this branch also passed. If it recurs, look at the harness first (the RTF sampler
 runs `gz topic -e` every 10 s beside the launch during bring-up).
 
+*(Correction, 2026-10-16: this is not the race the launch file documents, and the
+RTF sampler is ruled out. It is F17, section 10.24: a different timeout in a
+different phase.)*
+
 **The probe's W1 had a bug the first real run found.** On `/lidar_obstacle_map` it
 saw `['_NODE_NAME_UNKNOWN_', 'gt_obstacle_map_node']` with at most 1 publisher at
 once over 674 samples: rclpy names an endpoint that way until its node has
@@ -2608,6 +2612,113 @@ before `infer`, and the threshold is not it. Untested candidates: the live image
 state in the node's model instance. Until it is explained, "the model finds the line
 at 1280 x 720" is true of a saved frame and not shown for the running node.
 
+### 10.24 Nav2 bring-up can abort at `collision_monitor`'s `get_state`; the check now retries once (F17, 2026-10-16)
+
+Two of 59 saved bring-ups (2026-10-01, 2026-10-09) ended with `Failed to change
+state for node: collision_monitor. Exception: collision_monitor/get_state service
+client: async_send_request failed.` Nav2's lifecycle manager calls `get_state`
+after each transition with a hard-coded 2 s timeout, throws on expiry, aborts for
+good and never retries; no parameter reaches it. This is not the bond race 10.5
+describes (that is the activation phase, `smoother_server`, no Exception text). Why
+the reply sometimes takes more than 2 s is not established.
+
+`autonomy_check.sh` now detects the abort within about 2 s of the log line,
+reports it, tears everything down and retries once from a fresh simulator
+(`BRINGUP_RETRIES`, default 1, 0 disables). Every live run ends with
+`NAV2 BRINGUP RETRIES: n`. A run with n above 0 drove, but did not start cleanly;
+the freeze rule counts only n = 0 runs. Tools for finding the cause:
+`measurements/lifecycle_get_state_probe.py` (a server that answers `get_state`
+after a set delay) and `measurements/nav2_bringup_loop.sh`.
+
+Measured live, 2026-10-16, Gazebo image: the probe at 1.0 and 1.8 s, no abort; at
+2.3 and 2.6 s, abort with the gap at exactly 2.00 s, and the retry recovers. An
+injected abort with `BRINGUP_RETRIES=0` ends in `FAIL (Nav2 bring-up aborted; the
+robot was not graded)`, rc 1, `RETRIES: 1`; an abort on every attempt ends in FAIL
+with `RETRIES: 2`. A clean injected-abort-then-pass run was not shown: the injector
+wrote its line before the run's log was recreated (a test bug, not the check's).
+Evidence: `local-notes/oneshot_evidence/F17_live_2026-10-15/`.
+
+### 10.25 Nav2's progress checker could never see the robot move (F20, 2026-10-16; real robot too)
+
+`nav2_lane_follow_config.yaml` makes the local costmap robot-centric
+(`global_frame: base_link`, chosen on purpose: it avoided RPP's out-of-bounds
+`costAtPose` aborts). `controller_server` reads the robot's pose in that frame,
+where it is always (0, 0), so `SimpleProgressChecker` (0.1 m in 45 s) never saw
+movement and aborted every `FollowPath` goal 45 s after it arrived; new paths on the
+same goal do not reset it. Each abort sent the navigator into its back-off, and on
+lap 2 the robot came out of one heading for `barrel_3`. The aborts are in about a
+third of the saved runs since 2026-09-29, on both robots.
+
+Fix (`6ea1a7a`): the frame stays; `movement_time_allowance: 86400.0`, which
+switches the check off in practice. In this frame it could not detect a real
+stall anyway; the navigator's own blocked timer and reverse remain. This is the
+competition config, and the real robot runs the same file. Failing-first live
+test, 120 s laps, full launch logs: before, 2 progress aborts per lap on each robot
+and the 2027 robot grazed `barrel_3`; after, 0 aborts on each, 2027 PASS 108.0 m
+(+0.105 m), 2026 PASS 107.4 m (+0.011 m). Evidence:
+`local-notes/oneshot_evidence/F20_progress_checker_2026-10-16/`.
+
+### 10.26 Hough's invented lane boundary, as an opt-in setting (P5a, 2026-10-16): measured, not passing
+
+The Hough lane detector draws a lethal line wherever it does not see one, and
+that invented line can close the road in a curve. New parameter
+`synthetic_boundary` on `lane_detection` (`lethal`, the default and today's
+behaviour, or `unknown`) and the sim launch argument `lane_synthetic_boundary`.
+Tests (`test_lane_synthetic_boundary.py`): 6 fail on the shipped code, 14 pass
+fixed. Live, 2027 robot, `lane_source:=hough`: the default leaves the lane 0.5 s
+after it starts moving; with `unknown`, 3 of 3 laps take the first turn and stay in
+the lane about 12 s (9.5 m), then leave it (worst LANE -10 m). Better, not
+passing. Evidence: `local-notes/oneshot_evidence/P5a_live_2026-10-16/`.
+
+### 10.27 Unknown space is drivable only near space the camera saw (F12, 2026-10-16)
+
+The navigator treated every unknown cell as drivable at a small cost, so when the
+detector saw no lines the robot planned into unknown space and drove off the
+course: with the camera off, the 2027 robot drove 90 m straight (LANE -64.3 m).
+New navigator parameter `unknown_reach_m` (default -1, today's behaviour): when 0
+or more, an unknown cell is searched only if it lies within that many metres of a
+known-free cell, 4-connected and never across a lethal cell. Sim launch argument
+`nav_unknown_reach_m`: `auto` (the default) gives 1.5 m when `lane_source` is
+`hough` or `yolopv2` and nothing in `gt`; `off`; or a number. No competition
+config value changes.
+
+Tests (`test_navigator_unknown_reach.py`): 8 fail on the shipped code, 21 pass
+fixed. Live, 2027 robot: camera off now holds (0.0 m, LANE +1.740 m); the same with
+`nav_unknown_reach_m:=off` drives 90 m off the course (the failing-first control);
+Hough with P5a and F12 still leaves the lane (LANE -8.784 m after 25.9 m of
+progress); ground truth default PASS 90.1 m, +0.092 m. This makes lost lines stop
+the robot; it does not make the detector see them. Limits: a hold is not a stop
+(the navigator's reverse may creep), there is no return to the lane, and a grid
+that lies is not detected. Evidence: `local-notes/oneshot_evidence/F12_live_2026-10-16/`.
+
+### 10.28 The navigator now prefers a gap the robot fits through (F21, 2026-10-16; on in the simulator only)
+
+On lap 2 the navigator sometimes took the narrow gap between `barrel_3` and the
+left paint, about 0.88 m for a chassis 0.81 m wide. Nothing in the navigator asks
+whether a gap is wide enough: between a barrel and the paint it sees a corridor
+like any other, a little more expensive, and which side it takes is set by the
+robot's position and heading when the barrel comes inside the 4 m search window.
+On lap 2 the robot arrives aimed left. The 2026 robot squeezed through with about
+1 cm to spare; the 2027 robot touched the barrel or the line each time it went
+left, and that failed the first freeze of the 2027 tree (`647ab89`, Gazebo image:
+PASS, FAIL, PASS; run 2 LANE -0.032 m and `barrel_3` touched at 107.7 s).
+
+New navigator parameters `gap_choice_enabled` (default `false`, today's search
+cell for cell), `gap_choice_half_width_m` (0.405) and `gap_choice_margin_m`
+(0.15). When on, the search drops free cells that have a lethal cell within
+0.555 m, if a forward fill through what is left still reaches the end of the
+lookahead; otherwise today's search runs unchanged. Costs, the clearance field and
+the goal score are untouched. The simulator turns it on through
+`nav_gap_choice` (default `true`) and `nav_gap_choice_margin_m`;
+`navigator_config.yaml` and every real-robot launch file are unchanged, so the
+real robot keeps today's behaviour until the team decides otherwise. It is
+relevant there: the lidar map inflates barrels by only 0.20 m.
+
+Tests (`test_navigator_gap_choice.py`): 4 fail on the shipped code, 14 pass fixed.
+Offline replay of the lap-2 approach with the real navigator: left gap in 15 of 36
+starts shipped, 0 of 36 fixed; with the default, identical paths on 653 logged
+poses. Live: section 11.4. Design and replay tools: `local-notes/F21_gap_choice_design.md`.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model
@@ -2688,3 +2799,36 @@ Still placeholders, to replace when known: the chassis mass (20 kg) and the
 inertias (assign materials in Onshape, or weigh the robot); the lidar and GPS
 antenna poses (not in the CAD). The two `sim_wheel_*` defaults in
 `igvc_2027.urdf.xacro` must follow the generator's printout after a re-export.
+
+### 11.4 The freeze rule on the final tree, both images (2026-10-16): met
+
+Final tree `468f843` (F17, F20, the 2027 lidar mount, P5a, F12, F21), the 2027
+robot by default, one simulator at a time, headless, tier A laptop. The script
+runs render, the smoke test 3 times and the autonomy check 3 times, then the 2026
+robot once each. Evidence: `local-notes/oneshot_evidence/freeze_gz_f21_2026-10-16/`
+and `freeze_dev_f21_2026-10-16/`.
+
+| Check | Gazebo image (`igvc_gazebo`) | Dev image (`igvc_dev_jazzy`) |
+| --- | --- | --- |
+| `render_check.sh` | D3D12 on the NVIDIA GPU | D3D12 on the NVIDIA GPU |
+| `bringup_smoke_test.sh` x3 | 18/18 each, distance ratio 0.9969 | 18/18 each, distance ratio 0.9969 |
+| `autonomy_check.sh` x3 | **PASS 3 of 3**: 90.1, 90.0, 90.0 m; worst LANE +0.125, +0.136, +0.123 m | **PASS 3 of 3**: 90.1, 89.0, 89.8 m; worst LANE +0.188, +0.157, +0.132 m |
+| Barrel contacts, retries, progress aborts | none, 0, 0 in every run | none, 0, 0 in every run |
+| 2026 robot | smoke 18/18; autonomy PASS 90.1 m, +0.182 m | smoke 18/18; autonomy PASS 90.1 m, +0.204 m |
+| Processes left behind | 0 | 0 |
+
+**`barrel_3` on lap 2, the place the first freeze failed.** All six lap-2 passes
+went on the wide right side, 2.10 to 3.23 m from the barrel's centre (lateral
+-0.59 to -1.80 m; the barrel is at +1.34 m). On the same stretch before F21, 4 of
+about 11 lap-2 passes by the 2027 robot went left at about +2.2 m and failed. A
+live read of the navigator's parameters during a default launch gave
+`gap_choice_enabled: True`, `gap_choice_margin_m: 0.15` and
+`unknown_reach_m: -1.0` (ground truth, so F12 is off, as intended).
+
+For comparison, the first freeze of the 2027 tree (`647ab89`, before F21, Gazebo
+image) was render and smoke as above, autonomy PASS, FAIL, PASS (run 2: LANE
+-0.032 m, `barrel_3` touched at 107.7 s); evidence `freeze_gz_2026-10-16/`.
+
+Three passes in a row is a small sample. The navigator's choice depends on the
+robot's state when the barrel comes into view, and that varies run to run, so
+keep an eye on `barrel_3` in later runs.

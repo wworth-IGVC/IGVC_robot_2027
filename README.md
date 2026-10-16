@@ -68,6 +68,13 @@ Verified means a command was run and a number came back. Measured on Windows
   smoother and collision monitor, with **none of those nodes modified**. Last
   run: 83.0 m under its own control, 0.0% of samples with a footprint corner
   over the painted line. The test publishes no velocity command at any point.
+- **The simulated robot is the 2027 robot, since 2026-10-15.** It is built from
+  the team's Onshape model by `scripts/gazebo/generate_robot_2027.py` and has
+  **one camera, the front ZED X**. The 2026 robot is still there as
+  `robot:=2026`. Freeze rule met on 2026-10-16 in both images: smoke test 18 of
+  18 three times, autonomy check PASS 3 of 3 on the 2027 robot (about 90 m, no
+  barrel contact), and the 2026 robot passes both. The numbers in the rest of this list were measured earlier, on the
+  2026 robot. See [docs/GAZEBO_SETUP.md](docs/GAZEBO_SETUP.md) section 11.
 - **The whole workspace is on ROS 2 Jazzy.** All 22 packages build and every
   Python module imports in the Jazzy dev image `igvc-dev-jazzy`, which
   replaced the Humble torch image on 2026-09-29. Nothing on the simulator's
@@ -101,10 +108,18 @@ Verified means a command was run and a number came back. Measured on Windows
   measures is thin, 1.4 to 8.4 cm in recent runs, and good to about 3 cm, so
   read the number as well as the verdict (`docs/GAZEBO_SETUP.md` 10.9).
 - **`/fix` is not published** and ros2_control is not in the loop.
-- **Four collision meshes have zero vertex normals and segfault the physics
-  engine.** Worked around for simulation with primitive colliders under
-  `sim:=true`; the real robot's description is unchanged, and the meshes are
-  still broken for Isaac and MoveIt.
+- **The 2027 robot's masses, lidar pose and GPS pose are placeholders.** The CAD
+  has no materials and does not contain the lidar or the GPS antenna, so those
+  keep the 2026 values (chassis 20 kg, a placeholder). Wheel radius and
+  separation are measured from the CAD. Only the front ZED X exists on it:
+  `sim_cameras:=all` is refused with the 2027 robot (`docs/GAZEBO_SETUP.md`
+  section 11).
+- **Four collision meshes of the 2026 robot have zero vertex normals and
+  segfault the physics engine.** Worked around for simulation with primitive
+  colliders under `sim:=true`; the real robot's description is unchanged, and
+  the meshes are still broken for Isaac and MoveIt. The 2027 robot (the
+  simulator's default) has a body with primitive colliders (box, cylinders,
+  sphere), not these meshes.
 - **Only tier A, a discrete NVIDIA GPU, is measured.** An Intel or AMD machine
   (tier B) is unverified anywhere. Software rendering (tier C) is measured only
   on one laptop with its GPU switched off, where it still passed the smoke test
@@ -580,10 +595,11 @@ Robot description assets live in `src/igvc_test_description/`.
 
 | Path | Purpose |
 | --- | --- |
-| `urdf/robots/test_robot.urdf.xacro` | Main robot Xacro entry point. |
+| `urdf/robot_2027/igvc_2027.urdf.xacro` | The 2027 robot, the simulator's default since 2026-10-15. `body_2027.urdf.xacro` beside it and the meshes in `meshes/robot_2027/` are **generated** from an Onshape export by `scripts/gazebo/generate_robot_2027.py`; re-export and re-run, never hand-edit. |
+| `urdf/robots/test_robot.urdf.xacro` | The 2026 robot's Xacro entry point, and the real robot's. In the simulator, `robot:=2026`. |
 | `urdf/control/ros2_control_info.urdf.xacro` | ros2_control hardware interface wiring. |
 | `urdf/parts/` | Body, ZED camera, GPS antenna, and RPLiDAR Xacro parts. |
-| `meshes/` | Robot and sensor meshes. |
+| `meshes/` | The 2026 robot and sensor meshes. The 2027 robot's are in `meshes/robot_2027/`. |
 | `igvc_robot.urdf`, `test_robot.urdf` | Generated or exported URDF artifacts. |
 
 `grr_hardware` exports ros2_control system plugins:

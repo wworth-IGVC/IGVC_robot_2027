@@ -58,6 +58,15 @@ described at the end of the Mac guide.
 | Does it drive the course by itself | `... scripts/gazebo/autonomy_check.sh` | `pixi run autonomy` |
 | Stop | `docker compose -f docker-compose.windows.yml stop` | Ctrl-C |
 
+**Which robot you get.** The simulator loads the **2027 robot** by default
+(since 2026-10-15), built from the team's Onshape model. It has one camera, the
+front ZED X, and its masses, lidar pose and GPS pose are placeholders.
+`CAMERAS=all` is refused for it. The 2026 robot is still available as
+`robot:=2026` on the launch files, `ROBOT=2026` for the smoke test and
+`LAUNCH_ARGS="robot:=2026"` for the autonomy check and `ROBOT=2026` before
+`start_sim.sh` (including `ROBOT=2026 pixi run sim`). Details:
+`docs/GAZEBO_SETUP.md` section 11.
+
 **Set a `ROS_DOMAIN_ID` of your own on every path**, before starting anything,
 if anyone else on the same network is running ROS. Two simulators on one
 domain both publish `/clock`, `/odom` and `/tf`, and the results look real and

@@ -630,7 +630,8 @@ Options, set before the command:
 | --- | --- |
 | `NAV=1` | **also start Nav2 and the navigator, so the robot drives itself** |
 | `CAMERAS=none` | no cameras |
-| `CAMERAS=all` | all three ZED cameras instead of just the front one |
+| `ROBOT=2026` | the 2026 robot instead of the default 2027 robot |
+| `CAMERAS=all` | all three ZED cameras: **2026 robot only** (`ROBOT=2026 CAMERAS=all`). The default 2027 robot has one camera, the front ZED X, and refuses it |
 | `RVIZ=0` | no RViz window |
 | `HEADLESS=1` | no windows at all; for automated checks |
 
@@ -835,6 +836,16 @@ lane clearance       : worst +0.040 m (chassis), +0.081 m (Nav2 footprint)
                        0.0% of samples over the line
 AUTONOMY CHECK: PASS
 ```
+
+**Which robot those numbers are from.** The two blocks above were measured with
+the 2026 robot. The simulator's default is now the **2027 robot** (since
+2026-10-15, built from the team's Onshape model; one camera; masses, lidar pose
+and GPS pose are placeholders). It also passes the smoke test 18 of 18 (distance
+ratio 0.9969) and passed the autonomy check 3 of 3 in both images on
+2026-10-16, about 90 m each with no barrel contact (`docs/GAZEBO_SETUP.md`
+section 11.4). To
+test the 2026 robot instead, run the smoke test with `ROBOT=2026` and the
+autonomy check with `LAUNCH_ARGS="robot:=2026"` set before the command.
 
 **The lane criterion is `LANE`: the chassis must never cross the painted
 boundary.** (Until 2026-10-07 it was `IN LANE`, a flat 2.00 m from the

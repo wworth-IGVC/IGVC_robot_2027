@@ -30,6 +30,21 @@ Verified means a command was run and a number came back. Nothing below is
       autonomy PASS 4 of 4 in a row after one barrel graze on lap 2 (run 1).
       `robot:=2026` keeps the old robot (smoke 18/18, autonomy PASS). Masses,
       lidar and GPS poses are placeholders. `GAZEBO_SETUP.md` section 11.
+- [x] **Freeze rule met on the 2027 tree (2026-10-16), both images**, after
+      three fixes: F17 (Nav2 bring-up abort, the check retries once and says
+      so), F20 (Nav2's progress checker could never see the robot move; off),
+      F21 (the navigator prefers a gap the robot fits through; simulator only).
+      `GAZEBO_SETUP.md` 10.24, 10.25, 10.28 and 11.4.
+- [ ] **F17: why `collision_monitor`'s `get_state` reply sometimes takes more
+      than 2 s.** Run `measurements/nav2_bringup_loop.sh` (three arms) and read
+      `RcvbufErrors` and `ss` on the abort rows; decide whether to patch Nav2.
+      The retry only hides it.
+- [ ] **Team decision: turn F21's gap choice on for the real robot?**
+      `gap_choice_enabled` is off in `navigator_config.yaml`; the lidar map
+      inflates barrels by only 0.20 m, so the narrow-gap choice can happen there.
+- [ ] **Team decision: F20 changes the competition Nav2 config**
+      (`movement_time_allowance: 86400.0`). Confirm on the robot that nothing
+      relied on the progress checker's abort.
 - [x] **The robot loads and drives.** Meshes resolve, sensors and plugins
       survive the URDF to SDF conversion.
 - [x] **Four zero-normal collision meshes worked around** for simulation with
@@ -291,6 +306,12 @@ Verified means a command was run and a number came back. Nothing below is
       (`sim_cameras:=none`, zero lethal cells) fails the same way (F12). Next: the
       open-loop re-baseline (P2), then YOLOPv2 (P6); no competition code was
       changed or tuned.
+      **2026-10-16:** two opt-in fixes, defaults unchanged (`GAZEBO_SETUP.md`
+      10.26, 10.27). P5a (`lane_synthetic_boundary:=unknown`) takes the first turn
+      and stays in the lane about 9.5 m, then leaves it. F12 (`nav_unknown_reach_m`,
+      auto 1.5 m in camera modes) makes the blind control hold at 0.0 m instead of
+      driving 90 m off the course; Hough with both still leaves the lane (LANE
+      -8.8 m). Still not passing.
 - [ ] **YOLOPv2 in the loop never leaves the start (P6-mini, 2026-10-09,
       `GAZEBO_SETUP.md` 10.23).** `lane_source:=yolopv2` in `igvc_dev_jazzy`: model
       ready on `cuda:0`, L3 passes, but at the start pose the model's raw masks are
@@ -394,7 +415,8 @@ Verified means a command was run and a number came back. Nothing below is
       one synchroniser **per camera**, so camera 0 is unaffected, and it does
       log. Evidence above: 253 occupied cells with `sim_cameras:=front` and the
       stock `num_cameras: 3`. **No sim override is needed for function**; the
-      target stays `sim_cameras:=all` for a three-camera budget measurement.
+      target stays `sim_cameras:=all` for a three-camera budget measurement
+      (2026 robot only since 2026-10-15: the 2027 robot refuses it).
 - [x] **The camera point cloud IS rotated 90 degrees. Answered 2026-09-17, and
       it is the bad answer.** The cloud carries **body**-convention data, x
       forward, stamped with the **optical** frame. `gz_frame_id` sets a header
@@ -630,11 +652,14 @@ Verified means a command was run and a number came back. Nothing below is
       the unsafe direction.
 - [ ] **Repair the four zero-normal collision meshes**, or decide the
       primitive colliders are permanent for simulation. They are still broken
-      for Isaac and MoveIt.
+      for Isaac and MoveIt. (The 2027 robot, the simulator's default, has primitive
+      colliders on its body; these meshes are the 2026 robot's.)
 - [x] ~~**Run `sim_cameras:=all` against the real course.**~~ **Not needed,
       2026-10-01: the team is moving to one camera, the centre (front) one**
       (Liam), which is already the default `sim_cameras:=front`. The
-      three-camera option stays in the description for the 2026 robot.
+      three-camera option stays in the description for the 2026 robot
+      (`robot:=2026`); the 2027 robot has only the front camera and refuses
+      `sim_cameras:=all`.
 - [ ] **Does YOLOPv2 tolerate 640x360?** The camera budget forces that
       resolution. If perception needs 720p, three cameras are not viable on
       this hardware - which is also the AGX-versus-Orin-Nano argument.

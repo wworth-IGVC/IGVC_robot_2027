@@ -90,6 +90,9 @@ config, plus the two things that turned out not to be renames: Gazebo's
 odometry frame is rotated by the spawn yaw, and a one-word frame-id typo named
 a TF frame that did not exist. **10** the robot driving the course by itself -
 what is in the loop, what it measured, and what it is emphatically not doing.
+**11** the 2027 robot, the simulator's default since 2026-10-15: how it is
+generated from an Onshape export, what is still a placeholder (masses, lidar and
+GPS poses), and what was measured. Sections 1 to 10 describe the 2026 robot.
 
 **The four things worth knowing before you touch anything:** rendering can fail
 silently (section 3); `real_time_factor` lies about sensor rates because
