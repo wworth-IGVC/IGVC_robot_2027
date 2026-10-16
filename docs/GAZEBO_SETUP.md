@@ -2936,6 +2936,92 @@ lidar-map mode now passes (two control laps, not a large sample). The real robot
 does not have F21 turned on (`navigator_config.yaml`); see the GAZEBO_TODO team
 decision.
 
+### 10.34 Camera lanes: a first full pass, 1 lap in 6 (2026-10-16)
+
+Three more opt-in fixes, each with failing-first tests, took the camera laps
+from turning round at about 10 m to sometimes finishing the course. All laps
+below: the 2027 robot on the new defaults (`drive:=ros2_control`,
+`obstacle_source:=lidar_map`) plus `lane_source:=hough
+lane_synthetic_boundary:=unknown lane_boundary_model:=whole_line
+lane_held_grid_motion:=odom`; F12, F21 and the two navigator options below are
+switched on automatically in camera modes.
+
+- **The held grid no longer blanks on a TF lag** (`396aa12`). With
+  `held_grid_motion:=odom` the node published an all-unknown grid 57 to 59 times
+  a lap: TF lags the newest image, and always lags `now()`. It now moves the grid
+  to the newest transform TF holds. Tests: 2 fail before, pass after. Live: the
+  warning fell to 1 a lap.
+- **`stop_on_invalid_path`** (`bb35e67`, sim argument `nav_stop_on_invalid_path`,
+  auto). When the lane path goes invalid the navigator cancels the active Nav2
+  goal instead of leaving Nav2 to follow a path that turns with the robot.
+  Tests: 6 fail before, 11 pass after.
+- **`compensate_grid_latency`** (`eb30b56`, sim argument
+  `nav_compensate_grid_latency`, auto). The lane grid reaches the navigator a
+  median 0.74 s after its image (95th percentile 1.94 s), and the navigator
+  planned as if the robot were still where the camera saw the lane; every turn
+  overshot and the robot weaved. It now keeps 6 s of odometry, extracts the
+  centreline at the image's pose and moves it into the robot's current pose.
+  Tests: 6 fail before, 10 pass after.
+
+Course arc before any barrel contact (pass bar 73.3 m with no paint crossing
+and no contact). Evidence: `local-notes/oneshot_evidence/P5f_live_2026-10-16/`,
+`P5g_live_2026-10-16/` (`batch2/`, `grab_rviz3/`).
+
+| Laps | Options | Results |
+| --- | --- | --- |
+| 3 | held-grid fix, stop | 82.3 m (six small crossings), 33.7 m, 11.5 m |
+| 1 | the same, stop off | 43.8 m |
+| 6 | all of the above plus latency compensation | **PASS** 75.7 m, never over the paint (worst +0.000 m), no contact; 76.5 m and 55.5 m (crossings of 0.14 and 0.12 m); 51.9 m then `barrel_0`; about 26 and 23 m with contacts |
+| 1 | the same, latency compensation off | 14.0 m, 8.0 m out of the lane |
+
+So camera lanes can now complete the course, about 1 lap in 6, with two more
+near misses; not reliable. What remains is mostly the lane data: the detector
+reports one line in about 99 of 100 of its log lines and fits it as one straight segment,
+and the free band is drawn 3.0 m from that line on a lane 2.8 to 5.8 m wide.
+`local-notes/P5g_camera_nav_design.md` has the analysis.
+
+### 10.35 YOLOPv2 timing, measured (2026-10-16)
+
+The 2026 team reported that the "what is lane" image and the "where" 3D data
+fused at the wrong pose. `lane_segmentation_node` (YOLOPv2) already writes each
+frame into its odom-frame map at the robot's pose at the frame's capture stamp,
+and builds the local grid from that map at the current pose; when the
+capture-time lookup fails it falls back to the current pose. `4b6bdc3` counts
+that (`capture_pose=hits/total` on its once-a-second line) and adds
+`capture_pose_fallback:=skip` (opt-in) to drop such a frame instead.
+
+Measured in the dev image, `lane_source:=yolopv2` at 1280x720 (YOLOPv2 sees
+nothing at 640x360, 10.23):
+
+- At the default 15 Hz the point cloud does not get through: 5 images and 0
+  clouds in 30 s. A 1280x720 cloud is about 15 MB and is published twice (the
+  sim's, then the re-stamped copy), against the 128 MB/s camera pacer
+  (`fastdds_sim_camera_pacing.xml`); inferred from the config and the probe.
+- At `sim_camera_hz:=3` it works: the image and cloud of each fused pair carry
+  the same stamp (65 pairs, gap 0.000 s); the capture-time lookup failed 4 times
+  in 61 (about 7%); 28 frames were dropped as stale (age 2.0 to 5.9 s) against
+  87 processed. The lap left the lane after 36.8 m.
+
+For the replacement detector: carry one capture stamp from image to grid, take
+the lane mask and the 3D data from the same frame, and set a latency budget
+(for example under 150 ms from capture to grid); the navigator now compensates
+the lag it sees (10.34), which makes a slow detector usable but not accurate.
+
+### 10.36 RViz shows the lane pipeline (2026-10-16)
+
+`gazebo_sim.rviz` (`436a9bb`) adds the detector's overlay
+(`/lane_debug/cam0/overlay`: Hough segments thin yellow, fitted left and right
+lines thick blue and red), the lane grid (`/lane_costmap`), the lidar barrel map
+(`/lidar_obstacle_map`), the navigator's path (`/lane_path`, magenta) and
+YOLOPv2's lane markers. To watch a camera lap:
+
+```bash
+RVIZ=1 LAUNCH_ARGS='lane_source:=hough lane_synthetic_boundary:=unknown lane_boundary_model:=whole_line lane_held_grid_motion:=odom' bash scripts/gazebo/autonomy_check.sh
+```
+
+On WSLg RViz logs a map-shader message (`indexed_8bit_image`, "active samplers
+with a different type"); the maps still draw.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model

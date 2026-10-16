@@ -320,8 +320,20 @@ Verified means a command was run and a number came back. Nothing below is
       73.3 m), 49.5 m on the 2026 robot; not shown to help on the 2027 robot.
       P5c (`lane_held_grid_motion:=odom`, 10.31): no contacts, worst LANE
       -0.09 to -0.38 m in three laps (-1.38 m in a fourth), but every lap turns
-      round before `barrel_3` (arc about 10 m). Next: why it turns round (frames from such a lap), and a
-      ground-truth pose log so lane numbers survive a barrel contact.
+      round before `barrel_3` (arc about 10 m). **Later 2026-10-16 (10.34):**
+      with the held-grid TF fix, `stop_on_invalid_path` and
+      `compensate_grid_latency` (both auto in camera modes) the first camera
+      lap PASSED (75.7 m, never over the paint, no contact): 1 of 6 laps, two
+      near misses. Next: the lane data (one line, one straight segment, the
+      3.0 m free band) is the replacement detector's job; a ground-truth pose
+      log so lane numbers survive a barrel contact.
+- [ ] **IMU: published (`/imu`, 50 Hz) but nothing in the sim reads it.** The
+      mission planner's ramp check listens on the ZED IMU topic
+      (`/front_zed_camera_x/zed_node/imu/data`); the EKF (`dual_ekf_navsat`) is
+      not run. Remap or bridge `/imu` there, and bring the EKF in with the GPS
+      work.
+- [ ] **YOLOPv2 at 1280x720 needs `sim_camera_hz:=3`** (10.35): at 15 Hz the
+      point cloud never gets through the 128 MB/s pacer.
 - [ ] **YOLOPv2 in the loop never leaves the start (P6-mini, 2026-10-09,
       `GAZEBO_SETUP.md` 10.23).** `lane_source:=yolopv2` in `igvc_dev_jazzy`: model
       ready on `cuda:0`, L3 passes, but at the start pose the model's raw masks are
