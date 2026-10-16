@@ -148,6 +148,13 @@ Arguments
         auto       true with lane_source hough or yolopv2, not passed with gt
                    (the navigator's default, off), so the ground-truth run is
                    the one it was
+    nav_compensate_grid_latency   the navigator's compensate_grid_latency (P5g):
+                                  move the lane path from the grid's image stamp
+                                  to the newest odom pose, so a 0.7 s old camera
+                                  grid is not followed as if it were current
+                                  (default: auto, the nav_stop_on_invalid_path
+                                  rule: true with hough or yolopv2, not passed
+                                  with gt; true or false in any mode)
         true       on in any mode
         false      the navigator's default (off) in every mode
 """
@@ -222,6 +229,14 @@ UNKNOWN_REACH_DEFAULT = {"gt": None, "hough": 1.5, "yolopv2": 1.5}
 # round before barrel_3). A camera grid has invalid cycles often; the
 # ground-truth grid rarely does, so gt keeps the navigator's default (off).
 STOP_ON_INVALID_PATH_DEFAULT = {"gt": False, "hough": True, "yolopv2": True}
+
+# ── nav_compensate_grid_latency: plan from where the robot is now ───────────
+# A camera lane grid is in base_link at its image stamp, a median 0.7 s (95th
+# percentile 1.9 s) before the odom pose its path is sent with (P5f probe). The
+# robot weaves +-45 to +-75 deg across the lane with that lag (P5g). The
+# ground-truth grid is stamped with the current pose, so gt keeps the
+# navigator's default (off).
+COMPENSATE_GRID_LATENCY_DEFAULT = {"gt": False, "hough": True, "yolopv2": True}
 
 
 def _track_without_obstacles(track_file: str) -> str:
@@ -766,6 +781,20 @@ def _setup(context, *args, **kwargs):
         # navigator exactly the parameters it had before.
         stop_on_invalid_params = (
             {"stop_on_invalid_path": True} if stop_on_invalid else {})
+        nav_latency = cfg("nav_compensate_grid_latency").lower()
+        if nav_latency == "auto":
+            compensate_latency = COMPENSATE_GRID_LATENCY_DEFAULT[lane_source]
+        elif nav_latency in ("true", "1", "yes"):
+            compensate_latency = True
+        elif nav_latency in ("false", "0", "no"):
+            compensate_latency = False
+        else:
+            raise RuntimeError(
+                "nav_compensate_grid_latency:=%s is not auto, true or false"
+                % nav_latency)
+        # Only passed when on, as stop_on_invalid_path.
+        latency_params = (
+            {"compensate_grid_latency": True} if compensate_latency else {})
         navigator_node = Node(
             package="igvc_lane_detection",
             executable="navigation_node",
@@ -821,6 +850,7 @@ def _setup(context, *args, **kwargs):
                     "max_path_heading_rad": float(cfg("nav_max_path_heading_rad")),
                     **unknown_reach_params,
                     **stop_on_invalid_params,
+                    **latency_params,
                 },
             ],
         )
@@ -1032,6 +1062,13 @@ def generate_launch_description():
                         "held base_link path (P5e). auto = true with lane_source "
                         "hough or yolopv2 and the navigator's default (off) "
                         "with gt; true or false in any mode."),
+        DeclareLaunchArgument(
+            "nav_compensate_grid_latency", default_value="auto",
+            description="The navigator's compensate_grid_latency in the "
+                        "simulator: move the lane path from the camera grid's "
+                        "stamp to the newest odom pose (P5g). auto = true with "
+                        "lane_source hough or yolopv2 and the navigator's "
+                        "default (off) with gt; true or false in any mode."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),

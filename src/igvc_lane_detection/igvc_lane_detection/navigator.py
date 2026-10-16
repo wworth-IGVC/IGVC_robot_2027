@@ -55,6 +55,8 @@ Parameters
     max_path_heading_rad float 0.75       reject/limit sideways local paths
     stop_on_invalid_path  bool    false   cancel the active FollowPath on the
                                           first invalid lane path (P5e)
+    compensate_grid_latency bool  false   move the lane path from the grid's
+                                          stamp to the newest odom pose (P5g)
 
 Subscriptions
     /fix              NavSatFix       (GPS mode only)
@@ -230,6 +232,9 @@ class IGVCNavigatorNode(Node):
         self._reverse_max_dist_m = float(self._p('reverse_max_dist_m', 0.80))
         self._reverse_cmd_topic = self._p('reverse_cmd_topic', 'cmd_vel_nav')
         self._stop_on_invalid_path = bool(self._p('stop_on_invalid_path', False))
+        self._compensate_grid_latency = bool(self._p('compensate_grid_latency', False))
+        # (stamp_sec, x, y, yaw) odom samples, kept only when the above is on.
+        self._odom_history: deque = deque()
 
         # Centerline-waypoint strategy: rolling NavigateToPose goals along a
         # pre-known centerline (from track_points.json).  Lets SmacPlanner2D
@@ -469,6 +474,14 @@ class IGVCNavigatorNode(Node):
             # robot stops and waits for the next valid path). Off by default:
             # off keeps the goal, today's behaviour.
             ('stop_on_invalid_path', False),
+            # P5g: the lane grid is in base_link at its image stamp, a median
+            # 0.7 s (up to 2 s) before the odom pose the path is sent with, so
+            # the path is drawn from where the robot was. In turns that lag
+            # makes the robot overshoot and weave across the lane (+-45 to
+            # +-75 deg, growing, in every 2026-10-16 camera lap). True moves
+            # the extracted path from the grid stamp's odom pose to the newest
+            # one. Off by default: off is today's planner.
+            ('compensate_grid_latency', False),
             # Centerline-waypoint navigation strategy
             ('nav_strategy', ''),               # '' (auto) | 'local_lane' | 'centerline_waypoints' | 'gps'
             ('centerline_source_json', ''),     # path to track_points.json
@@ -527,6 +540,69 @@ class IGVCNavigatorNode(Node):
             1.0 - 2.0 * (q.y * q.y + q.z * q.z),
         )
         self._odom_stamp = msg.header.stamp
+        if getattr(self, '_compensate_grid_latency', False):
+            self._remember_odom(self._stamp_sec(msg.header.stamp),
+                                self._robot_xy[0], self._robot_xy[1], self._robot_yaw)
+
+    # ── Grid latency compensation (P5g) ───────────────────────────────────
+
+    _ODOM_HISTORY_SEC = 6.0
+    _ODOM_STAMP_SLACK_SEC = 0.10
+
+    @staticmethod
+    def _stamp_sec(stamp) -> float:
+        return float(stamp.sec) + float(stamp.nanosec) * 1.0e-9
+
+    def _remember_odom(self, t: float, x: float, y: float, yaw: float) -> None:
+        hist = self._odom_history
+        if hist and t < hist[-1][0]:
+            hist.clear()   # time went backwards (sim reset): start again
+        hist.append((t, x, y, yaw))
+        while hist and hist[0][0] < t - self._ODOM_HISTORY_SEC:
+            hist.popleft()
+
+    def _odom_pose_at(self, t: float) -> Optional[tuple[float, float, float]]:
+        """Odom pose (x, y, yaw) at time t, interpolated; None outside the history."""
+        hist = self._odom_history
+        if not hist:
+            return None
+        if t <= hist[0][0]:
+            return hist[0][1:] if hist[0][0] - t <= self._ODOM_STAMP_SLACK_SEC else None
+        if t >= hist[-1][0]:
+            return hist[-1][1:] if t - hist[-1][0] <= self._ODOM_STAMP_SLACK_SEC else None
+        for (t0, x0, y0, a0), (t1, x1, y1, a1) in zip(hist, list(hist)[1:]):
+            if t0 <= t <= t1:
+                u = 0.0 if t1 <= t0 else (t - t0) / (t1 - t0)
+                da = math.atan2(math.sin(a1 - a0), math.cos(a1 - a0))
+                return (x0 + u * (x1 - x0), y0 + u * (y1 - y0), a0 + u * da)
+        return None
+
+    @staticmethod
+    def _grid_points_to_current(
+            pts: list[tuple[float, float]],
+            grid_pose: tuple[float, float, float],
+            cur_pose: tuple[float, float, float],
+            min_fwd: float = 0.05) -> list[tuple[float, float]]:
+        """Move base_link points from the grid pose to the current pose.
+
+        Points that end up behind the robot (fwd < min_fwd) are the part of
+        the path it has already driven: everything up to the last of them is
+        dropped, so the path starts ahead of the robot."""
+        gx, gy, ga = grid_pose
+        cx, cy, ca = cur_pose
+        cg, sg = math.cos(ga), math.sin(ga)
+        cc, sc = math.cos(ca), math.sin(ca)
+        moved = []
+        for fwd, lat in pts:
+            ox = gx + cg * fwd - sg * lat
+            oy = gy + sg * fwd + cg * lat
+            dx, dy = ox - cx, oy - cy
+            moved.append((cc * dx + sc * dy, -sc * dx + cc * dy))
+        last_behind = -1
+        for i, (fwd, _) in enumerate(moved):
+            if fwd < min_fwd:
+                last_behind = i
+        return moved[last_behind + 1:]
 
     def _on_mission_state(self, msg: String) -> None:
         prev = self._mission_state
@@ -1333,7 +1409,9 @@ class IGVCNavigatorNode(Node):
             'lookahead; searching as before.', throttle_duration_sec=5.0)
         return traversable
 
-    def _extract_centerline(self) -> list[tuple[float, float]]:
+    def _extract_centerline(
+            self, pose: Optional[tuple[float, float, float]] = None,
+    ) -> list[tuple[float, float]]:
         """
         Derive the lane centerline from /lane_costmap.  Ground-truth mode
         marks the drivable corridor as FREE (0) and stamps obstacles as
@@ -1355,6 +1433,14 @@ class IGVCNavigatorNode(Node):
         g = self._grid
         if g is None:
             return []
+        # The odom pose the grid's base_link stands for: the newest odom pose
+        # (today), or with compensate_grid_latency the pose at the grid stamp,
+        # so the obstacle overlay and the previous-path bias line up with the
+        # paint in the grid.
+        if pose is None:
+            robot_xy, robot_yaw = self._robot_xy, self._robot_yaw
+        else:
+            robot_xy, robot_yaw = (pose[0], pose[1]), pose[2]
 
         W, H   = g.info.width, g.info.height
         res    = g.info.resolution
@@ -1382,8 +1468,8 @@ class IGVCNavigatorNode(Node):
         # The obstacle map is in odom frame; project each lethal cell into
         # base_link coordinates using the robot's current odom pose.
         if (self._obstacle_grid is not None
-                and self._robot_xy is not None
-                and self._robot_yaw is not None):
+                and robot_xy is not None
+                and robot_yaw is not None):
             og = self._obstacle_grid
             og_data = np.frombuffer(
                 bytes(og.data), dtype=np.int8).reshape(og.info.height, og.info.width)
@@ -1392,10 +1478,10 @@ class IGVCNavigatorNode(Node):
                 og_res = og.info.resolution
                 obs_x = og.info.origin.position.x + (lethal_idx[:, 1] + 0.5) * og_res
                 obs_y = og.info.origin.position.y + (lethal_idx[:, 0] + 0.5) * og_res
-                dx = obs_x - self._robot_xy[0]
-                dy = obs_y - self._robot_xy[1]
-                cos_r = math.cos(self._robot_yaw)
-                sin_r = math.sin(self._robot_yaw)
+                dx = obs_x - robot_xy[0]
+                dy = obs_y - robot_xy[1]
+                cos_r = math.cos(robot_yaw)
+                sin_r = math.sin(robot_yaw)
                 fwd = cos_r * dx + sin_r * dy    # odom → base_link forward
                 lat = -sin_r * dx + cos_r * dy   # odom → base_link lateral
                 gc = ((fwd - orig_x) / res).astype(int)
@@ -1520,12 +1606,12 @@ class IGVCNavigatorNode(Node):
         if (self._prev_path_bias_weight > 0.0
                 and self._prev_centerline_odom is not None
                 and self._prev_centerline_odom.size > 0
-                and self._robot_xy is not None
-                and self._robot_yaw is not None):
-            cos_r = math.cos(self._robot_yaw)
-            sin_r = math.sin(self._robot_yaw)
-            pdx = self._prev_centerline_odom[:, 0] - self._robot_xy[0]
-            pdy = self._prev_centerline_odom[:, 1] - self._robot_xy[1]
+                and robot_xy is not None
+                and robot_yaw is not None):
+            cos_r = math.cos(robot_yaw)
+            sin_r = math.sin(robot_yaw)
+            pdx = self._prev_centerline_odom[:, 0] - robot_xy[0]
+            pdy = self._prev_centerline_odom[:, 1] - robot_xy[1]
             pf = cos_r * pdx + sin_r * pdy
             pl = -sin_r * pdx + cos_r * pdy
             pcs = ((pf - orig_x) / res).astype(int) - min_col
@@ -1645,12 +1731,12 @@ class IGVCNavigatorNode(Node):
 
         # Cache the accepted path in odom frame so the next cycle can apply the
         # hysteresis bias above.
-        if pts and self._robot_xy is not None and self._robot_yaw is not None:
-            cos_r = math.cos(self._robot_yaw)
-            sin_r = math.sin(self._robot_yaw)
+        if pts and robot_xy is not None and robot_yaw is not None:
+            cos_r = math.cos(robot_yaw)
+            sin_r = math.sin(robot_yaw)
             arr = np.asarray(pts, dtype=float)
-            ox = self._robot_xy[0] + cos_r * arr[:, 0] - sin_r * arr[:, 1]
-            oy = self._robot_xy[1] + sin_r * arr[:, 0] + cos_r * arr[:, 1]
+            ox = robot_xy[0] + cos_r * arr[:, 0] - sin_r * arr[:, 1]
+            oy = robot_xy[1] + sin_r * arr[:, 0] + cos_r * arr[:, 1]
             self._prev_centerline_odom = np.column_stack([ox, oy])
 
         return pts
@@ -1720,7 +1806,22 @@ class IGVCNavigatorNode(Node):
                 throttle_duration_sec=2.0)
             return self._build_path([], self._grid.header.stamp)
 
-        raw_pts = self._extract_centerline()
+        grid_pose = None
+        if getattr(self, '_compensate_grid_latency', False):
+            grid_pose = self._odom_pose_at(self._stamp_sec(self._grid.header.stamp))
+            if grid_pose is None:
+                self.get_logger().warn(
+                    'compensate_grid_latency: no odom pose at the lane grid stamp; '
+                    'using the grid as if it were current.', throttle_duration_sec=2.0)
+        if grid_pose is None:
+            raw_pts = self._extract_centerline()
+        else:
+            raw_pts = self._extract_centerline(grid_pose)
+            if (raw_pts and self._robot_xy is not None
+                    and self._robot_yaw is not None):
+                raw_pts = self._grid_points_to_current(
+                    raw_pts, grid_pose,
+                    (self._robot_xy[0], self._robot_xy[1], self._robot_yaw))
         # Use the odom stamp so Nav2 resolves base_link→odom TF at the moment
         # that matches the robot pose used for costmap extraction.  Using the
         # (possibly stale) costmap stamp, then overriding it to now() in
