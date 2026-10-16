@@ -1089,17 +1089,36 @@ class LaneDetectionNode(Node):
             self.latest_grid.header.stamp = stamp
             return self.latest_grid
         grid, src_stamp = src
-        then = self._planar_pose(self._lookup_tf_exact(
-            self.odom_frame, self.base_frame, src_stamp))
-        now = self._planar_pose(self._lookup_tf_exact(
-            self.odom_frame, self.base_frame, stamp))
+        # TF usually lags the newest image (and always lags now()) by a frame
+        # or two, and the listener does not run while this callback does, so
+        # an exact lookup at the new stamp often fails. Then move the grid to
+        # the newest transform TF holds and stamp it with that transform's
+        # time: pose and stamp stay consistent, and a lag no longer blanks the
+        # grid (measured 2026-10-16: 57 to 59 all-unknown grids per lap).
+        then_tf = self._lookup_tf_exact(self.odom_frame, self.base_frame, src_stamp)
+        now_tf = self._lookup_tf_exact(self.odom_frame, self.base_frame, stamp)
+        if now_tf is None or then_tf is None:
+            latest = self._lookup_tf_latest(self.odom_frame, self.base_frame)
+            if now_tf is None and latest is not None:
+                now_tf, stamp = latest, latest.header.stamp
+            if then_tf is None:
+                then_tf = latest
+        then = self._planar_pose(then_tf)
+        now = self._planar_pose(now_tf)
         if then is None or now is None:
             self.get_logger().warn(
                 f'held_grid_motion odom: no {self.odom_frame}->{self.base_frame} '
-                'transform at the held grid\'s or the new stamp; publishing an '
-                'all-unknown grid.', throttle_duration_sec=2.0)
+                'transform at all; publishing an all-unknown grid.',
+                throttle_duration_sec=2.0)
             return self._empty_grid(stamp)
         return self._resample_grid(grid, then, now, stamp)
+
+    def _lookup_tf_latest(self, target_frame, source_frame):
+        """The newest transform TF holds (its header carries its stamp), or None."""
+        try:
+            return self.tf_buffer.lookup_transform(target_frame, source_frame, Time())
+        except Exception:
+            return None
 
     def _lookup_tf_exact(self, target_frame, source_frame, stamp):
         """Like _lookup_tf, but never falls back to the latest transform."""

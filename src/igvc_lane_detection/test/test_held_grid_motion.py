@@ -322,3 +322,82 @@ def test_a_grid_in_a_fixed_frame_is_not_moved():
     node._republish_grid()
     assert node.grid_pub.sent[-1] is grid
     assert node.tf_buffer.calls == []
+
+
+# ── a TF lag must not blank the grid (2026-10-16 fix) ───────────────────────
+# Live, four laps: "no odom->base_link transform" 57 to 59 times per lap. TF
+# lags the newest image and always lags now(), so an exact lookup at the new
+# stamp failed and the node published an all-unknown grid. Now it moves the
+# grid to the newest transform TF holds and stamps it with that time.
+
+T3 = Time(sec=20, nanosec=500000000)          # newer than any transform
+
+
+class _NsTime:
+    def __init__(self, ns):
+        self.nanoseconds = ns
+
+
+class _FakeTfWithLatest(_FakeTf):
+    """As _FakeTf; time 0 (rclpy's 'latest') gives the newest pose, header stamped."""
+
+    def lookup_transform(self, target, source, time, timeout=None):
+        if int(time.nanoseconds) == 0 and self.poses:
+            key = max(self.poses)
+            tf = super().lookup_transform(
+                target, source, _NsTime(key[0] * 1000000000 + key[1]), timeout)
+            tf.header = _V()
+            tf.header.stamp = Time(sec=key[0], nanosec=key[1])
+            return tf
+        return super().lookup_transform(target, source, time, timeout)
+
+
+def _clock_at(stamp):
+    class _Clock:
+        def now(self):
+            class _N:
+                def to_msg(self_inner):
+                    return stamp
+            return _N()
+    return lambda: _Clock()
+
+
+def _held_node():
+    node = _detector(held_grid_motion='odom', tf_buffer=_FakeTfWithLatest(POSES))
+    grid = _grid(node)
+    node.latest_grid = grid
+    node._held_src = (grid, T0)
+    return node
+
+
+def test_odom_new_stamp_ahead_of_tf_moves_to_the_newest_transform():
+    node = _held_node()
+    out = node._moved_held_grid(T3)
+    assert (out.header.stamp.sec, out.header.stamp.nanosec) == (T2.sec, T2.nanosec)
+    assert (_array(out) != -1).any(), 'a TF lag blanked the grid'
+    ref = _held_node()._moved_held_grid(T2)
+    assert _array(out).tolist() == _array(ref).tolist()
+
+
+def test_odom_timer_is_not_blank_when_now_is_ahead_of_tf():
+    node = _held_node()
+    node.get_clock = _clock_at(T3)
+    node._republish_grid()
+    sent = node.grid_pub.sent[-1]
+    assert (_array(sent) == 100).sum() > 0
+    assert (sent.header.stamp.sec, sent.header.stamp.nanosec) == (T2.sec, T2.nanosec)
+
+
+def test_odom_exact_stamp_available_uses_it_not_the_latest():
+    node = _held_node()
+    node._moved_held_grid(T1)
+    assert all(int(c[2].nanoseconds) != 0 for c in node.tf_buffer.calls)
+
+
+def test_odom_no_transform_at_all_is_still_all_unknown():
+    node = _detector(held_grid_motion='odom', tf_buffer=_FakeTfWithLatest({}))
+    grid = _grid(node)
+    node.latest_grid = grid
+    node._held_src = (grid, T0)
+    out = node._moved_held_grid(T3)
+    assert set(_array(out).ravel().tolist()) == {-1}
