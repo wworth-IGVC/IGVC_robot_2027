@@ -76,7 +76,8 @@ Usage
 
 Arguments
 ---------
-    Everything gazebo_sim.launch.py takes, plus:
+    Everything gazebo_sim.launch.py takes, including robot:=2027|2026 (default
+    2027; sim_cameras:=all needs robot:=2026), plus:
     track_image_file              path to track.png
     track_image_pixels_per_meter  float          (default: 52.5, JSON wins)
     debug_png_path                GT grid PNG export
@@ -233,7 +234,7 @@ def _merged_overrides(base_file: str, extra_file: str) -> str:
     return out
 
 
-def _branch_lidar_mount() -> tuple:
+def _branch_lidar_mount(robot: str = "2026") -> tuple:
     """The top lidar's (x, y, yaw) the competition computes from the URDF.
 
     igvc_fused_drive.launch.py reads test_robot.urdf.xacro for the rplidar_c1
@@ -241,6 +242,11 @@ def _branch_lidar_mount() -> tuple:
     file's own function rather than copying it, so the simulator cannot drift
     from the way the competition stack gets its mount. Importing the launch
     file only defines functions; generate_launch_description is not called.
+
+    For robot:=2027 the same lookup runs on urdf/robot_2027/igvc_2027.urdf.xacro,
+    with the competition file's own XML helpers, so the 2027 lidar's mount
+    follows that file when the lidar is added to the CAD (today it is the 2026
+    placeholder pose, so both robots give the same numbers).
     """
     import importlib.util
 
@@ -252,7 +258,25 @@ def _branch_lidar_mount() -> tuple:
     spec = importlib.util.spec_from_file_location("igvc_fused_drive_launch", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module._top_lidar_mount_from_urdf()
+    if robot == "2026":
+        return module._top_lidar_mount_from_urdf()
+
+    import xml.etree.ElementTree as ET
+    robot_xacro = _find(
+        os.path.join("src", "igvc_test_description", "urdf", "robot_2027",
+                     "igvc_2027.urdf.xacro"),
+        "igvc_test_description",
+        os.path.join("urdf", "robot_2027", "igvc_2027.urdf.xacro"))
+    for element in ET.parse(robot_xacro).getroot().iter():
+        if (module._xml_local_name(element.tag) != "rplidar_c1"
+                or element.attrib.get("prefix") != "top"):
+            continue
+        for child in element:
+            if module._xml_local_name(child.tag) == "origin":
+                xyz = module._parse_triplet(child.attrib.get("xyz", "0 0 0"), "xyz")
+                rpy = module._parse_triplet(child.attrib.get("rpy", "0 0 0"), "rpy")
+                return xyz[0], xyz[1], rpy[2]
+    raise RuntimeError("Could not find top rplidar_c1 origin in %s" % robot_xacro)
 
 
 def _setup(context, *args, **kwargs):
@@ -456,7 +480,7 @@ def _setup(context, *args, **kwargs):
     # (gazebo_odom_shim), and the course lies well inside its 100 x 100 m.
     lidar_mount = None
     if obstacle_source == "lidar_map":
-        lidar_mount = _branch_lidar_mount()
+        lidar_mount = _branch_lidar_mount(cfg("robot"))
         actions.append(Node(
             package="igvc_lane_detection",
             executable="lidar_obstacle_costmap_node",

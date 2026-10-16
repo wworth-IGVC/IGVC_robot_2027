@@ -11,6 +11,8 @@
 #   RVIZ=0        skip RViz
 #   HEADLESS=1    no Gazebo window either; for automated checks
 #   CAMERAS=all   all three cameras instead of just the front one
+#                 (robot 2026 only: the 2027 robot has one camera)
+#   ROBOT=2026    the 2026 robot; the default is the launch file's, 2027
 #   NAV=1         also start the ground-truth navigation inputs
 #                 (track_ground_truth_node, gt_nav_bridge_node, localization),
 #                 i.e. gazebo_nav_test.launch.py instead of gazebo_sim
@@ -79,6 +81,7 @@ LAUNCH_FILE="gazebo_sim.launch.py"
 ARGS="sim_cameras:=$CAMERAS"
 [ "$RVIZ" = "1" ] && ARGS="$ARGS rviz:=true"
 [ "$HEADLESS" = "1" ] && ARGS="$ARGS headless:=true rviz:=false"
+[ -n "${ROBOT:-}" ] && ARGS="$ARGS robot:=$ROBOT"
 
 echo "--- ros2 launch igvc_test_bringup $LAUNCH_FILE $ARGS ---"
 exec ros2 launch igvc_test_bringup "$LAUNCH_FILE" $ARGS
