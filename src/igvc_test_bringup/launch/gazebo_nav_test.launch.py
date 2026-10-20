@@ -106,7 +106,16 @@ Arguments
                    with any lane_source. The same cells as gt, by a different
                    route (scripts/gazebo/measurements/gt_obstacle_map_check.py)
     lane_source                   where the lane grids come from
-                                  (default: gt, the behaviour before 2026-10-09)
+                                  (default since 2026-10-20: hough, the robot's
+                                  own camera, with lane_synthetic_boundary
+                                  unknown, lane_boundary_model whole_line and
+                                  lane_held_grid_motion odom; F12, P5e and P5g
+                                  follow automatically. lane_source:=gt is the
+                                  default before, lanes from track_points.json.
+                                  Camera lanes pass the course about 1 lap in 9
+                                  (GAZEBO_SETUP.md 10.34, 10.40), so the default
+                                  autonomy check usually FAILS LANE now: that is
+                                  the honest state of camera lane following)
         gt         gt_nav_bridge_node publishes /lane_map and /lane_costmap
         hough      the competition's lane_detection_node (OpenCV Hough, no
                    torch, runs in igvc_gazebo) does, from the front camera
@@ -989,11 +998,12 @@ def generate_launch_description():
                         "lifecycle nodes are not activating while Gazebo is "
                         "still loading meshes and rendering its first frame."),
         DeclareLaunchArgument(
-            "lane_source", default_value="gt",
-            description="Where /lane_map and /lane_costmap come from: gt "
-                        "(gt_nav_bridge_node, the default), hough (the "
-                        "competition's lane_detection_node, from the front "
-                        "camera) or yolopv2 (lane_segmentation_node; needs "
+            "lane_source", default_value="hough",
+            description="Where /lane_map and /lane_costmap come from: hough "
+                        "(the default since 2026-10-20: the competition's "
+                        "lane_detection_node, from the front camera), gt "
+                        "(gt_nav_bridge_node, lanes from track_points.json, "
+                        "the default before) or yolopv2 (lane_segmentation_node; needs "
                         "torch and weights, run it in igvc_dev_jazzy). With "
                         "hough or yolopv2, obstacle_source gt is promoted to "
                         "gt_map."),
@@ -1004,26 +1014,28 @@ def generate_launch_description():
                         "45; a number overrides. The detector starts with "
                         "Nav2, at nav2_delay."),
         DeclareLaunchArgument(
-            "lane_synthetic_boundary", default_value="lethal",
+            "lane_synthetic_boundary", default_value="unknown",
             description="lane_source:=hough only: how the boundary the node "
                         "invents when it sees only one lane line is painted. "
-                        "lethal (the competition's behaviour, the default) "
-                        "or unknown."),
+                        "unknown (the simulator's default since 2026-10-20, "
+                        "P5a) or lethal (the competition's behaviour)."),
         DeclareLaunchArgument(
-            "lane_boundary_model", default_value="legacy",
+            "lane_boundary_model", default_value="whole_line",
             description="lane_source:=hough only: how a fitted lane line "
-                        "becomes grid boundaries. legacy (the competition's "
-                        "behaviour, the default) splits a line by lateral "
+                        "becomes grid boundaries. whole_line is the "
+                        "simulator's default since 2026-10-20. legacy (the "
+                        "competition's behaviour) splits a line by lateral "
                         "sign and holds its end lateral to the grid edge; "
                         "whole_line keeps it whole, sides it by where it "
                         "passes the robot, extends it along its own "
                         "direction and paints it 4-connected (P5b)."),
         DeclareLaunchArgument(
-            "lane_held_grid_motion", default_value="none",
+            "lane_held_grid_motion", default_value="odom",
             description="lane_source:=hough only: what the grid the node "
                         "holds when a frame finds no lane line does while "
-                        "the robot moves. none (the competition's behaviour, "
-                        "the default) republishes it unchanged, so it turns "
+                        "the robot moves (odom is the simulator's default "
+                        "since 2026-10-20). none (the competition's "
+                        "behaviour) republishes it unchanged, so it turns "
                         "with the robot; odom moves it with the robot through "
                         "odom->base_link (P5c)."),
         DeclareLaunchArgument(

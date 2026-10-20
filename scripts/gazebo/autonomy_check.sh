@@ -57,7 +57,9 @@
 #                  appended last, for running the same check on another
 #                  configuration (a perception source, say). The default run
 #                  passes none, so it checks the launch file's defaults:
-#                  ground-truth lanes and, since 2026-10-16, the real
+#                  since 2026-10-20 camera lanes (lane_source:=hough, which
+#                  passes about 1 lap in 9; LAUNCH_ARGS="lane_source:=gt"
+#                  for ground-truth lanes) and, since 2026-10-16, the real
 #                  diff_drive_controller (drive:=ros2_control) and the barrels
 #                  from the lidar (obstacle_source:=lidar_map). The previous
 #                  defaults, ground-truth barrels and Gazebo's DiffDrive:

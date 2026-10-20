@@ -983,10 +983,10 @@ the course, stays between the lines and goes around the barrels. Since
 on the real robot. `drive:=diffdrive obstacle_source:=gt` gives the previous
 behaviour.
 
-**It does not perceive the lanes.** This is the important one and it is easy to
-misreport. The lane lines come out of
-`IGVC_track_generator/track_points.json`, not out of the camera
-(`lane_source:=gt`, still the default). With `obstacle_source:=gt` the barrel
+**Since 2026-10-20 it perceives the lanes by default**, from the front camera
+(`lane_source:=hough`, `docs/GAZEBO_SETUP.md` 10.40), and that is the weak part:
+camera laps pass about 1 in 9. With `lane_source:=gt` the lane lines come out of
+`IGVC_track_generator/track_points.json` instead, as in every run before then. With `obstacle_source:=gt` the barrel
 positions come out of the JSON too, as they did in every run before
 2026-10-16. Nav2's own `obstacle_layer` is **never instantiated**:
 `gazebo_nav_test_nav2_overrides.yaml` replaces the costmap `plugins` list with

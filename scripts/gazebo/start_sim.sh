@@ -16,8 +16,10 @@
 #   DRIVE=diffdrive  Gazebo's DiffDrive instead of ros2_control (the default
 #                 under Docker; under pixi the default is diffdrive, see
 #                 igvc_env.sh)
-#   NAV=1         also start the navigation inputs: the ground-truth lanes
-#                 (track_ground_truth_node, gt_nav_bridge_node, localization),
+#   NAV=1         also start the navigation inputs: since 2026-10-20 the
+#                 camera lane detector (lane_source:=hough), plus the
+#                 ground-truth nodes kept for scoring (track_ground_truth_node,
+#                 gt_nav_bridge_node), localization,
 #                 i.e. gazebo_nav_test.launch.py instead of gazebo_sim
 #
 # The drive and the barrels are the launch files' defaults. Since 2026-10-16:

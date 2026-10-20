@@ -3136,6 +3136,30 @@ No same-day lap with the filter off was counted, so the trail's size before the
 fix is the RViz observation, not a number. One lap is not the three-lap barrel_3
 question; that still needs repeated runs.
 
+### 10.40 Camera lanes are the simulator's default (2026-10-20)
+
+On Liam's call (the sim's defaults should be what is most like the real robot),
+`gazebo_nav_test.launch.py` now defaults to `lane_source:=hough`: the
+competition's `lane_detection_node` builds the lane grid from the front camera.
+The Hough options that produced the camera pass (10.34) are the defaults too:
+`lane_synthetic_boundary:=unknown` (P5a), `lane_boundary_model:=whole_line`
+(P5b), `lane_held_grid_motion:=odom` (P5c); F12, P5e and P5g follow
+automatically in camera modes, as before. `lane_source:=gt` gives ground-truth
+lanes from `track_points.json`; the ground-truth nodes keep running for scoring
+either way.
+
+Consequence: camera lanes pass the course about 1 lap in 9 (10.34 plus three
+demonstration laps), so **the default autonomy check now usually FAILS LANE**.
+That is the honest state of camera lane following. Regression checks on the rest
+of the stack (the freeze rule) use `LAUNCH_ARGS="lane_source:=gt"`.
+
+Verified on the new default (Gazebo image, tree `12ee484` plus this change):
+`bringup_smoke_test.sh` 22 of 22, distance ratio 0.9948; one autonomy lap with
+RViz ran the camera pipeline (`lanes : hough` in the check's report) and FAILED
+as expected: `barrel_7` touched at 63.1 s, readings after that void (the
+odometry ran away with the robot pinned on the barrel). The same lap showed the
+lidar self filter (10.39) in RViz: barrels only, no trail along the path.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model

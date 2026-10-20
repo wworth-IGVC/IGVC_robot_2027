@@ -80,8 +80,11 @@ Verified means a command was run and a number came back. Measured on Windows
   robot does, by default.** `drive:=ros2_control`: `gz_ros2_control` runs the
   real `diff_drive_controller`, and `/odom` comes from its wheel odometry.
   `obstacle_source:=lidar_map`: the barrels come from the simulated lidar
-  through the competition's `lidar_obstacle_costmap`. Lanes are still ground
-  truth (`lane_source:=gt`). Each passed on its own: `ros2_control` 3 of 3
+  through the competition's `lidar_obstacle_costmap` (with the self filter,
+  10.39). **Since 2026-10-20 the lanes come from the robot's own camera too**
+  (`lane_source:=hough` with the P5a, P5b and P5c options, 10.40); camera laps
+  pass about 1 in 9, so the default autonomy check usually fails LANE.
+  `lane_source:=gt` gives ground-truth lanes. Each passed on its own: `ros2_control` 3 of 3
   autonomy laps (smoke test 22 of 22), `lidar_map` 5 of 5. Together, the freeze
   rule passed in the Gazebo image on 2026-10-16 (smoke 22 of 22 three times,
   autonomy 3 of 3 at about 90 m, no barrel contact, and the 2026 robot); the dev
