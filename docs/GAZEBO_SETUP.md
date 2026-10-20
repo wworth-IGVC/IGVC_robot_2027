@@ -3083,8 +3083,11 @@ drive. One earlier start-check run on ros2_control logged a fit residual of
 2.5 to 4.6 m; a rerun gave 0.01 m, so it did not repeat. Evidence
 `local-notes/oneshot_evidence/gps_s1_newdef_2026-10-20/` (outside the repo).
 
-The mission check (`gps_mission_check.sh`) was cut off by Docker stopping and
-has not been rerun. The scripts still launch with the launch file's default
+The mission check (`gps_mission_check.sh`) was cut off by Docker stopping on the
+first attempt; rerun on `0b006cc` (ros2_control) it PASSES: the mission started by
+itself, Nav2 accepted the end goal, and it handed back to lane following with the
+robot 1.2 m from the end waypoint (`after_budget_fix/mission.log` in the evidence
+folder). So all three GPS checks pass on the new defaults. The scripts still launch with the launch file's default
 drive and ignore `IGVC_DEFAULT_DRIVE`, so under pixi they would ask for
 ros2_control.
 
