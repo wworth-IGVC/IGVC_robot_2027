@@ -43,6 +43,7 @@ ODOM = '/front_zed_camera_x/zed_node/odom'
 START_AHEAD_M = 14.0
 RADIUS_M = 3.0
 TOL_M = 0.5
+DRIVE_BUDGET_M = START_AHEAD_M + RADIUS_M + 2.0   # past the gate, plus margin
 OUT = os.environ.get('GPS_CHECK_OUT', '/tmp/gps_heading_check')
 SPAWN = (float(os.environ.get('SPAWN_X', '0')), float(os.environ.get('SPAWN_Y', '0')))
 YAW = float(os.environ.get('SPAWN_YAW', '0'))
@@ -116,6 +117,11 @@ def spin(seconds):
         rclpy.spin_once(node, timeout_sec=0.05)
 
 
+def travelled(p0):
+    o = state['odom']
+    return math.hypot(o[0] - p0[0], o[1] - p0[1]) if o and p0 else 0.0
+
+
 def drive(vx):
     t = Twist()
     t.linear.x = vx
@@ -137,8 +143,14 @@ t0 = time.time()
 while state['odom'] is None and time.time() - t0 < 30:
     rclpy.spin_once(node, timeout_sec=0.1)
 spin(4.0)
-t0 = time.time()
-while state['anchored'] is None and time.time() - t0 < 50.0:
+# Budget the drive by distance, not wall time. It was 50 s of wall time,
+# written before the planner's heading fit (8f489c8), which anchors only after
+# 10 m of travel; at the 2027 robot's real-time factor (about 0.5) 50 s fell
+# short of the 11 m to the gate, so the planner never anchored on either drive (2026-10-20). The pass
+# criteria below are unchanged.
+t0, p0 = time.time(), state['odom']
+while (state['anchored'] is None and time.time() - t0 < 240.0
+       and travelled(p0) < DRIVE_BUDGET_M):
     drive(0.5)
     spin(0.1)
 drive(0.0)

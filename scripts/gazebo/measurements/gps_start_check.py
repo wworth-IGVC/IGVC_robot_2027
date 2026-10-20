@@ -58,6 +58,7 @@ ODOM = '/front_zed_camera_x/zed_node/odom'
 RADIUS_M = 4.0
 START_AHEAD_M = 8.0
 TOL_M = 0.5
+DRIVE_BUDGET_M = 14.0   # the 10 m heading fit, past the start waypoint, plus margin
 OUT = os.environ.get('GPS_CHECK_OUT', '/tmp/gps_start_check')
 
 A = 6378137.0
@@ -139,6 +140,11 @@ def spin(seconds):
     t0 = time.time()
     while time.time() - t0 < seconds:
         rclpy.spin_once(node, timeout_sec=0.05)
+
+
+def travelled(p0):
+    o = state['odom']
+    return math.hypot(o[0] - p0[0], o[1] - p0[1]) if o and p0 else 0.0
 
 
 def drive(vx):
@@ -237,8 +243,14 @@ print('         PASS' if results['F'] else
 # ---- arm N: drive at the start waypoint
 proc, log = start_planner('N', [shipped, overlay_path])
 spin(4.0)                                   # let it subscribe and see a fix
-t0 = time.time()
-while state['anchored_at'] is None and time.time() - t0 < 40.0:
+# Budget the drive by distance, not wall time. It was 40 s of wall time,
+# written before the planner's heading fit (8f489c8), which anchors only after
+# 10 m of travel; at the 2027 robot's real-time factor (about 0.5) 40 s is 5 to
+# 7.5 m, so the planner never anchored on either drive (2026-10-20). The pass
+# criteria below are unchanged.
+t0, p0 = time.time(), state['odom']
+while (state['anchored_at'] is None and time.time() - t0 < 240.0
+       and travelled(p0) < DRIVE_BUDGET_M):
     drive(0.5)
     spin(0.1)
 drive(0.0)

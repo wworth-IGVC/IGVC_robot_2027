@@ -3057,6 +3057,37 @@ instead (91 to 92% of all points, the rest exactly those four). The lap
 passed (89.6 m, worst lane clearance +0.322 m, no contact). To watch it:
 `RVIZ=1 bash scripts/gazebo/autonomy_check.sh`.
 
+### 10.38 GPS checks on the new defaults; the drive budget (2026-10-20)
+
+On the new defaults `gps_start_check.sh` failed arm N ("drove toward the start
+waypoint: never anchored") and `gps_heading_check.sh 0 90 135 180` failed all
+four headings the same way. Not a drive problem: the same start check on
+`drive:=diffdrive` failed identically. Both checks drove for a fixed wall time
+(40 s and 50 s) and were written before the mission planner's heading fit
+(`8f489c8`), which anchors only after 10 m of travel. At the 2027 robot's
+real-time factor (about 0.5) 40 s is 5 to 7.5 m; the planner logged "no heading
+estimate yet: 7.5 m of the 10 m". The drive is now budgeted by odometry travel
+(start check 14 m, heading check 19 m) with a 240 s wall cap; the pass criteria
+are unchanged.
+
+| Check (ros2_control, tree with the fix) | Result |
+| --- | --- |
+| start check | PASS: arm N anchored 2.9 m from the start waypoint (gate 4 m) after 10.9 m; virtual obstacles 0.21 m and 0.21 m from truth (limit 0.5 m) |
+| heading check 0, 90, 135, 180 deg | PASS 4 of 4: anchored after 10.9 to 11.3 m; both virtual obstacles within 0.23 m of truth at every heading (limit 0.5 m) |
+
+Also measured, a probe driving 20 s straight and 20 s on an arc, compared at
+rest with Gazebo's true pose: odometry 0.27 m off truth over 5.3 m on
+ros2_control and 0.29 m over 5.6 m on diffdrive; the heading fit's residual
+0.14 m and 0.18 m. The two drives' odometry is equally good over this short
+drive. One earlier start-check run on ros2_control logged a fit residual of
+2.5 to 4.6 m; a rerun gave 0.01 m, so it did not repeat. Evidence
+`local-notes/oneshot_evidence/gps_s1_newdef_2026-10-20/` (outside the repo).
+
+The mission check (`gps_mission_check.sh`) was cut off by Docker stopping and
+has not been rerun. The scripts still launch with the launch file's default
+drive and ignore `IGVC_DEFAULT_DRIVE`, so under pixi they would ask for
+ros2_control.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model
