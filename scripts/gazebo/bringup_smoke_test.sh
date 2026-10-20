@@ -20,6 +20,8 @@
 # Docker: run this INSIDE the Gazebo container. pixi: `pixi run smoke`.
 #
 #   RVIZ=1        also start RViz and check the node comes up (needs a display)
+#   RVIZ_VIEW=demo|debug  with RVIZ=1, which RViz config (rviz_view:=);
+#                 default the launch file's, demo
 #   STARTUP_LIMIT=300  ceiling, in wall seconds, on waiting for the stack to
 #                 come up. It is a ceiling, not a wait: the script proceeds
 #                 the moment Gazebo, the bridge and odometry are live, so a
@@ -70,6 +72,7 @@ LAUNCH_FILE="gazebo_nav_test.launch.py"
 LAUNCH_ARGS="headless:=true sim_cameras:=$CAMERAS"
 if [ "${RVIZ:-0}" = "1" ]; then
     LAUNCH_ARGS="headless:=false rviz:=true sim_cameras:=$CAMERAS"
+    [ -n "${RVIZ_VIEW:-}" ] && LAUNCH_ARGS="$LAUNCH_ARGS rviz_view:=$RVIZ_VIEW"
 fi
 
 # nav2:=false is NOT optional. PART 2 and 3 command a velocity and measure

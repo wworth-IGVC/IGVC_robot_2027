@@ -74,10 +74,15 @@ Usage
     # with both windows, from a WSL2 shell
     ros2 launch igvc_test_bringup gazebo_nav_test.launch.py rviz:=true
 
+    # RViz only, every display (the debug view), no Gazebo window
+    ros2 launch igvc_test_bringup gazebo_nav_test.launch.py \\
+        headless:=true rviz:=true rviz_view:=debug
+
 Arguments
 ---------
     Everything gazebo_sim.launch.py takes, including robot:=2027|2026 (default
-    2027; sim_cameras:=all needs robot:=2026), plus:
+    2027; sim_cameras:=all needs robot:=2026) and rviz_view:=demo|debug
+    (default demo; passed on to gazebo_sim.launch.py, which explains both), plus:
     track_image_file              path to track.png
     track_image_pixels_per_meter  float          (default: 52.5, JSON wins)
     debug_png_path                GT grid PNG export
@@ -225,6 +230,10 @@ HELD_GRID_MOTIONS = ("none", "odom")
 # ── obstacle_source: where the planner's barrels come from ───────────────────
 OBSTACLE_SOURCES = ("gt", "gt_map", "none", "nav2_scan", "lidar_map")
 
+# ── rviz_view: which RViz config gazebo_sim.launch.py opens with rviz:=true ──
+# demo is gazebo_demo.rviz, debug is gazebo_sim.rviz (RVIZ_VIEWS there).
+RVIZ_VIEWS = ("demo", "debug")
+
 # ── nav_unknown_reach_m: the navigator's limit on planning through unknown ───
 # Metres from known-free cells. The ground-truth grid is dense and the paint is
 # lethal, so unknown beyond it is never reached and gt keeps the navigator's
@@ -365,6 +374,12 @@ def _setup(context, *args, **kwargs):
 
     use_sim_time = cfg("use_sim_time").lower() in ("true", "1", "yes")
     odom_topic = cfg("odom_topic")
+    # Checked here as well as in gazebo_sim.launch.py, so a typo fails before
+    # anything starts and not after Gazebo is up.
+    rviz_view = cfg("rviz_view")
+    if rviz_view not in RVIZ_VIEWS:
+        raise RuntimeError("rviz_view:=%s is not one of %s"
+                           % (rviz_view, ", ".join(RVIZ_VIEWS)))
     lane_source = cfg("lane_source")
     if lane_source not in LANE_SOURCES:
         raise RuntimeError("lane_source:=%s is not one of %s"
@@ -485,6 +500,7 @@ def _setup(context, *args, **kwargs):
             "sim_camera_hz": cfg("sim_camera_hz"),
             "headless": cfg("headless"),
             "rviz": cfg("rviz"),
+            "rviz_view": rviz_view,
             "use_sim_time": cfg("use_sim_time"),
             "drive": cfg("drive"),
         }.items(),
@@ -1131,6 +1147,13 @@ def generate_launch_description():
                         "default (off) with gt; true or false in any mode."),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
+        DeclareLaunchArgument(
+            "rviz_view", default_value="demo",
+            description="With rviz:=true, which RViz config. demo (the "
+                        "default): gazebo_demo.rviz, the robot, search grid, "
+                        "lane path, lidar map, odometry trail and detector "
+                        "overlay. debug: gazebo_sim.rviz, every display. "
+                        "Passed to gazebo_sim.launch.py."),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument(
             "odom_topic",

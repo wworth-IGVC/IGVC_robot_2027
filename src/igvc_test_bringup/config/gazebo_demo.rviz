@@ -1,0 +1,232 @@
+# RViz "demo" view for the Gazebo simulation (rviz_view:=demo, the default).
+#
+# For watching the robot drive and showing someone what it sees. It is the
+# lighter of the two views: gazebo_sim.rviz is the "debug" view
+# (rviz_view:=debug) with every display, for finding out why the robot did
+# something. Added 2026-10-20 (RVIZ_VIEWS_PLAN): with the Gazebo window and the
+# full view open, the simulator ran at about 12 to 16% real time.
+#
+# What is on screen, and what each colour means:
+#   RobotModel            the robot.
+#   NavigatorSearchGrid   /navigator/search_grid, the window ahead of the robot
+#                         that the navigator's lane search plans over, about
+#                         4 m x 6 m, as generated each cycle (nav_search_grid:=
+#                         true, the default). Purple blocked (paint, barrels,
+#                         the lidar map); cyan passable but ruled out (too
+#                         narrow for the robot, or unknown too far from seen
+#                         ground); blue to red open ground, by its clearance
+#                         cost; grey unknown that was searched.
+#   NavigatorLanePath     /lane_path, magenta: the path chosen over that grid.
+#   LidarObstacleMap      /lidar_obstacle_map, the lidar's obstacle grid in
+#                         odom (obstacle_source:=lidar_map, the default).
+#   Odometry              /odom, a short trail of small green arrows: where the
+#                         robot has just been (about the last 9 m). /odom is
+#                         the CORRECTED odometry from gazebo_odom_shim.
+#   LaneDetectorOverlay   /lane_debug/cam0/overlay, the lane detector's own
+#                         drawing on the front camera image. The raw camera
+#                         panel is left out: the overlay is the same picture.
+#   Grid                  a faint 1 m ground grid, for scale.
+# Left out on purpose (all in the debug view): TF, the LaneCostmap sheet,
+# LaneMap, the YOLOPv2 markers, the LaserScan points and the raw camera.
+#
+# Sync and speed: NavigatorSearchGrid has Use Timestamp true, so it is drawn at
+# the robot pose of its own stamp, as /lane_path is, and the two line up.
+# Every display has queue Depth 1, so a slow RViz draws the newest message
+# instead of a backlog. Frame Rate 20.
+#
+# The camera follows base_link (Orbit, Target Frame base_link), looking down
+# at the robot from about 11 m. It follows the robot's position, not its
+# heading: drag to turn the view.
+#
+# CAREFUL: RViz WRITES THIS FILE, as it does gazebo_sim.rviz (see that file's
+# header). Saving from the GUI replaces every comment here and rewrites 0.03
+# as 0.029999999329447746. Edit it as text; if `git diff` is suddenly
+# hundreds of lines, revert and re-apply the real change by hand.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+      Splitter Ratio: 0.5
+    Tree Height: 640
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Displays:
+    - Alpha: 0.25
+      Cell Size: 1
+      Class: rviz_default_plugins/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Plane: XY
+      Plane Cell Count: 40
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 0.7
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Draw Behind: true
+      Enabled: true
+      Name: LidarObstacleMap
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /lidar_obstacle_map
+      Update Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /lidar_obstacle_map_updates
+      Use Timestamp: false
+      Value: true
+    - Alpha: 0.6
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Draw Behind: false
+      Enabled: true
+      Name: NavigatorSearchGrid
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /navigator/search_grid
+      Update Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /navigator/search_grid_updates
+      Use Timestamp: true
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 0; 255
+      Enabled: true
+      Head Diameter: 0.3
+      Head Length: 0.2
+      Length: 0.3
+      Line Style: Billboards
+      Line Width: 0.12
+      Name: NavigatorLanePath
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.05
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.1
+      Shaft Length: 0.1
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /lane_path
+      Value: true
+    - Angle Tolerance: 0.3
+      Class: rviz_default_plugins/Odometry
+      Covariance:
+        Value: false
+      Enabled: true
+      Keep: 30
+      Name: Odometry
+      Position Tolerance: 0.3
+      Shape:
+        Alpha: 0.6
+        Color: 120; 230; 120
+        Head Length: 0.06
+        Head Radius: 0.04
+        Shaft Length: 0.15
+        Shaft Radius: 0.015
+        Value: Arrow
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /odom
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Name: RobotModel
+      Visual Enabled: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: LaneDetectorOverlay
+      Normalize Range: true
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /lane_debug/cam0/overlay
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 32; 32; 36
+    Fixed Frame: odom
+    Frame Rate: 20
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 11
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Name: Current View
+      Near Clip Distance: 0.01
+      Pitch: 1.0
+      Target Frame: base_link
+      Value: Orbit (rviz)
+      Yaw: 2.4
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Hide Left Dock: false
+  Hide Right Dock: false
+  Width: 1500

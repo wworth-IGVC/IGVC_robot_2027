@@ -64,6 +64,17 @@
 #                  from the lidar (obstacle_source:=lidar_map). The previous
 #                  defaults, ground-truth barrels and Gazebo's DiffDrive:
 #                  LAUNCH_ARGS="drive:=diffdrive obstacle_source:=gt".
+#   RVIZ=1         open RViz to watch the run (default 0: no windows). Since
+#                  2026-10-20 RViz ONLY, without the Gazebo window: with both
+#                  open the simulator ran at about 12 to 16% real time. Needs
+#                  a display, so a WSL2 shell, never PowerShell.
+#   GZ_GUI=1       with RVIZ=1, open the Gazebo window too (headless:=false),
+#                  which is what RVIZ=1 alone did before 2026-10-20.
+#   RVIZ_VIEW=debug  with RVIZ=1, the full RViz view (gazebo_sim.rviz: TF,
+#                  laser, raw camera, every grid) instead of the default demo
+#                  view (gazebo_demo.rviz). Passed as rviz_view:=. Windows only
+#                  watch: none of these changes what the robot does or how the
+#                  run is graded.
 #   ANALYSE_ONLY=<track_log>  do not run a simulator: score a saved run. The
 #                  same Python block that grades a live run reads the file.
 #                  Optional companions, because a live run measures them and a
@@ -161,8 +172,14 @@ else
     echo "this script never publishes /cmd_vel"
     echo
 
+    # RVIZ=1 is RViz only; GZ_GUI=1 adds the Gazebo window; RVIZ_VIEW picks
+    # the RViz config (header). Without RVIZ=1 nothing opens, as before.
     ARGS="headless:=true"
-    [ "${RVIZ:-0}" = "1" ] && ARGS="headless:=false rviz:=true"
+    if [ "${RVIZ:-0}" = "1" ]; then
+        ARGS="headless:=true rviz:=true"
+        [ "${GZ_GUI:-0}" = "1" ] && ARGS="headless:=false rviz:=true"
+        [ -n "${RVIZ_VIEW:-}" ] && ARGS="$ARGS rviz_view:=$RVIZ_VIEW"
+    fi
     [ -n "$NAV2_DELAY" ] && ARGS="$ARGS nav2_delay:=$NAV2_DELAY"
     # Before LAUNCH_ARGS, so a drive named there wins (igvc_env.sh).
     [ -n "${IGVC_DEFAULT_DRIVE:-}" ] && ARGS="$ARGS drive:=$IGVC_DEFAULT_DRIVE"

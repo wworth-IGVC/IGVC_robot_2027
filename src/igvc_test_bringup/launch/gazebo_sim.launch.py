@@ -79,6 +79,13 @@ Arguments
     sim_camera_hz      int                        (default: 15)
     headless           true | false               (default: false)
     rviz               true | false               (default: false)
+    rviz_view          demo | debug               (default: demo)
+        demo   config/gazebo_demo.rviz: the robot, the navigator's search
+               grid and lane path, the lidar obstacle map, a short odometry
+               trail and the lane detector's overlay image. Lighter, for
+               watching it drive (since 2026-10-20)
+        debug  config/gazebo_sim.rviz: every display, as before 2026-10-20
+               (TF, laser scan, raw camera, the lane grids, YOLOPv2 markers)
     use_sim_time       true | false               (default: true)
     robot_name         spawned entity name        (default: igvc_robot)
     spawn_{x,y,z,yaw}  override the json spawn pose
@@ -125,6 +132,13 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+# rviz_view:= value -> RViz config under config/. gazebo_nav_test.launch.py
+# validates against the same two names before passing the value on.
+RVIZ_VIEWS = {
+    "demo": "gazebo_demo.rviz",
+    "debug": "gazebo_sim.rviz",
+}
 
 
 # ── Locating files in the install tree or the source tree ────────────────────
@@ -316,6 +330,10 @@ def _setup(context, *args, **kwargs):
     drive = cfg("drive")
     if drive not in ("diffdrive", "ros2_control"):
         raise RuntimeError("drive:=%s is not diffdrive or ros2_control" % drive)
+    rviz_view = cfg("rviz_view")
+    if rviz_view not in RVIZ_VIEWS:
+        raise RuntimeError("rviz_view:=%s is not one of %s"
+                           % (rviz_view, ", ".join(RVIZ_VIEWS)))
     use_ros2_control = drive == "ros2_control"
     if use_ros2_control:
         _require_ros2_control(use_sim_time)
@@ -572,7 +590,9 @@ def _setup(context, *args, **kwargs):
     # It also uses its own config. config.rviz is fixed to base_link and shows
     # only the model and TF, so a driving robot appears to stand still while
     # the world slides past. gazebo_sim.rviz is fixed to odom and adds the
-    # laser, camera and odometry displays.
+    # laser, camera and odometry displays. Since 2026-10-20 that file is the
+    # "debug" view (rviz_view:=debug) and the default is the lighter "demo"
+    # view, gazebo_demo.rviz; each file's header says what it shows.
     actions = [gz, rsp, spawn, bridge, odom_shim]
     if use_ros2_control:
         actions += _ros2_control_actions(spawn, use_sim_time)
@@ -611,11 +631,11 @@ def _setup(context, *args, **kwargs):
 
     use_rviz = cfg("rviz").lower() in ("true", "1", "yes")
     if use_rviz:
+        rviz_file = RVIZ_VIEWS[rviz_view]
         rviz_cfg = _find(
-            os.path.join("src", "igvc_test_bringup", "config",
-                         "gazebo_sim.rviz"),
+            os.path.join("src", "igvc_test_bringup", "config", rviz_file),
             "igvc_test_bringup",
-            os.path.join("config", "gazebo_sim.rviz"),
+            os.path.join("config", rviz_file),
         )
         actions.append(Node(
             package="rviz2",
@@ -647,7 +667,9 @@ def _setup(context, *args, **kwargs):
     print("  cloud     : re-stamped to the body frame for %s"
           % (", ".join(cloud_cams) or "no camera"))
     print("  cloud DDS : %s" % pacing_note)
-    print("  rviz      : %s" % ("on" if use_rviz else "off"))
+    print("  rviz      : %s" % (("on, %s view (%s)"
+                                  % (rviz_view, RVIZ_VIEWS[rviz_view]))
+                                 if use_rviz else "off"))
 
     return actions
 
@@ -701,6 +723,12 @@ def generate_launch_description():
         DeclareLaunchArgument("sim_camera_hz", default_value="15"),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("rviz", default_value="false"),
+        DeclareLaunchArgument(
+            "rviz_view", default_value="demo",
+            description="With rviz:=true, which RViz config. demo (the "
+                        "default): gazebo_demo.rviz, the robot, search grid, "
+                        "lane path, lidar map, odometry trail and detector "
+                        "overlay. debug: gazebo_sim.rviz, every display."),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("robot_name", default_value="igvc_robot"),
         DeclareLaunchArgument("spawn_x", default_value=""),

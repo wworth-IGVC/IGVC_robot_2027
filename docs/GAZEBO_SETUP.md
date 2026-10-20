@@ -3160,6 +3160,44 @@ as expected: `barrel_7` touched at 63.1 s, readings after that void (the
 odometry ran away with the robot pinned on the barrel). The same lap showed the
 lidar self filter (10.39) in RViz: barrels only, no trail along the path.
 
+### 10.41 RViz: a demo view and a debug view, in sync and faster (2026-10-20)
+
+Liam saw the planner's path turn before the grid behind it changed, and RViz
+redrawing slowly with the Gazebo window open. Measured with
+`scripts/gazebo/measurements/rviz_load_probe.py` (new: rate, size, stamp age
+and grid-to-path stamp offset of every topic RViz draws) on the camera-lane
+default: `/lane_costmap` and `/navigator/search_grid` reach RViz 0.6 to 0.8 s
+older than `/lane_path` (median), and RViz drew them with `Use Timestamp: false`,
+that is at the robot's newest pose, so the grid slid against the path. Every
+display queued 5 messages, so a slow RViz drew a backlog. The lidar map is
+1000 x 1000 cells (about 1 MB a message), the lane grid 400 x 400 (160 kB at
+about 15 Hz of sim time), each camera image about 690 kB.
+
+- `gazebo_sim.rviz` is now the **debug view** (every display, as before), with
+  `Use Timestamp: true` on the two `base_link` grids, queue depth 1 on every
+  perception display, frame rate 20 and an odometry trail of 30.
+- New `gazebo_demo.rviz`, the **demo view** and the default: the robot, the
+  search grid, the lane path, the lidar map, a short odometry trail and the
+  detector's overlay image; no TF, raw camera, lane-grid sheet or markers.
+- `rviz_view:=demo|debug` on `gazebo_sim.launch.py` and `gazebo_nav_test.launch.py`
+  (default demo). `autonomy_check.sh`: `RVIZ=1` now opens RViz only (Gazebo
+  headless), `GZ_GUI=1` adds the Gazebo window, `RVIZ_VIEW=debug` the full view.
+  `start_sim.sh` keeps the debug view unless `NAV=1`.
+
+Measured on the camera-lane default, 40 s of wall time each, one simulator:
+
+| Run | Real-time factor | RViz frame rate | Grid and path |
+| --- | --- | --- | --- |
+| Old view, Gazebo window + RViz | 0.235 | | |
+| Old view, RViz only | 0.285 | 11 fps | path leaves the drawn grid |
+| Demo view, RViz only | 0.301 | 19 fps (cap 20) | path inside the grid |
+| Debug view, RViz only | 0.304 | 11 fps (every layer) | path inside the grid |
+
+RViz logged 3 "Message Filter dropping" lines in each run, all in the first
+1.5 s of sim time (no transform yet); none after. Visual only: nothing the robot
+does or how a run is graded changes. Most of the remaining slowness is the
+simulation itself with the camera pipeline (real-time factor about 0.3).
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model

@@ -9,6 +9,11 @@
 # starts Gazebo, the robot, the ros_gz bridge and RViz.
 #
 #   RVIZ=0        skip RViz
+#   RVIZ_VIEW=demo|debug  which RViz config (rviz_view:=). Default: debug
+#                 (gazebo_sim.rviz, every display, the view this script has
+#                 always opened) without NAV=1, because the demo view shows
+#                 the navigator's grid and path, which only NAV=1 starts; with
+#                 NAV=1 the launch file's default, demo (gazebo_demo.rviz)
 #   HEADLESS=1    no Gazebo window either; for automated checks
 #   CAMERAS=all   all three cameras instead of just the front one
 #                 (robot 2026 only: the 2027 robot has one camera)
@@ -94,6 +99,9 @@ LAUNCH_FILE="gazebo_sim.launch.py"
 
 ARGS="sim_cameras:=$CAMERAS"
 [ "$RVIZ" = "1" ] && ARGS="$ARGS rviz:=true"
+RVIZ_VIEW="${RVIZ_VIEW:-}"
+[ -z "$RVIZ_VIEW" ] && [ "${NAV:-0}" != "1" ] && RVIZ_VIEW="debug"
+[ -n "$RVIZ_VIEW" ] && ARGS="$ARGS rviz_view:=$RVIZ_VIEW"
 [ "$HEADLESS" = "1" ] && ARGS="$ARGS headless:=true rviz:=false"
 [ -n "${ROBOT:-}" ] && ARGS="$ARGS robot:=$ROBOT"
 DRIVE="${DRIVE:-${IGVC_DEFAULT_DRIVE:-}}"
