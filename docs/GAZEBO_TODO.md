@@ -103,6 +103,11 @@ Verified means a command was run and a number came back. Nothing below is
       (2026-09-17). The earlier figures of 122.9 m and 1.79 m came from a
       pose log sampled at about 2 Hz; see the clearance note below for what
       that rate hid.
+- [x] **RViz shows what the robot plans over (2026-10-20).** `gazebo_sim.rviz`
+      draws the lane pipeline (detector overlay, lane grid, lidar map, path;
+      `GAZEBO_SETUP.md` 10.36) and the navigator's search grid, the cells
+      ahead of the robot the path is chosen over, live each cycle
+      (`/navigator/search_grid`, `nav_search_grid:=true` by default; 10.37).
 - [x] **Nav2 is in the image** - `navigation2`, `nav2-bringup`,
       `image-geometry`, `twist-stamper`.
 

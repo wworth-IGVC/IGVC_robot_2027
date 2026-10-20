@@ -3022,6 +3022,41 @@ RVIZ=1 LAUNCH_ARGS='lane_source:=hough lane_synthetic_boundary:=unknown lane_bou
 On WSLg RViz logs a map-shader message (`indexed_8bit_image`, "active samplers
 with a different type"); the maps still draw.
 
+### 10.37 RViz shows the navigator's search grid (2026-10-20)
+
+`/lane_costmap` is not what the lane path is chosen over. The navigator crops it
+to a window ahead of the robot (the 4 m lookahead, 3 m each side), stamps the
+lidar barrel map into it, and with gap choice (F21) and unknown reach (F12)
+drops cells the robot does not fit through or that are unknown too far from
+seen ground. `publish_search_grid` (navigator, default off) publishes that
+window every planning cycle on `/navigator/search_grid`, in the lane grid's frame
+and stamp; `nav_search_grid:=true` (the simulator's default) turns it on and
+`gazebo_sim.rviz` draws it as **NavigatorSearchGrid** (costmap colours):
+
+| Colour | Value | Cell |
+| --- | --- | --- |
+| purple | 100 | blocked: paint, a barrel, a lidar map cell |
+| cyan | 99 | passable but not searched: too narrow for the robot (gap choice) or unknown too far from seen ground (unknown reach) |
+| blue to red | 1 to 60 | searched free ground, coloured by the search's own clearance penalty (0.45 m / clearance, capped at 6): blue mid-lane, red by the paint |
+| grey | -1 | searched unknown (dearer than free) |
+
+The magenta `/lane_path` is chosen over it. It never changes the path (a unit
+test compares). Tests: `test_navigator_search_grid.py`, 7 fail on the navigator
+before the change, 9 pass after; the package's other tests are as before (23
+pre-existing failures, the same set as at `19cfce5`: older fixtures that do not set `_robot_yaw`, and flake8 and pep257; 188 pass in all).
+
+Measured live (2026-10-20, Gazebo image, the default autonomy lap): one
+publisher (`igvc_navigator`), a 40 x 60 grid at 0.1 m (4 m ahead, 3 m each
+side) in `base_link`, about 1.8 grids a second (one per plan, so at the lane
+grid's rate, not the navigator's 10 Hz timer), all four classes present. Of the
+`/lane_path` points, everything from 0.4 m ahead lies on a searched cell; the
+first four of every path (0.0 to 0.3 m) lie on blocked cells: the path is
+anchored at the robot, and the ground-truth bridge marks the strip under and
+behind the robot lethal, so the search starts from the nearest searchable cell
+instead (91 to 92% of all points, the rest exactly those four). The lap
+passed (89.6 m, worst lane clearance +0.322 m, no contact). To watch it:
+`RVIZ=1 bash scripts/gazebo/autonomy_check.sh`.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model

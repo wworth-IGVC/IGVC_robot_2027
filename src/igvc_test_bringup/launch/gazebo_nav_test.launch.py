@@ -148,6 +148,10 @@ Arguments
         auto       true with lane_source hough or yolopv2, not passed with gt
                    (the navigator's default, off), so the ground-truth run is
                    the one it was
+    nav_search_grid               the navigator's publish_search_grid: publish
+                                  the cells the lane search plans over on
+                                  /navigator/search_grid for RViz; never changes
+                                  the path (default: true)
     nav_compensate_grid_latency   the navigator's compensate_grid_latency (P5g):
                                   move the lane path from the grid's image stamp
                                   to the newest odom pose, so a 0.7 s old camera
@@ -831,6 +835,12 @@ def _setup(context, *args, **kwargs):
                     "gap_choice_enabled": cfg("nav_gap_choice").lower() in (
                         "true", "1", "yes"),
                     "gap_choice_margin_m": float(cfg("nav_gap_choice_margin_m")),
+                    # The cells the lane search plans over, on
+                    # /navigator/search_grid for RViz (gazebo_sim.rviz,
+                    # NavigatorSearchGrid). Debug only, never changes the
+                    # path; the navigator's own default is off.
+                    "publish_search_grid": cfg("nav_search_grid").lower() in (
+                        "true", "1", "yes"),
                     # The competition navigator (67a6934) rejects any path that
                     # turns more than max_path_heading_rad (default 0.75, 43
                     # deg) from the robot and then holds and reverses. The
@@ -1039,6 +1049,14 @@ def generate_launch_description():
             "nav_gap_choice_margin_m", default_value="0.15",
             description="The navigator's gap_choice_margin_m: clearance added "
                         "to the robot half-width 0.405 m. A diagnosis knob."),
+        DeclareLaunchArgument(
+            "nav_search_grid", default_value="true",
+            description="The navigator's publish_search_grid in the simulator: "
+                        "publish the cells the lane search plans over (lane "
+                        "grid, obstacle map, gap choice, unknown reach, the "
+                        "clearance cost) on /navigator/search_grid for RViz. "
+                        "Never changes the path. false = the navigator's "
+                        "default (off)."),
         DeclareLaunchArgument(
             "nav_max_path_heading_rad", default_value="1.57",
             description="The navigator's max_path_heading_rad in the simulator. "

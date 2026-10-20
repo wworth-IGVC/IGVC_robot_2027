@@ -25,6 +25,13 @@
 # above. That happened on 2026-09-15 and was reverted. If `git diff` on this
 # file is suddenly 350 lines, that is what happened; revert and re-apply the
 # real change by hand.
+#
+# NavigatorSearchGrid (/navigator/search_grid, nav_search_grid:=true, the
+# default) is the window ahead of the robot the navigator's lane search plans
+# over, as it is generated each cycle: purple blocked (paint, barrels, the
+# lidar map), cyan passable but dropped (too narrow for the robot, or unknown
+# too far from seen ground), blue to red the clearance cost of free cells,
+# grey searched unknown. The magenta NavigatorLanePath is chosen over it.
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
@@ -211,6 +218,27 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /lidar_obstacle_map_updates
+      Use Timestamp: false
+      Value: true
+    - Alpha: 0.6
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Draw Behind: false
+      Enabled: true
+      Name: NavigatorSearchGrid
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /navigator/search_grid
+      Update Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /navigator/search_grid_updates
       Use Timestamp: false
       Value: true
     - Alpha: 1

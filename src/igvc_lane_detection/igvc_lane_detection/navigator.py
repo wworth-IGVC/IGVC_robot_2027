@@ -233,6 +233,10 @@ class IGVCNavigatorNode(Node):
         self._reverse_cmd_topic = self._p('reverse_cmd_topic', 'cmd_vel_nav')
         self._stop_on_invalid_path = bool(self._p('stop_on_invalid_path', False))
         self._compensate_grid_latency = bool(self._p('compensate_grid_latency', False))
+        self._search_grid_pub = None
+        if bool(self._p('publish_search_grid', False)):
+            self._search_grid_pub = self.create_publisher(
+                OccupancyGrid, '/navigator/search_grid', 10)
         # (stamp_sec, x, y, yaw) odom samples, kept only when the above is on.
         self._odom_history: deque = deque()
 
@@ -482,6 +486,11 @@ class IGVCNavigatorNode(Node):
             # the extracted path from the grid stamp's odom pose to the newest
             # one. Off by default: off is today's planner.
             ('compensate_grid_latency', False),
+            # Publish the cells the lane search plans over, after the
+            # obstacle overlay, gap choice and unknown reach, on
+            # /navigator/search_grid for RViz. Off by default: debug only, it
+            # never changes the path.
+            ('publish_search_grid', False),
             # Centerline-waypoint navigation strategy
             ('nav_strategy', ''),               # '' (auto) | 'local_lane' | 'centerline_waypoints' | 'gps'
             ('centerline_source_json', ''),     # path to track_points.json
@@ -1511,7 +1520,9 @@ class IGVCNavigatorNode(Node):
         if unknown_reach_m >= 0.0:
             traversable = self._limit_unknown_reach(roi, unknown_reach_m / res)
         roi_h, roi_w = traversable.shape
+        roi_orig = (orig_x + min_col * res, orig_y + min_row * res)
         if roi_h < 3 or roi_w < 3 or not traversable.any():
+            self._publish_search_grid(g, roi, traversable, None, roi_orig)
             return []
 
         start_r = int((0.0 - orig_y) / res) - min_row
@@ -1549,6 +1560,7 @@ class IGVCNavigatorNode(Node):
 
         start = _nearest_traversable_cell()
         if start is None:
+            self._publish_search_grid(g, roi, traversable, None, roi_orig)
             return []
 
         # Chamfer distance-to-obstacle.  Higher clearance means closer to the
@@ -1595,6 +1607,7 @@ class IGVCNavigatorNode(Node):
         if getattr(self, '_gap_choice_enabled', False):
             traversable = self._gap_choice_mask(
                 roi, traversable, start, res, orig_x + min_col * res)
+        self._publish_search_grid(g, roi, traversable, clearance_m, roi_orig)
 
         # Previous-path hysteresis: build a boolean mask of ROI cells lying
         # near the last accepted centerline so the Dijkstra search can discount
@@ -1740,6 +1753,46 @@ class IGVCNavigatorNode(Node):
             self._prev_centerline_odom = np.column_stack([ox, oy])
 
         return pts
+
+    def _publish_search_grid(self, g: OccupancyGrid, roi: np.ndarray,
+                             traversable: np.ndarray,
+                             clearance_m: Optional[np.ndarray],
+                             roi_orig: tuple[float, float]) -> None:
+        """Publish the search window on /navigator/search_grid, if enabled.
+
+        Same frame and stamp as the lane grid, origin at the window's corner.
+        Values: 100 blocked (paint, barrel, obstacle map), 99 passable but
+        dropped from the search (gap choice, unknown reach), -1 searched
+        unknown, 1 to 60 searched free: the search's clearance penalty
+        (0.45 m / clearance, capped at 6) scaled, low mid-lane, 60 at the
+        paint.  The RViz costmap colour scheme draws
+        these blue to red, cyan, purple and grey.
+        """
+        pub = getattr(self, '_search_grid_pub', None)
+        if pub is None:
+            return
+        res = g.info.resolution
+        out = np.full(roi.shape, 99, dtype=np.int8)
+        out[roi >= 90] = 100
+        searched = traversable & (roi < 90)
+        out[searched & (roi != 0)] = -1
+        free = searched & (roi == 0)
+        if clearance_m is None:
+            out[free] = 1
+        else:
+            # The same clearance penalty the search adds to each step.
+            penalty = np.minimum(6.0, 0.45 / np.maximum(clearance_m, res))
+            out[free] = (1 + np.rint(penalty[free] / 6.0 * 59.0)).astype(np.int8)
+        msg = OccupancyGrid()
+        msg.header = g.header
+        msg.info.resolution = res
+        msg.info.width = int(roi.shape[1])
+        msg.info.height = int(roi.shape[0])
+        msg.info.origin.position.x = float(roi_orig[0])
+        msg.info.origin.position.y = float(roi_orig[1])
+        msg.info.origin.orientation.w = 1.0
+        msg.data = out.reshape(-1).tolist()
+        pub.publish(msg)
 
     @staticmethod
     def _limit_unknown_reach(roi: np.ndarray, reach_cells: float) -> np.ndarray:
