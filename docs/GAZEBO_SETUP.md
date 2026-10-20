@@ -3088,6 +3088,51 @@ has not been rerun. The scripts still launch with the launch file's default
 drive and ignore `IGVC_DEFAULT_DRIVE`, so under pixi they would ask for
 ros2_control.
 
+### 10.39 The lidar map's self filter: no trail of phantom barrels (2026-10-20)
+
+With the 2027 robot every `/scan` has 4 rays at 161 to 164 degrees from the
+lidar (behind it, on the robot's own body) returning 0.10 to 0.14 m, the same
+rays 10.20 found on 2026-10-09. `min_range_m` 0.15 (the competition's value)
+drops most of them, but the sensor's 1 cm noise pushes some just past it, and
+with the simulator's `hit_weight` 5 and `hit_threshold` 4 one hit is lethal. The
+cell lands about 0.2 m ahead of `base_link`, and because `/lidar_obstacle_map` is
+a persistent odom-frame map it stays as the robot moves on: RViz showed a trail
+of lethal cells along the whole driven path, which lap 2 drives back over. It is
+the leading suspect for the lap 2 barrel_3 graze (not yet shown).
+
+Fix, opt-in in competition code: `lidar_obstacle_costmap_node` has a new
+parameter `self_filter_enabled` (default **false**, so the real robot's map is
+unchanged unless configured). When on, a return is dropped if its endpoint, in
+`base_link` (from `lidar_x_m`, `lidar_y_m`, `lidar_yaw_rad`), lies inside a box of
+`self_filter_length_m` x `self_filter_width_m` (defaults 0.97 and 0.81) centred
+at (`self_filter_offset_x_m`, `self_filter_offset_y_m`) (defaults 0, 0), grown
+by `self_filter_margin_m` (default 0.05) on every side. A dropped return is
+treated like any other invalid one. Unlike a larger `min_range_m` this holds at
+any noise level. The box is the 2027 chassis collision box,
+`urdf/robot_2027/body_2027.urdf.xacro` (0.97 x 0.810 m, centred on `base_link`
+to within 7 mm); the lidar mount x 0.345 m is `igvc_2027.urdf.xacro`.
+
+`gazebo_nav_test.launch.py` turns it on: `lidar_self_filter` (default `true`;
+`false` is the shipped map) and `lidar_self_filter_margin_m` (default 0.05).
+The box values are the 2027 chassis's for both `robot` values.
+
+Tests, `src/igvc_lane_detection/test/test_lidar_costmap_self_trail.py`: body
+returns of 0.151 to 0.16 m at 161 to 164 degrees leave no lethal cell, at the
+origin, yawed at (2, 1), or over a 5 m drive; a barrel 1.5 m ahead and a return
+0.75 m to the side are still marked; with the option off the body return is
+lethal and a 5 m drive leaves a trail (the control). Before the fix 9 of the 17
+failed; after, 17 of 17 pass, with `test_lidar_costmap_body_return.py` 2 of 2.
+
+One live lap on the defaults with the filter on (`autonomy_check.sh`, headless,
+node log "self filter on, box 0.970 x 0.810 m"): **AUTONOMY CHECK: PASS**, 90.1 m
+travelled, lane clearance worst +0.302 m (chassis), no barrel contacts (8 sensors
+live). Snapshots of `/lidar_obstacle_map` every 4 to 5 s of sim time: 8 lethal
+blobs at 89 s, of which 1 has its centroid within 0.35 m of the driven path
+(from 53 s on; not identified, could be a barrel the path passes close to).
+No same-day lap with the filter off was counted, so the trail's size before the
+fix is the RViz observation, not a number. One lap is not the three-lap barrel_3
+question; that still needs repeated runs.
+
 ## 11. The 2027 robot, the simulator's default since 2026-10-15
 
 The simulator now loads the **2027 robot**, built from the team's Onshape model

@@ -609,6 +609,23 @@ def _setup(context, *args, **kwargs):
                 "free_threshold": 3.0,
                 "inflate_radius_m": float(cfg("lidar_inflate_radius_m")),
                 "publish_hz": 5.0,
+                # 2026-10-20: the lidar sees the robot's own body (4 rays at
+                # 161 to 164 degrees, 0.10 to 0.14 m), the 1 cm noise pushes
+                # some past min_range_m, one hit is lethal here, and the
+                # persistent odom map keeps every one: a trail of phantom
+                # barrels along the driven path. The self filter drops any
+                # return that lands inside the chassis box plus a margin. The
+                # node's own default is off (the competition's map); the
+                # simulator turns it on here. lidar_self_filter:=false is the
+                # shipped map. The box is the 2027 chassis collision box,
+                # 0.97 x 0.81 m on base_link (urdf/robot_2027/body_2027.urdf.xacro).
+                "self_filter_enabled": cfg("lidar_self_filter").lower() in (
+                    "true", "1", "yes"),
+                "self_filter_length_m": 0.97,
+                "self_filter_width_m": 0.81,
+                "self_filter_offset_x_m": 0.0,
+                "self_filter_offset_y_m": 0.0,
+                "self_filter_margin_m": float(cfg("lidar_self_filter_margin_m")),
             }],
         ))
 
@@ -1039,6 +1056,19 @@ def generate_launch_description():
             description="obstacle_source:=lidar_map only: the lidar map's "
                         "minimum range, default the competition's 0.15 m. "
                         "A diagnosis knob."),
+        DeclareLaunchArgument(
+            "lidar_self_filter", default_value="true",
+            description="obstacle_source:=lidar_map only: the lidar map's "
+                        "self_filter_enabled. Drop returns that land inside "
+                        "the 2027 chassis box plus a margin, so the lidar's "
+                        "view of the robot's own body cannot stamp a trail "
+                        "of phantom barrels (2026-10-20). false is the "
+                        "shipped map."),
+        DeclareLaunchArgument(
+            "lidar_self_filter_margin_m", default_value="0.05",
+            description="obstacle_source:=lidar_map only: the self filter's "
+                        "margin on every side of the chassis box. A "
+                        "diagnosis knob."),
         DeclareLaunchArgument(
             "nav_gap_choice", default_value="true",
             description="The navigator's gap_choice_enabled in the simulator: "

@@ -44,6 +44,17 @@ odom_topic            (str,   '/front_zed_camera_x/zed_node/odom')
 max_odom_age_sec      (float, 2.0)             — Drop scans when odom is stale.
 lidar_x/y_m           (float)                  — LiDAR origin in base_link.
 lidar_yaw_rad         (float)                  — LiDAR yaw relative to base_link.
+self_filter_enabled   (bool,  False)           : Drop returns whose endpoint, in
+                                                 base_link (via lidar_x/y_m and
+                                                 lidar_yaw_rad), lies inside the
+                                                 robot's own footprint box plus
+                                                 self_filter_margin_m. Off keeps
+                                                 the original behaviour.
+self_filter_length_m  (float, 0.97)            : Footprint box length along x.
+self_filter_width_m   (float, 0.81)            : Footprint box width along y.
+self_filter_offset_x_m (float, 0.0)            : Box centre x in base_link.
+self_filter_offset_y_m (float, 0.0)            : Box centre y in base_link.
+self_filter_margin_m  (float, 0.05)            : Added to every side of the box.
 """
 
 from __future__ import annotations
@@ -116,6 +127,17 @@ class LidarObstacleCostmapNode(Node):
         self._lidar_x       = float(p('lidar_x_m', 0.225))
         self._lidar_y       = float(p('lidar_y_m', 0.0))
         self._lidar_yaw     = float(p('lidar_yaw_rad', 0.0))
+        # Self filter (opt-in, 2026-10-20): the lidar sees the robot's own
+        # body, and the sensor noise pushes some of those returns past
+        # min_range_m. Dropping returns that land inside the footprint box
+        # removes them at any noise level. Defaults are the 2027 chassis
+        # collision box (urdf/robot_2027/body_2027.urdf.xacro); off by default.
+        self._self_filter   = bool(p('self_filter_enabled', False))
+        self._sf_half_len   = 0.5 * float(p('self_filter_length_m', 0.97))
+        self._sf_half_wid   = 0.5 * float(p('self_filter_width_m', 0.81))
+        self._sf_off_x      = float(p('self_filter_offset_x_m', 0.0))
+        self._sf_off_y      = float(p('self_filter_offset_y_m', 0.0))
+        self._sf_margin     = float(p('self_filter_margin_m', 0.05))
 
         # ── Grid state ────────────────────────────────────────────────
         self._nx = int(round(self._width_m  / self._res))
@@ -175,6 +197,12 @@ class LidarObstacleCostmapNode(Node):
             f'lidar_obstacle_costmap: {self._nx}×{self._ny} cells @ '
             f'{self._res:.2f} m, frame={self._frame}, '
             f'in={self._scan_topic}, out={self._output_topic}')
+        if self._self_filter:
+            self.get_logger().info(
+                f'lidar_obstacle_costmap: self filter on, box '
+                f'{2 * self._sf_half_len:.3f} x {2 * self._sf_half_wid:.3f} m at '
+                f'({self._sf_off_x:.3f}, {self._sf_off_y:.3f}) in base_link, '
+                f'margin {self._sf_margin:.3f} m')
 
     def _on_odom(self, msg: Odometry) -> None:
         self._latest_odom = msg
@@ -278,6 +306,24 @@ class LidarObstacleCostmapNode(Node):
             & (ranges_all >= self._min_range_m)
             & (ranges_all <= self._max_range_m)
         )
+
+        # ── Self filter: drop returns off the robot's own body ────────
+        # The endpoint in base_link is the lidar mount plus the ray in the
+        # lidar frame, so the test does not depend on the robot's pose.
+        # A dropped return is treated like any other invalid one below.
+        if self._self_filter:
+            ca = math.cos(self._lidar_yaw)
+            sa = math.sin(self._lidar_yaw)
+            r_fin = np.where(np.isfinite(ranges_all), ranges_all, 0.0)
+            lx = r_fin * np.cos(angles)
+            ly = r_fin * np.sin(angles)
+            bx = self._lidar_x + ca * lx - sa * ly - self._sf_off_x
+            by = self._lidar_y + sa * lx + ca * ly - self._sf_off_y
+            on_body = (
+                (np.abs(bx) <= self._sf_half_len + self._sf_margin)
+                & (np.abs(by) <= self._sf_half_wid + self._sf_margin)
+            )
+            valid &= ~on_body
 
         # ── Mark hit cells ────────────────────────────────────────────
         if np.any(valid):
